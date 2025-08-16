@@ -1,102 +1,260 @@
 ---
-title: Migrate to V2
-description: "Firecrawl allows you to turn entire websites into LLM-ready markdown"
-og:title: "Migrate to V2 | Firecrawl"
-og:description: "Firecrawl allows you to turn entire websites into LLM-ready markdown"
+title: Migrating from v1 to v2
+description: "Key changes, mappings, and before/after snippets to upgrade your integration to v2."
+og:title: "Migrating from v1 to v2 | Firecrawl"
+og:description: "Key changes, mappings, and before/after snippets to upgrade your integration to v2."
 ---
 
-## /scrape endpoint
+## Overview
 
-The updated `/scrape` endpoint has been redesigned for enhanced reliability and ease of use. The structure of the new `/scrape` request body is as follows:
+- **Faster by default**
+  - Requests are cached with `maxAge` defaulting to 2 days, and sensible defaults like `blockAds`, `skipTlsVerification`, and `removeBase64Images` are enabled.
 
-```json
-{
-  "url": "<string>",
-  "formats": ["markdown", "html", "rawHtml", "links", "screenshot", "json"],
-  "includeTags": ["<string>"],
-  "excludeTags": ["<string>"],
-  "headers": { "<key>": "<value>" },
-  "waitFor": 123,
-  "timeout": 123
-}
+- **Scrape summary format**
+  - **New**: You can now specify `"summary"` as a format to directly receive a concise summary of the page content.
+
+- **Scrape json format and extract**
+  - JSON extraction and change tracking are now an object format: `{ type: "json", prompt, schema }`.
+  - The old `"extract"` format no longer exists (renamed to `"json"`).
+
+- **Scrape screenshot options**
+  - Use the object form: `{ type: "screenshot", fullPage, quality, viewport }`.
+
+- **Search can return news and images**
+  - When source is `"news"` or `"images"`
+
+- **Crawl prompt + preview**
+  - **New**: pass a natural-language `prompt` to crawl and the system derives paths/limits automatically.
+  - **New**: crawl-params-preview endpoint lets you inspect the derived options before starting a job.
+
+## Quick migration checklist
+
+- Replace v1 client usage with v2 clients:
+  - JS: `const firecrawl = new Firecrawl({ apiKey: 'fc-YOUR-API-KEY' })`
+  - Python: `firecrawl = Firecrawl(api_key='fc-YOUR-API-KEY')`
+  - API: use the new `https://api.firecrawl.dev/v2/` endpoints.
+- Update formats:
+  - Use `"summary"` where needed
+  - JSON mode: Use `{ type: "json", prompt, schema }` for JSON extraction
+  - Screenshot and Screenshot@fullPage: Use screenshot object format when specifying options
+- Adopt standardized async flows in the SDKs:
+  - Crawls: `startCrawl` + `getCrawlStatus` (or `crawl` waiter)
+  - Batch: `startBatchScrape` + `getBatchScrapeStatus` (or `batchScrape` waiter)
+  - Extract: `startExtract` + `getExtractStatus` (or `extract` waiter)
+- Crawl options mapping (see below)
+- Check crawl `prompt` with `crawl-params-preview`
+
+## SDK surface (v2)
+
+### JS/TS
+
+#### Method name changes (v1 → v2)
+
+**Scrape, Search, and Map**
+
+| v1 (FirecrawlApp)     | v2 (Firecrawl)           |
+|-----------------------|--------------------------|
+| `scrapeUrl(url, ...)` | `scrape(url, options?)`  |
+| `search(query, ...)`  | `search(query, options?)`|
+| `mapUrl(url, ...)`    | `map(url, options?)`     |
+
+**Crawling**
+
+| v1                        | v2                        |
+|---------------------------|---------------------------|
+| `crawlUrl(url, ...)`      | `crawl(url, options?)` (waiter) |
+| `asyncCrawlUrl(url, ...)` | `startCrawl(url, options?)`     |
+| `checkCrawlStatus(id, ...)` | `getCrawlStatus(id)`          |
+| `cancelCrawl(id)`         | `cancelCrawl(id)`              |
+| `checkCrawlErrors(id)`    | `getCrawlErrors(id)`           |
+
+**Batch Scraping**
+
+| v1                                 | v2                                 |
+|------------------------------------|------------------------------------|
+| `batchScrapeUrls(urls, ...)`       | `batchScrape(urls, opts?)` (waiter)|
+| `asyncBatchScrapeUrls(urls, ...)`  | `startBatchScrape(urls, opts?)`    |
+| `checkBatchScrapeStatus(id, ...)`  | `getBatchScrapeStatus(id)`         |
+| `checkBatchScrapeErrors(id)`       | `getBatchScrapeErrors(id)`         |
+
+**Extraction**
+
+| v1                          | v2                  |
+|-----------------------------|---------------------|
+| `extract(urls?, params?)`   | `extract(args)`     |
+| `asyncExtract(urls, params?)` | `startExtract(args)` |
+| `getExtractStatus(id)`      | `getExtractStatus(id)` |
+
+**Other / Removed**
+
+| v1                                 | v2                |
+|------------------------------------|-------------------|
+| `generateLLMsText(...)`            | (not in v2 SDK)   |
+| `checkGenerateLLMsTextStatus(id)`  | (not in v2 SDK)   |
+| `crawlUrlAndWatch(...)`            | `watcher(jobId, ...)` |
+| `batchScrapeUrlsAndWatch(...)`     | `watcher(jobId, ...)` |
+
+---
+
+### Python (sync)
+
+#### Method name changes (v1 → v2)
+
+**Scrape, Search, and Map**
+
+| v1                | v2             |
+|-------------------|----------------|
+| `scrape_url(...)` | `scrape(...)`  |
+| `search(...)`     | `search(...)`  |
+| `map_url(...)`    | `map(...)`     |
+
+**Crawling**
+
+| v1                      | v2                    |
+|-------------------------|-----------------------|
+| `crawl_url(...)`        | `crawl(...)` (waiter) |
+| `async_crawl_url(...)`  | `start_crawl(...)`    |
+| `check_crawl_status(...)` | `get_crawl_status(...)` |
+| `cancel_crawl(...)`     | `cancel_crawl(...)`   |
+
+**Batch Scraping**
+
+| v1                           | v2                           |
+|------------------------------|------------------------------|
+| `batch_scrape_urls(...)`     | `batch_scrape(...)` (waiter) |
+| `async_batch_scrape_urls(...)` | `start_batch_scrape(...)`   |
+| `get_batch_scrape_status(...)` | `get_batch_scrape_status(...)` |
+| `get_batch_scrape_errors(...)` | `get_batch_scrape_errors(...)` |
+
+**Extraction**
+
+| v1                | v2                |
+|-------------------|-------------------|
+| `extract(...)`    | `extract(...)`    |
+| `start_extract(...)` | `start_extract(...)` |
+| `get_extract_status(...)` | `get_extract_status(...)` |
+
+**Other / Removed**
+
+| v1                              | v2                |
+|---------------------------------|-------------------|
+| `generate_llms_text(...)`       | (not in v2 SDK)   |
+| `get_generate_llms_text_status(...)` | (not in v2 SDK) |
+| `watch_crawl(...)`              | `watcher(job_id, ...)` |
+
+---
+
+### Python (async)
+
+- `AsyncFirecrawl` mirrors the same methods (all awaitable).
+
+## Formats and scrape options
+
+- Use string formats for basics: `"markdown"`, `"html"`, `"rawHtml"`, `"links"`, `"summary"`.
+- Use object formats for JSON, change tracking, and screenshots:
+
+### JSON format
+<CodeGroup>
+```js Node
+const formats = [ {
+  "type": "json",
+  "prompt": "Extract the company mission from the page."
+}];
+
+doc = firecrawl.scrape(url, { formats });
 ```
 
-### Formats
+```python Python
+formats = [ { "type": "json", "prompt": "Extract the company mission from the page." } ];
 
-You can now choose what formats you want your output in. You can specify multiple output formats. Supported formats are:
-
-- Markdown (markdown)
-- HTML (html)
-- Raw HTML (rawHtml) (with no modifications)
-- Screenshot (screenshot or screenshot@fullPage)
-- Links (links)
-- JSON (json)
-By default, the output will be include only the markdown format.
-
-### Details on the new request body
-
-The table below outlines the changes to the request body parameters for the `/scrape` endpoint in V1.
-
-| Parameter | Change | Description |
-| --------- | ------ | ----------- |
-| `onlyIncludeTags` | Moved and Renamed | Moved to root level. And renamed to `includeTags`. |
-| `removeTags` | Moved and Renamed | Moved to root level. And renamed to `excludeTags`. |
-| `onlyMainContent`| Moved | Moved to root level. `true` by default. |
-| `waitFor`| Moved | Moved to root level. |
-| `headers`| Moved | Moved to root level. |
-| `parsePDF`| Moved | Moved to root level. |
-| `extractorOptions`| No Change ||
-| `timeout`| No Change ||
-| `pageOptions` | Removed | No need for `pageOptions` parameter. The scrape options were moved to root level. |
-| `replaceAllPathsWithAbsolutePaths` | Removed | `replaceAllPathsWithAbsolutePaths` is not needed anymore. Every path is now default to absolute path. |
-| `includeHtml`| Removed | add `"html"` to `formats` instead. |
-| `includeRawHtml`| Removed | add `"rawHtml"` to `formats` instead. |
-| `screenshot`| Removed | add `"screenshot"` to `formats` instead. |
-| `fullPageScreenshot`| Removed | add `"screenshot@fullPage"` to `formats` instead. |
-| `extractorOptions` | Removed | Use `"json"` format instead with `jsonOptions` object. |
-
-The new `json` format is described in the [llm-extract](/features/extract) section.
-
-## /crawl endpoint
-
-We've also updated the `/crawl` endpoint on `v1`. Check out the improved body request below:
-
-```json
-{
-  "url": "<string>",
-  "excludePaths": ["<string>"],
-  "includePaths": ["<string>"],
-  "maxDepth": 2,
-  "ignoreSitemap": true,
-  "limit": 10,
-  "allowBackwardLinks": true,
-  "allowExternalLinks": true,
-  "scrapeOptions": {
-    // same options as in /scrape
-    "formats": ["markdown", "html", "rawHtml", "screenshot", "links"],
-    "headers": { "<key>": "<value>" },
-    "includeTags": ["<string>"],
-    "excludeTags": ["<string>"],
-    "onlyMainContent": true,
-    "waitFor": 123
-  }
-}
+doc = firecrawl.scrape(url, formats=formats);
 ```
 
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/scrape \
+    -H 'Content-Type: application/json' \
+    -H 'Authorization: Bearer YOUR_API_KEY' \
+    -d '{
+      "url": "https://docs.firecrawl.dev/",
+      "formats": [{
+        "type": "json",
+        "prompt": "Extract the company mission from the page."
+      }]
+    }'
+```
+</CodeGroup>
 
-### Details on the new request body
 
-The table below outlines the changes to the request body parameters for the `/crawl` endpoint in V1.
+### Screenshot format
+<CodeGroup>
 
-| Parameter | Change | Description |
-| --------- | ------ | ----------- |
-| `pageOptions` | Renamed | Renamed to `scrapeOptions`. |
-| `includes` | Moved and Renamed | Moved to root level. Renamed to `includePaths`. |
-| `excludes` | Moved and Renamed | Moved to root level. Renamed to `excludePaths`. |
-| `allowBackwardCrawling` | Moved and Renamed | Moved to root level. Renamed to `allowBackwardLinks`. |
-| `allowExternalLinks` | Moved | Moved to root level. |
-| `maxDepth` | Moved | Moved to root level. |
-| `ignoreSitemap` | Moved | Moved to root level. |
-| `limit` | Moved | Moved to root level. |
-| `crawlerOptions` | Removed | No need for `crawlerOptions` parameter. The crawl options were moved to root level. |
-| `timeout` | Removed | Use `timeout` in `scrapeOptions` instead. |
+```js Node
+// Screenshot format (JS)
+const formats = [ { "type": "screenshot", "fullPage": true, "quality": 80, "viewport": { "width": 1280, "height": 800 } } ];
+
+doc = firecrawl.scrape(url, { formats });
+```
+
+```python Python
+formats = [ { "type": "screenshot", "fullPage": true, "quality": 80, "viewport": { "width": 1280, "height": 800 } } ];
+doc = firecrawl.scrape(url, formats=formats);
+```
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/scrape \
+    -H 'Content-Type: application/json' \
+    -H 'Authorization: Bearer YOUR_API_KEY' \
+    -d '{
+      "url": "https://docs.firecrawl.dev/",
+      "formats": [{
+        "type": "screenshot",
+        "fullPage": true,
+        "quality": 80,
+        "viewport": { "width": 1280, "height": 800 }
+      }]
+    }'
+```
+
+</CodeGroup>
+
+## Crawl options mapping (v1 → v2)
+
+| v1                     | v2                 |
+|------------------------|--------------------|
+| `allowBackwardCrawling`| (removed) use `crawlEntireDomain`|
+| `maxDepth`             | (removed) use `maxDiscoveryDepth`|
+| `ignoreSitemap` (bool) | `sitemap` (e.g., `"only"`, `"skip"`, or `"include"`) |
+| (none) | `prompt` |
+
+## Crawl prompt + params preview
+
+See crawl params preview examples:
+
+<CodeGroup>
+```js Node
+import Firecrawl from '@mendable/firecrawl-js';
+
+const firecrawl = new Firecrawl({ apiKey: "fc-YOUR-API-KEY" });
+
+const params = await firecrawl.crawlParamsPreview('https://docs.firecrawl.dev', 'Extract docs and blog');
+console.log(params);
+```
+
+```python Python
+from firecrawl import Firecrawl
+
+firecrawl = Firecrawl(api_key='fc-YOUR-API-KEY')
+preview = firecrawl.crawl_params_preview(url='https://docs.firecrawl.dev', prompt='Extract docs and blog')
+print(preview)
+```
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/crawl-params-preview \
+    -H 'Content-Type: application/json' \
+    -H 'Authorization: Bearer YOUR_API_KEY' \
+    -d '{
+      "url": "https://docs.firecrawl.dev",
+      "prompt": "Extract docs and blog"
+    }'
+```
+</CodeGroup>
