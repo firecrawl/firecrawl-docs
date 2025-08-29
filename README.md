@@ -55,6 +55,6 @@ When contributing, please follow these guidelines:
 
 ## Contact
 
-If you have any questions or need further assistance, please reach out to us at [hello@firecrawl.dev](mailto:hello@firecrawl.dev).
+If you have any questions or need further assistance, please reach out to us at [help@firecrawl.dev](mailto:help@firecrawl.dev).
 
 Happy crawling with Firecrawl! 🔥🕷️
