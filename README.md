@@ -32,6 +32,7 @@ To get started with the Firecrawl documentation, follow the steps below:
 
    ```bash
    git clone https://github.com/mendableai/firecrawl-docs.git
+   cd firecrawl-docs
    ```
 
 3. Start the Mintlify development server:
