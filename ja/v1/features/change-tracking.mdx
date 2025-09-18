@@ -1,0 +1,467 @@
+---
+title: '変更検知'
+description: 'Firecrawl は現在のページと以前のバージョンの差分を追跡し、更新の有無を知らせます'
+og:title: "変更検知 | Firecrawl"
+sidebarTitle: "変更検知"
+og:description: "Firecrawl は現在のページと以前のバージョンの差分を追跡し、更新の有無を知らせます"
+---
+
+![変更検知](/images/launch-week/lw3d12.webp)
+
+変更検知を使うと、時間経過に伴うウェブコンテンツの変更を監視・検出できます。この機能は JavaScript と Python の両方の SDK で利用可能です。
+
+<div id="overview">
+  ## 概要
+</div>
+
+変更追跡を使用すると、次のことが可能になります:
+
+- 前回のスクレイプ以降にウェブページが変更されたかを検出
+- スクレイプ間の具体的な差分を表示
+- 何が変更されたかの構造化データを取得
+- 変更の可視性を制御
+
+`changeTracking` フォーマットを使用すると、ウェブサイト上の変更を監視し、次の情報を受け取ることができます:
+
+- `previousScrapeAt`: 現在のページと比較対象となる前回スクレイプのタイムスタンプ（前回スクレイプがない場合は `null`）
+- `changeStatus`: 2つのページバージョンの比較結果
+  - `new`: このページは存在しなかった、またはこれまで検出されなかった（通常は `previousScrapeAt` が `null`）
+  - `same`: このページのコンテンツは前回のスクレイプ以降、変更されていない
+  - `changed`: このページのコンテンツは前回のスクレイプ以降に変更された
+  - `removed`: このページは前回のスクレイプ以降に削除された
+- `visibility`: 現在のページ/URL の可視性
+  - `visible`: このページは可視であり、その URL が自然な経路（他の可視ページ上のリンクまたはサイトマップ）で発見されたことを意味します
+  - `hidden`: このページは不可視で、ウェブ上には引き続き存在しますが、サイトマップやサイトのクロールではもはや発見できないことを意味します。不可視リンクは、過去のクロールまたはスクレイプ時に可視であり取得されていた場合にのみ特定できます
+
+<div id="javascript-sdk">
+  ## JavaScript SDK
+</div>
+
+<div id="basic-usage">
+  ### 基本的な使い方
+</div>
+
+JavaScript SDKでchangeTrackingを使うには、URLをスクレイピングする際、フォーマット配列に `'changeTracking'` を含めてください。
+
+```javascript
+const app = new FirecrawlApp({ apiKey: 'your-api-key' });
+const result = await app.scrapeUrl('https://example.com', {
+  formats: ['markdown', 'changeTracking']
+});
+
+// 変更追跡データにアクセス
+console.log(result.changeTracking.changeStatus); // 'new'（新規）、'same'（同一）、'changed'（変更あり）、または 'removed'（削除）
+console.log(result.changeTracking.visibility); // 'visible'（表示）、または 'hidden'（非表示）
+console.log(result.changeTracking.previousScrapeAt); // 前回スクレイプ日時（ISOタイムスタンプ）
+```
+
+レスポンス例：
+
+```json
+{
+  "url": "https://firecrawl.dev",
+  "markdown": "# 優れた顧客体験のための AI エージェント\n\nユーザーを魅了するチャットボット...",
+  "changeTracking": {
+    "previousScrapeAt": "2025-04-10T12:00:00Z",
+    "changeStatus": "changed",
+    "visibility": "visible"
+  }
+}
+```
+
+
+<div id="advanced-options">
+  ### 詳細オプション
+</div>
+
+変更追跡は追加のオプションで設定できます:
+
+```javascript
+const result = await app.scrapeUrl('https://example.com', {
+  formats: ['markdown', 'changeTracking'],
+  changeTrackingOptions: {
+    modes: ['git-diff', 'json'], // 特定の変更追跡モードを有効にする
+    schema: { 
+      type: 'object', 
+      properties: { 
+        title: { type: 'string' },
+        content: { type: 'string' }
+      } 
+    }, // 構造化JSON比較用のスキーマ
+    prompt: '抽出用のカスタムプロンプト', // 任意のカスタムプロンプト
+    tag: 'production' // 変更履歴を分離するための任意のタグ
+  }
+});
+
+// git-diff 形式の変更にアクセス
+if (result.changeTracking.diff) {
+  console.log(result.changeTracking.diff.text); // Gitスタイルのdiffテキスト
+  console.log(result.changeTracking.diff.json); // 構造化diffデータ
+}
+
+// JSON比較の変更にアクセス
+if (result.changeTracking.json) {
+  console.log(result.changeTracking.json.title.previous); // 以前のタイトル
+  console.log(result.changeTracking.json.title.current); // 現在のタイトル
+}
+```
+
+
+<div id="git-diff-results-example">
+  ### Git diff の結果例:
+</div>
+
+```
+ **2025年4月13日**
+ 
+-**午後5:55:05**
++**午後5:58:57**
+
+...
+```
+
+
+<div id="json-comparison-results-example">
+  ### JSON 比較結果の例
+</div>
+
+```json
+{
+  "time": { 
+    "previous": "2025-04-13T17:54:32Z", 
+    "current": "2025-04-13T17:55:05Z" 
+  }
+}
+```
+
+
+<div id="typescript-interface">
+  ### TypeScript インターフェイス
+</div>
+
+changeTracking 機能には、以下の TypeScript インターフェイスが含まれます:
+
+```typescript
+interface FirecrawlDocument {
+  // ... other properties
+  changeTracking?: {
+    previousScrapeAt: string | null;
+    changeStatus: "new" | "same" | "changed" | "removed";
+    visibility: "visible" | "hidden";
+    diff?: {
+      text: string;
+      json: {
+        files: Array<{
+          from: string | null;
+          to: string | null;
+          chunks: Array<{
+            content: string;
+            changes: Array<{
+              type: string;
+              normal?: boolean;
+              ln?: number;
+              ln1?: number;
+              ln2?: number;
+              content: string;
+            }>;
+          }>;
+        }>;
+      };
+    };
+    json?: any;
+  };
+}
+
+interface ScrapeParams {
+  // ... other properties
+  changeTrackingOptions?: {
+    prompt?: string;
+    schema?: any;
+    modes?: ("json" | "git-diff")[];
+    tag?: string | null;
+  }
+}
+```
+
+
+<div id="python-sdk">
+  ## Python SDK
+</div>
+
+<div id="basic-usage">
+  ### 基本的な使い方
+</div>
+
+Python SDKでchangeTrackingを使うには、URLをスクレイピングするときにフォーマットのリストへ `'changeTracking'` を追加してください。
+
+```python
+from firecrawl import FirecrawlApp, ChangeTrackingOptions
+
+app = FirecrawlApp(api_key='your-api-key')
+result = app.scrape_url('https://example.com',
+    formats=['markdown', 'changeTracking']
+)
+
+# 変更追跡データにアクセス
+print("変更ステータス:", result.changeTracking.changeStatus)  # 'new'、'same'、'changed'、または 'removed'
+print("可視状態:", result.changeTracking.visibility)  # 'visible' または 'hidden'
+print("前回のスクレイプ時刻:", result.changeTracking.previousScrapeAt)  # 前回スクレイプのISOタイムスタンプ
+```
+
+
+<div id="advanced-options">
+  ### 高度なオプション
+</div>
+
+changeTracking は追加のオプションで設定できます：
+
+```python
+result = app.scrape_url('https://example.com',
+    formats=['markdown', 'changeTracking'],
+    change_tracking_options=ChangeTrackingOptions(
+        modes=['git-diff', 'json'],  # 特定のchangeTrackingモードを有効化
+        schema={
+            'type': 'object',
+            'properties': {
+                'title': {'type': 'string'},
+                'content': {'type': 'string'}
+            }
+        },  # 構造化JSON比較用のスキーマ
+        prompt='Custom prompt for extraction',  # 任意のカスタムプロンプト
+        tag='production'  # 変更履歴を分離管理するための任意タグ
+    )
+)
+
+# git-diff形式の変更にアクセス
+if 'diff' in result.changeTracking:
+    print(result.changeTracking.diff.text)  # Gitスタイルの差分テキスト
+    print(result.changeTracking.diff.json)  # 構造化差分データ
+
+# JSON比較の変更にアクセス
+if 'json' in result.changeTracking:
+    print(result.changeTracking.json.title.previous)  # 以前のタイトル
+    print(result.changeTracking.json.title.current)  # 現在のタイトル
+```
+
+
+<div id="python-data-model">
+  ### Pythonデータモデル
+</div>
+
+changeTracking 機能には、次の Python データモデルが含まれます。
+
+```python
+class ChangeTrackingData(pydantic.BaseModel):
+    """
+    changeTracking フォーマット用のデータ。
+    """
+    previousScrapeAt: Optional[str] = None
+    changeStatus: str  # 「new」 | 「same」 | 「changed」 | 「removed」
+    visibility: str  # 「visible」 | 「hidden」
+    diff: Optional[Dict[str, Any]] = None
+    json: Optional[Any] = None
+```
+
+
+<div id="change-tracking-modes">
+  ## 変更追跡モード
+</div>
+
+変更追跡機能は2つのモードに対応しています：
+
+<div id="git-diff-mode">
+  ### Git-Diff モード
+</div>
+
+`git-diff` モードは、Git の出力に近い従来型の差分フォーマットを提供します。追加や削除をマークし、行ごとの変更を表示します。
+
+出力例:
+
+```
+@@ -1,1 +1,1 @@
+-旧コンテンツ
++新コンテンツ
+```
+
+差分の構造化された JSON 表現には次が含まれます：
+
+* `files`: 変更されたファイルの配列（Web の文脈では通常は 1 件）
+* `chunks`: ファイル内の変更セクション
+* `changes`: 種別（add、delete、normal）付きの個々の行変更
+
+
+<div id="json-mode">
+  ### JSONモード
+</div>
+
+`json`モードは、コンテンツから抽出した特定のフィールドについて、構造化された比較結果を提供します。コンテンツ全体ではなく、特定のデータポイントの変化を追跡するのに役立ちます。
+
+出力例:
+
+```json
+{
+  "title": {
+    "previous": "旧題名",
+    "current": "新題名"
+  },
+  "price": {
+    "previous": "$19.99",
+    "current": "$24.99"
+  }
+}
+```
+
+JSONモードを使用するには、抽出と比較の対象となるフィールドを定義したスキーマを用意する必要があります。
+
+
+<div id="important-facts">
+  ## 重要なポイント
+</div>
+
+change tracking 機能を使用する際に知っておくべき重要事項は次のとおりです:
+
+- **比較方法**: スクレイプ結果は常に markdown レスポンスで比較されます。
+  - `changeTracking` フォーマットを使用する場合は、`markdown` フォーマットも必ず指定してください。必要に応じて他のフォーマットを併せて指定できます。
+  - 比較アルゴリズムは、空白やコンテンツの並び順の変更に強く設計されています。captcha や antibot によるランダム化された URL への耐性のため、現時点では iframe のソース URL は無視されます。
+
+- **以前のスクレイプとの照合**: 比較対象となる以前のスクレイプは、現在、ソース URL、チーム ID、`markdown` フォーマット、`tag` パラメータで照合されます。
+  - 有効な比較のため、入力 URL は同一コンテンツに対する以前のリクエストと完全に一致している必要があります。
+  - 同一の URL を異なる `includePaths`/`excludePaths` でクロールすると、`changeTracking` 使用時に不整合が生じます。
+  - 同一の URL を異なる `includeTags`/`excludeTags`/`onlyMainContent` でスクレイプすると、`changeTracking` 使用時に不整合が生じます。
+  - 比較対象のページは、`changeTracking` を指定していないものの `markdown` フォーマットのみを持つ過去のスクレイプとも比較されます。
+  - 比較はチーム単位でスコープされます。あなたの API キーでその URL を初めてスクレイプする場合、他の Firecrawl ユーザーが以前にスクレイプしていても、その `changeStatus` は常に `new` になります。
+
+- **ベータ版ステータス**: Beta 期間中は、結果ドキュメントの `warning` フィールドを監視し、レスポンスから `changeTracking` オブジェクトが欠落している可能性を考慮して処理することを推奨します。
+  - これは、比較対象となる以前のスクレイプを検索するデータベース照会がタイムアウトした場合に発生することがあります。
+
+<div id="examples">
+  ## 例
+</div>
+
+<div id="basic-scrape-example">
+  ### スクレイピングの基本例
+</div>
+
+```json
+// リクエスト
+{
+    "url": "https://firecrawl.dev",
+    "formats": ["markdown", "changeTracking"]
+}
+
+// レスポンス
+{
+  "success": true,
+  "data": {
+    "markdown": "...",
+    "metadata": {...},
+    "changeTracking": {
+      "previousScrapeAt": "2025-03-30T15:07:17.543071+00:00",
+      "changeStatus": "same",
+      "visibility": "visible"
+    }
+  }
+}
+```
+
+
+<div id="crawl-example">
+  ### クロール例
+</div>
+
+```json
+// リクエスト
+{
+    "url": "https://firecrawl.dev",
+    "scrapeOptions": {
+        "formats": ["markdown", "changeTracking"]
+    }
+}
+```
+
+
+<div id="tracking-product-price-changes">
+  ### 商品価格の変動を追跡
+</div>
+
+```javascript
+// JavaScript
+const result = await app.scrapeUrl('https://example.com/product', {
+  formats: ['markdown', 'changeTracking'],
+  changeTrackingOptions: {
+    modes: ['json'],
+    schema: {
+      type: 'object',
+      properties: {
+        price: { type: 'string' },
+        availability: { type: 'string' }
+      }
+    }
+  }
+});
+
+if (result.changeTracking.changeStatus === 'changed') {
+  console.log(`価格が${result.changeTracking.json.price.previous}から${result.changeTracking.json.price.current}に変更されました`);
+}
+```
+
+```python
+# Python
+result = app.scrape_url('https://example.com/product',
+    formats=['markdown', 'changeTracking'],
+    changeTrackingOptions={
+        'modes': ['json'],
+        'schema': {
+            'type': 'object',
+            'properties': {
+                'price': {'type': 'string'},
+                'availability': {'type': 'string'}
+            }
+        }
+    }
+)
+
+if result.changeTracking.changeStatus == 'changed':
+    print(f"価格が {result.changeTracking.json.price.previous} から {result.changeTracking.json.price.current} に変わりました")
+```
+
+
+<div id="monitoring-content-changes-with-git-diff">
+  ### Git diff を使ったコンテンツ変更の監視
+</div>
+
+```javascript
+// JavaScript
+const result = await app.scrapeUrl('https://example.com/blog', {
+  formats: ['markdown', 'changeTracking'],
+  changeTrackingOptions: {
+    modes: ['git-diff']
+  }
+});
+
+if (result.changeTracking.changeStatus === 'changed') {
+  console.log('コンテンツが変更されました:');
+  console.log(result.changeTracking.diff.text);
+}
+```
+
+```python
+# Python
+result = app.scrape_url('https://example.com/blog',
+    formats=['markdown', 'changeTracking'],
+    changeTrackingOptions={
+        'modes': ['git-diff']
+    }
+)
+
+if result.changeTracking.changeStatus == 'changed':
+    print('コンテンツの変更:')
+    print(result.changeTracking.diff.text)
+```
+
+
+<div id="billing">
+  ## 請求
+</div>
+
+changeTracking 機能は現在ベータ版です。基本的な changeTracking 機能および `git-diff` モードの利用には追加費用はかかりません。ただし、構造化データの比較に `json` モードを使用する場合、スクレイプは1ページあたり5クレジットかかります。

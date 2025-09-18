@@ -1,0 +1,107 @@
+---
+title: "Crie um 'Chat com o site' usando Groq Llama 3"
+description: "Aprenda a usar Firecrawl, Groq Llama 3 e LangChain para criar um bot de 'chat com seu site'."
+og:title: "Crie um 'Chat com o site' usando Groq Llama 3 | Firecrawl"
+og:description: "Aprenda a usar Firecrawl, Groq Llama 3 e LangChain para criar um bot de 'chat com seu site'."
+---
+
+> Observação: este exemplo usa a [versão v0 da API do Firecrawl](/pt-BR/v0/introduction). Você pode instalar a versão 0.0.20 do SDK de Python ou a 0.0.36 do SDK de Node.
+
+<div id="setup">
+  ## Configuração
+</div>
+
+Instale as dependências do Python, incluindo langchain, groq, faiss, ollama e firecrawl-py.
+
+```bash
+pip install --upgrade --quiet langchain langchain-community groq faiss-cpu ollama firecrawl-py
+```
+
+Usaremos o Ollama para as embeddings; você pode baixar o Ollama [aqui](https://ollama.com/). Mas fique à vontade para usar quaisquer outras embeddings de sua preferência.
+
+<div id="load-website-with-firecrawl">
+  ## Carregar site com o Firecrawl
+</div>
+
+Para obter todos os dados de um site e garantir que estejam no formato mais limpo, usaremos o Firecrawl. O Firecrawl se integra com muita facilidade ao LangChain como um carregador de documentos.
+
+Veja como carregar um site com o Firecrawl:
+
+```python
+from langchain_community.document_loaders import FireCrawlLoader  # Importando o FirecrawlLoader
+
+url = "https://firecrawl.dev"
+loader = FirecrawlLoader(
+    api_key="fc-YOUR_API_KEY", # Observação: substitua 'YOUR_API_KEY' pela sua chave de API do Firecrawl
+    url=url,  # URL de destino para o rastreamento
+    mode="crawl"  # Modo definido como 'crawl' para rastrear todas as subpáginas acessíveis
+)
+docs = loader.load()
+```
+
+<div id="setup-the-vectorstore">
+  ## Configurar o vectorstore
+</div>
+
+Em seguida, vamos configurar o vectorstore. O vectorstore é uma estrutura de dados que permite armazenar e consultar embeddings. Usaremos os embeddings do Ollama e o vectorstore FAISS.
+Dividimos os documentos em blocos de 1.000 caracteres cada, com sobreposição de 200 caracteres. Isso garante que os blocos não sejam nem muito pequenos nem muito grandes — e que caibam no modelo de LLM quando fizermos consultas.
+
+```python
+from langchain_community.embeddings import OllamaEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+splits = text_splitter.split_documents(docs)
+vectorstore = FAISS.from_documents(documents=splits, embedding=OllamaEmbeddings())
+```
+
+<div id="retrieval-and-generation">
+  ## Recuperação e Geração
+</div>
+
+Agora que nossos documentos estão carregados e o vectorstore está configurado, podemos, com base na pergunta do usuário, fazer uma busca por similaridade para recuperar os documentos mais relevantes. Assim, podemos usar esses documentos como contexto para o modelo de LLM.
+
+```python
+question = "O que é o Firecrawl?"
+docs = vectorstore.similarity_search(query=question)
+```
+
+<div id="generation">
+  ## Geração
+</div>
+
+Por fim, você pode usar o Groq para gerar uma resposta a uma pergunta com base nos documentos que carregamos.
+
+```python
+from groq import Groq
+
+client = Groq(
+    api_key="SUA_GROQ_API_KEY",
+)
+
+completion = client.chat.completions.create(
+    model="llama3-8b-8192",
+    messages=[
+        {
+            "role": "user",
+            "content": f"Você é um assistente simpático. Sua tarefa é responder à pergunta do usuário com base na documentação fornecida abaixo:\nDocs:\n\n{docs}\n\nPergunta: {question}"
+        }
+    ],
+    temperature=1,
+    max_tokens=1024,
+    top_p=1,
+    stream=False,
+    stop=None,
+)
+
+print(completion.choices[0].message)
+```
+
+<div id="and-voila">
+  ## E voilà!
+</div>
+
+Você agora criou um bot “Converse com seu site” usando Llama 3, Groq Llama 3, LangChain e Firecrawl. Agora você pode usar esse bot para responder a perguntas com base na documentação do seu site.
+
+Se tiver alguma dúvida ou precisar de ajuda, fique à vontade para falar com a gente no [Firecrawl](https://firecrawl.dev).

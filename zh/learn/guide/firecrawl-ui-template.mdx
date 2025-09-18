@@ -1,0 +1,749 @@
+---
+title: "Web Connector UI Template"
+description: "使用 React 与 Firecrawl 搭建网页数据接入 UI 的指南。"
+og:title: "Web Connector UI Template | Firecrawl"
+og:description: "了解如何使用 React 与 Firecrawl 搭建用于网页数据接入的 UI。"
+---
+
+> 注意：此示例使用的是 [Firecrawl API 的 v0 版本](/zh/v0/introduction)。你可以为 Python SDK 安装 0.0.20 版本，或为 Node SDK 安装 0.0.36 版本。
+
+此模板简化了使用 React 为 Firecrawl 构建网页连接器 UI 的过程。
+它包含一个预构建组件，可与 Firecrawl API 交互，帮助你快速搭建网页爬取与抓取界面，便于用户为其 AI 应用提取数据。
+![Firecrawl UI Template](/images/firecrawl-ui.png)
+
+该模板允许用户输入待爬取的 URL。若检测到子页面，模板会继续爬取并显示发现的 URL 列表。随后，用户可选择需要抓取的 URL，抓取的内容将被接入其 AI 应用并在 UI 中显示。
+
+> **安全提示：此示例会在客户端代码中暴露 Firecrawl API 密钥。用于生产环境时，强烈建议将 API 调用迁移至服务端以保护你的 API 密钥。**
+
+<div id="prerequisites">
+  ## 前置条件
+</div>
+
+* Node.js（建议 v14 或更高）
+* npm
+* 确保已安装 [shadcn](https://github.com/shadcn-ui/ui)
+* 确保已安装 [Tailwind CSS](https://tailwindcss.com/docs/installation)
+
+<div id="getting-started">
+  ## 入门
+</div>
+
+1. 安装依赖：
+
+* 安装你需要的 [shadcn 组件](https://github.com/shadcn-ui/ui)：
+
+```
+npx shadcn-ui@latest add button card checkbox collapsible input label
+```
+
+* 安装剩余依赖：
+
+```
+npm install clsx lucide-react tailwind-merge tailwindcss-animate class-variance-authority
+```
+
+2. 新建一个 `lib/utils.ts` 文件，并加入以下代码：
+
+```typescript
+import { type ClassValue, clsx } from "clsx"
+import { twMerge } from "tailwind-merge"
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs))
+}
+```
+
+3. 复制并粘贴我们的主摄取组件。**请务必将 `FIRECRAWL_API_KEY` 替换为你的密钥。**
+
+<Accordion title="摄取组件（ingestion.tsx）">
+  ```jsx
+  import { useState, ChangeEvent, FormEvent, useEffect } from "react";
+  import {
+    Card,
+    CardHeader,
+    CardTitle,
+    CardContent,
+    CardFooter,
+  } from "@/components/ui/card";
+  import { Input } from "@/components/ui/input";
+  import { Button } from "@/components/ui/button";
+  import { Checkbox } from "@/components/ui/checkbox";
+  import { Label } from "@/components/ui/label";
+  import {
+    Collapsible,
+    CollapsibleContent,
+    CollapsibleTrigger,
+  } from "@/components/ui/collapsible";
+  import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
+
+  //! 硬编码的值（不建议用于生产环境）
+  //! 强烈建议将所有 Firecrawl API 调用移至后端（例如 Next.js API 路由）
+  const FIRECRAWL_API_URL = "https://api.firecrawl.dev"; // 将其替换为你的实际 API URL（本地或 Firecrawl Cloud 均可）
+  const FIRECRAWL_API_KEY = "fc-YOUR_API_KEY"; // 将其替换为你的实际 API Key
+
+  interface FormData {
+    url: string;
+    crawlSubPages: boolean;
+    limit: string;
+    maxDepth: string;
+    excludePaths: string;
+    includePaths: string;
+    extractMainContent: boolean;
+  }
+
+  interface CrawlerOptions {
+    includes?: string[];
+    excludes?: string[];
+    maxDepth?: number;
+    limit?: number;
+    returnOnlyUrls: boolean;
+  }
+
+  interface PageOptions {
+    onlyMainContent: boolean;
+  }
+
+  interface RequestBody {
+    url: string;
+    crawlerOptions?: CrawlerOptions;
+    pageOptions: PageOptions;
+  }
+
+  interface ScrapeResultMetadata {
+    title: string;
+    description: string;
+    language: string;
+    sourceURL: string;
+    pageStatusCode: number;
+    pageError?: string;
+    [key: string]: string | number | undefined;
+  }
+
+  interface ScrapeResultData {
+    markdown: string;
+    content: string;
+    html: string;
+    rawHtml: string;
+    metadata: ScrapeResultMetadata;
+    llm_extraction: Record<string, unknown>;
+    warning?: string;
+  }
+
+  interface ScrapeResult {
+    success: boolean;
+    data: ScrapeResultData;
+  }
+
+  export default function FirecrawlComponent() {
+    const [formData, setFormData] = useState<FormData>({
+      url: "",
+      crawlSubPages: false,
+      limit: "",
+      maxDepth: "",
+      excludePaths: "",
+      includePaths: "",
+      extractMainContent: false,
+    });
+    const [loading, setLoading] = useState<boolean>(false);
+    const [scrapingSelectedLoading, setScrapingSelectedLoading] =
+      useState<boolean>(false);
+    const [crawledUrls, setCrawledUrls] = useState<string[]>([]);
+    const [selectedUrls, setSelectedUrls] = useState<string[]>([]);
+    const [scrapeResults, setScrapeResults] = useState<
+      Record<string, ScrapeResult>
+    >({});
+    const [isCollapsibleOpen, setIsCollapsibleOpen] = useState(true);
+    const [crawlStatus, setCrawlStatus] = useState<{
+      current: number;
+      total: number | null;
+    }>({ current: 0, total: null });
+    const [elapsedTime, setElapsedTime] = useState<number>(0);
+    const [showCrawlStatus, setShowCrawlStatus] = useState<boolean>(false);
+    const [isScraping, setIsScraping] = useState<boolean>(false);
+    const [currentPage, setCurrentPage] = useState<number>(1);
+    const urlsPerPage = 10;
+
+    useEffect(() => {
+      let timer: NodeJS.Timeout;
+      if (loading) {
+        setShowCrawlStatus(true);
+        timer = setInterval(() => {
+          setElapsedTime((prevTime) => prevTime + 1);
+        }, 1000);
+      }
+      return () => {
+        if (timer) clearInterval(timer);
+      };
+    }, [loading]);
+
+    const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
+      const { name, value, type, checked } = e.target;
+      setFormData((prevData) => ({
+        ...prevData,
+        [name]: type === "checkbox" ? checked : value,
+      }));
+    };
+
+    const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
+      setLoading(true);
+      setIsCollapsibleOpen(false);
+      setElapsedTime(0);
+      setCrawlStatus({ current: 0, total: null });
+      setIsScraping(!formData.crawlSubPages);
+      setCrawledUrls([]);
+      setSelectedUrls([]);
+      setScrapeResults({});
+      setScrapingSelectedLoading(false);
+      setShowCrawlStatus(false);
+
+      try {
+        const endpoint = `${FIRECRAWL_API_URL}/v0/${
+          formData.crawlSubPages ? "crawl" : "scrape"
+        }`;
+
+        const requestBody: RequestBody = formData.crawlSubPages
+          ? {
+              url: formData.url,
+              crawlerOptions: {
+                includes: formData.includePaths
+                  ? formData.includePaths.split(",").map((p) => p.trim())
+                  : undefined,
+                excludes: formData.excludePaths
+                  ? formData.excludePaths.split(",").map((p) => p.trim())
+                  : undefined,
+                maxDepth: formData.maxDepth
+                  ? parseInt(formData.maxDepth)
+                  : undefined,
+                limit: formData.limit ? parseInt(formData.limit) : undefined,
+                returnOnlyUrls: true,
+              },
+              pageOptions: {
+                onlyMainContent: formData.extractMainContent,
+              },
+            }
+          : {
+              url: formData.url,
+              pageOptions: {
+                onlyMainContent: formData.extractMainContent,
+              },
+            };
+
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${FIRECRAWL_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP 错误！状态码: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (formData.crawlSubPages) {
+          const jobId = data.jobId;
+          if (jobId) {
+            const statusEndpoint = `${FIRECRAWL_API_URL}/v0/crawl/status/${jobId}`;
+            let statusData: {
+              status: string;
+              data?: { url: string }[];
+              current?: number;
+              total?: number;
+            };
+            do {
+              const statusResponse = await fetch(statusEndpoint, {
+                headers: {
+                  Authorization: `Bearer ${FIRECRAWL_API_KEY}`,
+                },
+              });
+              if (statusResponse.ok) {
+                statusData = await statusResponse.json();
+
+                const urls = statusData.data
+                  ? statusData.data.map((urlObj) => urlObj.url)
+                  : [];
+                setCrawledUrls(urls);
+                setSelectedUrls(urls);
+                setCrawlStatus({
+                  current: urls.length || 0,
+                  total: urls.length || null,
+                });
+                if (statusData.status !== "completed") {
+                  // 再等待 1 秒后继续轮询
+                  await new Promise((resolve) => setTimeout(resolve, 1000));
+                  console.log("再次轮询中...");
+                  console.log(statusData);
+                } else {
+                  console.log("爬取完成，状态：", statusData.status);
+                  console.log(statusData);
+                }
+              } else {
+                console.error("获取爬取状态失败");
+                break;
+              }
+            } while (statusData.status !== "completed");
+          } else {
+            console.error("爬取请求未返回 jobId");
+          }
+        } else {
+          setScrapeResults({ [formData.url]: data });
+          setCrawlStatus({ current: 1, total: 1 });
+        }
+      } catch (error) {
+        console.error("错误：", error);
+        setScrapeResults({
+          error: {
+            success: false,
+            data: {
+              metadata: {
+                pageError: "获取数据时发生错误",
+                title: "",
+                description: "",
+                language: "",
+                sourceURL: "",
+                pageStatusCode: 0,
+              },
+              markdown: "",
+              content: "",
+              html: "",
+              rawHtml: "",
+              llm_extraction: {},
+            },
+          },
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const handleScrapeSelected = async () => {
+      setLoading(true);
+      setElapsedTime(0);
+      setCrawlStatus({ current: 0, total: selectedUrls.length });
+      setIsScraping(true);
+      setScrapingSelectedLoading(true);
+      const newScrapeResults: Record<string, ScrapeResult> = {};
+
+      for (const [index, url] of selectedUrls.entries()) {
+        try {
+          const response = await fetch(`${FIRECRAWL_API_URL}/v0/scrape`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${FIRECRAWL_API_KEY}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              url: url,
+              pageOptions: {
+                onlyMainContent: formData.extractMainContent,
+              },
+            }),
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP 错误！状态码: ${response.status}`);
+          }
+
+          const data: ScrapeResult = await response.json();
+          newScrapeResults[url] = data;
+          setCrawlStatus((prev) => ({ ...prev, current: index + 1 }));
+          setScrapeResults({ ...scrapeResults, ...newScrapeResults });
+        } catch (error) {
+          console.error(`抓取 ${url} 时出错：`, error);
+          newScrapeResults[url] = {
+            success: false,
+            data: {
+              markdown: "",
+              content: "",
+              html: "",
+              rawHtml: "",
+              metadata: {
+                title: "",
+                description: "",
+                language: "",
+                sourceURL: url,
+                pageStatusCode: 0,
+                pageError: (error as Error).message,
+              },
+              llm_extraction: {},
+            },
+          };
+        }
+      }
+
+      setLoading(false);
+      setIsScraping(false);
+    };
+
+    const handlePageChange = (newPage: number) => {
+      setCurrentPage(newPage);
+    };
+
+    const paginatedUrls = crawledUrls.slice(
+      (currentPage - 1) * urlsPerPage,
+      currentPage * urlsPerPage
+    );
+
+    return (
+      <div className="max-w-2xl mx-auto p-4">
+        <Card>
+          <CardHeader className="flex items-start justify-between mb-0 pb-4">
+            <CardTitle className="flex items-center justify-between w-full space-x-2">
+              <span className="text-base">提取网页内容</span>
+              <a
+                href="https://www.firecrawl.dev"
+                className="text-xs text-gray-500 font-normal px-3 py-1 bg-zinc-100 rounded-xl hover:bg-zinc-200 transition-colors"
+              >
+                Powered by Firecrawl 🔥
+              </a>
+            </CardTitle>
+            <div className="text-sm text-gray-500 w-11/12 items-center">
+              使用该组件可让你的用户快速将其 AI 应用连接到网页数据（通过 Firecrawl）。了解更多请查看{" "}
+              their AI apps to web data with Firecrawl. Learn more on the{" "}
+              <a
+                href="https://docs.firecrawl.dev/"
+                className="text-sm text-blue-500"
+              >
+                Firecrawl 文档！
+              </a>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <form onSubmit={handleSubmit}>
+              <div className="flex items-center space-x-2">
+                <Input
+                  placeholder="https://www.firecrawl.dev/"
+                  className="flex-grow"
+                  name="url"
+                  value={formData.url}
+                  onChange={handleChange}
+                />
+                <Button type="submit" variant="default" disabled={loading}>
+                  {loading ? (
+                    <div
+                      role="status"
+                      className="flex items-center justify-between space-x-2"
+                    >
+                      <svg
+                        className="animate-spin  h-4 w-4 text-white"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        ></circle>
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        ></path>
+                      </svg>
+                      <span className="sr-only">加载中...</span>
+                    </div>
+                  ) : (
+                    "运行"
+                  )}
+                </Button>
+              </div>
+              <Collapsible
+                open={isCollapsibleOpen}
+                onOpenChange={setIsCollapsibleOpen}
+                className="mt-2"
+              >
+                <CollapsibleTrigger asChild>
+                  <Button variant="ghost" className="w-full justify-between pl-2">
+                    高级选项
+                    <ChevronDown className="h-4 w-4 opacity-50" />
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="space-y-4 mt-4 px-2">
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="crawlSubPages"
+                      name="crawlSubPages"
+                      checked={formData.crawlSubPages}
+                      onCheckedChange={(checked: boolean) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          crawlSubPages: checked,
+                        }))
+                      }
+                    />
+                    <label htmlFor="crawlSubPages" className="text-sm">
+                      爬取子页面
+                    </label>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label
+                        htmlFor="limit"
+                        className="block text-left w-full pb-2"
+                      >
+                        数量上限 *
+                      </Label>
+                      <Input
+                        id="limit"
+                        name="limit"
+                        placeholder="10"
+                        value={formData.limit}
+                        onChange={handleChange}
+                      />
+                    </div>
+                    <div>
+                      <Label
+                        htmlFor="maxDepth"
+                        className="block text-left w-full pb-2"
+                      >
+                        最大深度
+                      </Label>
+                      <Input
+                        id="maxDepth"
+                        name="maxDepth"
+                        placeholder="5"
+                        value={formData.maxDepth}
+                        onChange={handleChange}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label
+                        htmlFor="excludePaths"
+                        className="block text-left w-full pb-2"
+                      >
+                        排除路径
+                      </Label>
+                      <Input
+                        id="excludePaths"
+                        name="excludePaths"
+                        placeholder="blog/, /about/"
+                        value={formData.excludePaths}
+                        onChange={handleChange}
+                      />
+                    </div>
+                    <div>
+                      <Label
+                        htmlFor="includePaths"
+                        className="block text-left w-full pb-2"
+                      >
+                        仅包含这些路径
+                      </Label>
+                      <Input
+                        id="includePaths"
+                        name="includePaths"
+                        placeholder="articles/"
+                        value={formData.includePaths}
+                        onChange={handleChange}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="extractMainContent"
+                      name="extractMainContent"
+                      checked={formData.extractMainContent}
+                      onCheckedChange={(checked: boolean) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          extractMainContent: checked,
+                        }))
+                      }
+                    />
+                    <label htmlFor="extractMainContent" className="text-sm">
+                      仅提取主体内容（不含页眉、导航、页脚等）
+                    </label>
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            </form>
+            {showCrawlStatus && (
+              <div className="flex items-center justify-between mb-2 space-x-2 bg-gray-100 p-2 rounded-md">
+                <div className="flex items-center space-x-2">
+                  {!isScraping &&
+                    crawledUrls.length > 0 &&
+                    !scrapingSelectedLoading && (
+                      <>
+                        <Checkbox
+                          id="selectAll"
+                          checked={selectedUrls.length === crawledUrls.length}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setSelectedUrls([...crawledUrls]);
+                            } else {
+                              setSelectedUrls([]);
+                            }
+                          }}
+                        />
+                        <label
+                          htmlFor="selectAll"
+                          className="text-sm cursor-pointer"
+                        >
+                          {selectedUrls.length === crawledUrls.length
+                            ? `取消全选（${selectedUrls.length}）`
+                            : `全选（${selectedUrls.length}）`}
+                        </label>
+                      </>
+                    )}
+                </div>
+                <div className="text-sm text-gray-600">
+                  {isScraping
+                    ? `已抓取 ${crawlStatus.current} 个页面，用时 ${elapsedTime}s`
+                    : `已爬取 ${crawlStatus.current} 个页面，用时 ${elapsedTime}s`}
+                </div>
+              </div>
+            )}
+
+            {crawledUrls.length > 0 &&
+              !scrapingSelectedLoading &&
+              !isScraping && (
+                <>
+                  <ul className="pl-2">
+                    {paginatedUrls.map((url, index) => (
+                      <li
+                        key={index}
+                        className="flex items-center space-x-2 my-2 text-sm"
+                      >
+                        <Checkbox
+                          checked={selectedUrls.includes(url)}
+                          onCheckedChange={() =>
+                            setSelectedUrls((prev) =>
+                              prev.includes(url)
+                                ? prev.filter((u) => u !== url)
+                                : [...prev, url]
+                            )
+                          }
+                        />
+                        <span className="flex items-center max-w-lg">
+                          {url.length > 70 ? `${url.slice(0, 70)}...` : url}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="flex items-center justify-between mt-4">
+                    <Button
+                      variant="outline"
+                      className="px-2"
+                      onClick={() => handlePageChange(currentPage - 1)}
+                      disabled={currentPage === 1}
+                    >
+                      <ChevronLeft className="h-5 w-5" />
+                    </Button>
+                    <span className="text-sm text-gray-500">
+                      第 {currentPage} 页，共{" "}
+                      {Math.ceil(crawledUrls.length / urlsPerPage)}
+                    </span>
+                    <Button
+                      variant="outline"
+                      className="px-2"
+                      onClick={() => handlePageChange(currentPage + 1)}
+                      disabled={currentPage * urlsPerPage >= crawledUrls.length}
+                    >
+                      <ChevronRight className="h-5 w-5 " />
+                    </Button>
+                  </div>
+                </>
+              )}
+          </CardContent>
+          <CardFooter className="w-full flex justify-center">
+            {crawledUrls.length > 0 && !scrapingSelectedLoading && (
+              <Button
+                variant="default"
+                className="w-full"
+                onClick={handleScrapeSelected}
+                disabled={loading || selectedUrls.length === 0}
+              >
+                抓取所选 URL
+              </Button>
+            )}
+          </CardFooter>
+        </Card>
+
+        {Object.keys(scrapeResults).length > 0 && (
+          <div className="mt-4">
+            <h2 className="text-base font-bold ">抓取结果</h2>
+            <p className="text-sm text-gray-500">
+              你可以按需处理抓取结果。下面是一个
+              基础的 Markdown 示例。
+            </p>
+            <div className="flex flex-col gap-4 mt-4 w-full">
+              {Object.entries(scrapeResults).map(([url, result]) => (
+                <Card key={url} className="relative p-4 w-full">
+                  <CardTitle className="text-sm font-normal flex flex-col">
+                    <span>{result.data.metadata.title}</span>
+                    <span className="text-xs text-gray-500">
+                      {url
+                        .replace(/^(https?:\/\/)?(www\.)?/, "")
+                        .replace(/\/$/, "")}
+                    </span>
+                  </CardTitle>
+                  <CardContent className="relative px-0 pt-2 !text-xs w-full">
+                    <div className=" overflow-y-auto h-32 bg-zinc-100 rounded-md p-2 w-full">
+                      {result.success ? (
+                        <>
+                          <pre className="text-xs whitespace-pre-wrap">
+                            {result.data.markdown.trim()}
+                          </pre>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-red-500">
+                            抓取该 URL 失败
+                          </p>
+                          <p className="text-zinc-500 font-mono">
+                            {result.toString()}
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+  ```
+</Accordion>
+
+<div id="customization">
+  ## 自定义
+</div>
+
+由于这不是一个库，你可以按需自定义 UI。像使用 shadcn 一样，直接修改代码即可。
+
+<div id="security-considerations">
+  ## 安全注意事项
+</div>
+
+在生产环境中，请考虑以下安全措施：
+
+* 将 API 交互放到服务端实现，以保护你的 Firecrawl API 密钥。
+
+<div id="learn-more">
+  ## 了解更多
+</div>
+
+如需进一步了解 Firecrawl 及其 API，请访问 [Firecrawl 文档](https://docs.firecrawl.dev/)。
+
+<div id="contributing">
+  ## 贡献
+</div>
+
+欢迎参与贡献！欢迎随时提交 Pull Request。
+
+<div id="license">
+  ## 许可
+</div>
+
+Firecrawl Ingestion UI 模板采用 MIT 许可证授权。

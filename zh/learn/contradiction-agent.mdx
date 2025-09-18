@@ -1,0 +1,97 @@
+---
+title: "构建一个用于检查网站矛盾的代理"
+description: "使用 Firecrawl 和 Claude 抓取你的网站数据并查找矛盾"
+og:title: "构建一个用于检查网站矛盾的代理 | Firecrawl"
+og:description: "使用 Firecrawl 和 Claude 抓取你的网站数据并查找矛盾"
+---
+
+> 注意：此示例使用的是 [Firecrawl API 的 v0 版本](/zh/v0/introduction)。你可以为 Python SDK 安装 0.0.20 版本，或为 Node SDK 安装 0.0.36 版本。
+
+<img className="block" src="/images/articles/hero-contradiction.png" alt="展示包含矛盾内容的网站的图片。" />
+
+在这个快速教程中，你将学习如何使用 Firecrawl 和 Claude 抓取你的网站数据，并用几行代码查找矛盾与不一致之处。快速迭代发布时，数据难免会过时；借助 Firecrawl 和 LLM，你可以确保对外的网页数据始终一致！我们将利用 Opus 的 200k 超大上下文窗口和 Firecrawl 的并行化能力，使流程既准确又高效。
+
+<div id="setup">
+  ## 设置
+</div>
+
+安装所需的 Python 依赖项，包括 anthropic 和 firecrawl-py。
+
+```bash
+pip install firecrawl-py anthropic
+```
+
+<div id="getting-your-claude-and-firecrawl-api-keys">
+  ## 获取 Claude 和 Firecrawl 的 API 密钥
+</div>
+
+要使用 Claude Opus 和 Firecrawl，你需要先获取各自的 API 密钥。你可以在[此处](https://www.anthropic.com/)获取 Anthropic 的 API 密钥，在[此处](https://firecrawl.dev)获取 Firecrawl 的 API 密钥。
+
+<div id="load-website-with-firecrawl">
+  ## 使用 Firecrawl 加载网站
+</div>
+
+为了从我们的网站页面获取完整数据并将其整理成便于 LLM 阅读的格式，我们将使用 [Firecrawl](https://firecrawl.dev)。它可绕过受 JS 限制的网站、提取主体内容，并以 LLM 可读的格式输出，从而提升准确性。
+
+以下示例展示如何使用 Firecrawl-py 抓取网站 URL
+
+```python
+from firecrawl import FirecrawlApp
+
+app = FirecrawlApp(api_key="YOUR-KEY")
+
+crawl_result = app.crawl_url('docs.firecrawl.dev', {'crawlerOptions': {'excludes': ['blog/*','usecases/*']}})
+
+print(crawl_result)
+```
+
+在我们已将所有所需的网页数据抓取完毕并整理成干净的格式后，就可以进入下一步了。
+
+<div id="combination-and-generation">
+  ## 组合与生成
+</div>
+
+现在我们已经拿到网站数据，让我们将各页面两两配对，并把所有组合交由 Opus 分析。
+
+```python
+from itertools import combinations
+
+page_combinations = []
+
+for first_page, second_page in combinations(crawl_result, 2):
+    combined_string = "第一页：\n" + first_page['markdown'] + "\n\n第二页：\n" + second_page['markdown']
+    page_combinations.append(combined_string)
+
+import anthropic
+
+client = anthropic.Anthropic(
+    # 默认使用 os.environ.get("ANTHROPIC_API_KEY")
+    api_key="YOUR-KEY",
+)
+
+final_output = []
+
+for page_combination in page_combinations:
+
+    prompt = "以下是某家公司网站的两个页面。你的任务是找出它们之间的任何矛盾或观点差异，这可能源于信息过时等原因。若发现矛盾，请逐条列出，并简要说明其矛盾或不同之处。说明需具体、简明。若未发现任何矛盾，只需回复「未发现矛盾」，不必添加其他内容。页面如下：" + "\n\n".join(page_combination)
+
+    message = client.messages.create(
+        model="claude-3-opus-20240229",
+        max_tokens=1000,
+        temperature=0.0,
+        system="你是一名助手，负责在公司网站和知识库的页面之间发现矛盾或观点差异。这可能由知识库中的过时信息引起。"
+        messages=[
+            {"role": "user", "content": prompt}
+        ]
+    )
+    final_output.append(message.content)
+
+```
+
+<div id="thats-about-it">
+  ## 就这些！
+</div>
+
+你现在已经构建了一个代理，它会检查你的网站并发现可能存在的任何不一致之处。
+
+如果你有任何问题或需要帮助，欢迎随时通过 [Firecrawl](https://firecrawl.dev) 与我们联系。

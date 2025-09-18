@@ -1,0 +1,467 @@
+---
+title: '变更追踪'
+description: 'Firecrawl 可以比较当前页面与先前版本的差异，并告知是否已更新'
+og:title: "Change tracking | Firecrawl"
+sidebarTitle: "变更追踪"
+og:description: "Firecrawl 可以比较当前页面与先前版本的差异，并告知是否已更新"
+---
+
+![变更追踪](/images/launch-week/lw3d12.webp)
+
+变更追踪可用于长期监控并检测网页内容的变化。该功能在 JavaScript 和 Python SDK 中均可用。
+
+<div id="overview">
+  ## 概览
+</div>
+
+变更跟踪可用于：
+
+- 检测网页自上次抓取以来是否发生变化
+- 查看不同抓取之间的具体差异
+- 获取关于变更内容的结构化数据
+- 控制变更的可见性
+
+使用 `changeTracking` format，你可以监控站点的变化，并获取以下信息：
+
+- `previousScrapeAt`：当前页面用于对比的上一次抓取时间戳（若无上一次抓取则为 `null`）
+- `changeStatus`：两个页面版本对比的结果
+  - `new`：此页面之前不存在或未被发现（通常其 `previousScrapeAt` 为 `null`）
+  - `same`：此页面的内容自上次抓取以来未发生变化
+  - `changed`：此页面的内容自上次抓取以来发生了变化
+  - `removed`：此页面自上次抓取以来已被移除
+- `visibility`：当前页面/URL 的可见性
+  - `visible`：该页面为可见页面，表示其 URL 通过自然路径被发现（来自其他可见页面的链接或站点地图）
+  - `hidden`：该页面为不可见页面，表示其仍可在网上访问，但不再能通过站点地图或爬取被发现。仅当某链接在之前的爬取或抓取中曾可见且被捕获时，我们才能识别其后续的不可见状态
+
+<div id="javascript-sdk">
+  ## JavaScript SDK
+</div>
+
+<div id="basic-usage">
+  ### 基本用法
+</div>
+
+要在 JavaScript SDK 中使用 changeTracking，在抓取某个 URL 时将 `'changeTracking'` 加入到 formats 数组中：
+
+```javascript
+const app = new FirecrawlApp({ apiKey: 'your-api-key' });
+const result = await app.scrapeUrl('https://example.com', {
+  formats: ['markdown', 'changeTracking']
+});
+
+// 访问变更追踪数据
+console.log(result.changeTracking.changeStatus); // 'new'、'same'、'changed' 或 'removed'
+console.log(result.changeTracking.visibility); // 'visible' 或 'hidden'
+console.log(result.changeTracking.previousScrapeAt); // 上次抓取的 ISO 时间戳
+```
+
+示例响应：
+
+```json
+{
+  "url": "https://firecrawl.dev",
+  "markdown": "# 打造卓越客户体验的 AI 代理\n\n令用户满意的聊天机器人……",
+  "changeTracking": {
+    "previousScrapeAt": "2025-04-10T12:00:00Z",
+    "changeStatus": "changed",
+    "visibility": "visible"
+  }
+}
+```
+
+
+<div id="advanced-options">
+  ### 高级选项
+</div>
+
+你可以通过其他选项来配置 changeTracking：
+
+```javascript
+const result = await app.scrapeUrl('https://example.com', {
+  formats: ['markdown', 'changeTracking'],
+  changeTrackingOptions: {
+    modes: ['git-diff', 'json'], // 启用指定的 changeTracking 模式
+    schema: { 
+      type: 'object', 
+      properties: { 
+        title: { type: 'string' },
+        content: { type: 'string' }
+      } 
+    }, // 用于结构化 JSON 对比的 schema
+    prompt: '自定义抽取提示词', // 可选的自定义提示词
+    tag: 'production' // 可选的标签，用于分隔变更跟踪历史
+  }
+});
+
+// 读取 git-diff 格式的变更
+if (result.changeTracking.diff) {
+  console.log(result.changeTracking.diff.text); // Git 风格的差异文本
+  console.log(result.changeTracking.diff.json); // 结构化差异数据
+}
+
+// 读取 JSON 对比的变更
+if (result.changeTracking.json) {
+  console.log(result.changeTracking.json.title.previous); // 先前的标题
+  console.log(result.changeTracking.json.title.current); // 当前标题
+}
+```
+
+
+<div id="git-diff-results-example">
+  ### Git diff 结果示例：
+</div>
+
+```
+ **2025年4月13日**
+ 
+-**下午 5:55:05**
++**下午 5:58:57**
+
+...
+```
+
+
+<div id="json-comparison-results-example">
+  ### JSON 比较结果示例：
+</div>
+
+```json
+{
+  "time": { 
+    "previous": "2025-04-13T17:54:32Z", 
+    "current": "2025-04-13T17:55:05Z" 
+  }
+}
+```
+
+
+<div id="typescript-interface">
+  ### TypeScript 接口
+</div>
+
+changeTracking 功能包含以下 TypeScript 接口：
+
+```typescript
+interface FirecrawlDocument {
+  // ... other properties
+  changeTracking?: {
+    previousScrapeAt: string | null;
+    changeStatus: "new" | "same" | "changed" | "removed";
+    visibility: "visible" | "hidden";
+    diff?: {
+      text: string;
+      json: {
+        files: Array<{
+          from: string | null;
+          to: string | null;
+          chunks: Array<{
+            content: string;
+            changes: Array<{
+              type: string;
+              normal?: boolean;
+              ln?: number;
+              ln1?: number;
+              ln2?: number;
+              content: string;
+            }>;
+          }>;
+        }>;
+      };
+    };
+    json?: any;
+  };
+}
+
+interface ScrapeParams {
+  // ... other properties
+  changeTrackingOptions?: {
+    prompt?: string;
+    schema?: any;
+    modes?: ("json" | "git-diff")[];
+    tag?: string | null;
+  }
+}
+```
+
+
+<div id="python-sdk">
+  ## Python SDK
+</div>
+
+<div id="basic-usage">
+  ### 基本用法
+</div>
+
+要在 Python SDK 中启用变更跟踪，请在抓取 URL 时将 `'changeTracking'` 添加到 formats 列表中：
+
+```python
+from firecrawl import FirecrawlApp, ChangeTrackingOptions
+
+app = FirecrawlApp(api_key='your-api-key')
+result = app.scrape_url('https://example.com',
+    formats=['markdown', 'changeTracking']
+)
+
+# 访问变更跟踪数据
+print("变更状态：", result.changeTracking.changeStatus)  # 'new'、'same'、'changed' 或 'removed'
+print("可见性：", result.changeTracking.visibility)  # 'visible' 或 'hidden'
+print("上次抓取时间：", result.changeTracking.previousScrapeAt)  # 上次抓取的 ISO 时间戳
+```
+
+
+<div id="advanced-options">
+  ### 高级选项
+</div>
+
+你可以通过更多选项来配置 changeTracking：
+
+```python
+result = app.scrape_url('https://example.com',
+    formats=['markdown', 'changeTracking'],
+    change_tracking_options=ChangeTrackingOptions(
+        modes=['git-diff', 'json'],  # 启用特定的变更追踪模式
+        schema={
+            'type': 'object',
+            'properties': {
+                'title': {'type': 'string'},
+                'content': {'type': 'string'}
+            }
+        },  # 用于结构化 JSON 比较的架构
+        prompt='用于抽取的自定义提示词',  # 可选的自定义提示词
+        tag='production'  # 可选标签，用于分别记录变更追踪历史
+    )
+)
+
+# 访问 git-diff 格式的变更
+if 'diff' in result.changeTracking:
+    print(result.changeTracking.diff.text)  # Git 风格的 diff 文本
+    print(result.changeTracking.diff.json)  # 结构化 diff 数据
+
+# 访问 JSON 比较的变更
+if 'json' in result.changeTracking:
+    print(result.changeTracking.json.title.previous)  # 上一次的标题
+    print(result.changeTracking.json.title.current)  # 当前标题
+```
+
+
+<div id="python-data-model">
+  ### Python 数据模型
+</div>
+
+changeTracking 功能包含以下 Python 数据模型：
+
+```python
+class ChangeTrackingData(pydantic.BaseModel):
+    """
+    changeTracking 格式的数据。
+    """
+    previousScrapeAt: Optional[str] = None
+    changeStatus: str  # "new" | "same" | "changed" | "removed"
+    visibility: str  # "visible" | "hidden"
+    diff: Optional[Dict[str, Any]] = None
+    json: Optional[Any] = None
+```
+
+
+<div id="change-tracking-modes">
+  ## 变更跟踪模式
+</div>
+
+变更跟踪功能支持两种模式：
+
+<div id="git-diff-mode">
+  ### Git-Diff 模式
+</div>
+
+`git-diff` 模式提供与 Git 输出类似的传统 diff 格式。它按行显示更改，并以新增和删除的标记加以区分。
+
+示例输出：
+
+```
+@@ -1,1 +1,1 @@
+-旧内容
++新内容
+```
+
+差异的结构化 JSON 表示包括：
+
+* `files`：已更改文件的数组（在 Web 场景中通常只有一个）
+* `chunks`：文件中的变更片段
+* `changes`：逐行变更，包含类型（add、delete、normal）
+
+
+<div id="json-mode">
+  ### JSON 模式
+</div>
+
+`json` 模式会对从内容中提取的特定字段进行结构化对比。相比关注整段内容，它更适合用于跟踪具体数据点的变化。
+
+示例输出：
+
+```json
+{
+  "title": {
+    "previous": "原标题",
+    "current": "新标题"
+  },
+  "price": {
+    "previous": "$19.99",
+    "current": "$24.99"
+  }
+}
+```
+
+要使用 JSON 模式，你需要提供一个 schema，用于定义要提取和比较的字段。
+
+
+<div id="important-facts">
+  ## 重要提示
+</div>
+
+使用 changeTracking 功能时需了解以下重点：
+
+- **比较方式**：抓取结果始终基于其 markdown 响应进行比较。
+  - 使用 `changeTracking` format 时，必须同时指定 `markdown` format。也可以另外指定其他 formats。
+  - 比较算法对空白字符和内容顺序的变化具备鲁棒性。为抵御带有随机化 URL 的验证码与反爬机制，目前会忽略 iframe 的源 URL。
+
+- **匹配历史抓取**：用于对比的历史抓取目前根据源 URL、团队 ID、`markdown` format 以及 `tag` 参数进行匹配。
+  - 为达到有效比较，输入的 URL 应与之前针对同一内容的请求完全一致。
+  - 使用不同的 `includePaths`/`excludePaths` 爬取相同 URL，在使用 `changeTracking` 时会出现不一致。
+  - 使用不同的 `includeTags`/`excludeTags`/`onlyMainContent` 抓取相同 URL，在使用 `changeTracking` 时会出现不一致。
+  - 被比较的页面也会与仅包含 `markdown` format 而未包含 `changeTracking` format 的历史抓取进行对比。
+  - 比较限定在你的团队范围内。如果你首次使用自己的 API key 抓取某个 URL，其 `changeStatus` 将始终为 `new`，即使其他 Firecrawl 用户此前已抓取过。
+
+- **Beta 状态**：在 Beta 期间，建议监控结果文档中的 `warning` 字段，并处理响应中可能缺失的 `changeTracking` 对象。
+  - 当查找用于对比的历史抓取时数据库查询超时，可能会发生这种情况。
+
+<div id="examples">
+  ## 示例
+</div>
+
+<div id="basic-scrape-example">
+  ### 基本抓取示例
+</div>
+
+```json
+// 请求
+{
+    "url": "https://firecrawl.dev",
+    "formats": ["markdown", "changeTracking"]
+}
+
+// 响应
+{
+  "success": true,
+  "data": {
+    "markdown": "...",
+    "metadata": {...},
+    "changeTracking": {
+      "previousScrapeAt": "2025-03-30T15:07:17.543071+00:00",
+      "changeStatus": "same",
+      "visibility": "visible"
+    }
+  }
+}
+```
+
+
+<div id="crawl-example">
+  ### 爬虫示例
+</div>
+
+```json
+// 请求
+{
+    "url": "https://firecrawl.dev",
+    "scrapeOptions": {
+        "formats": ["markdown", "changeTracking"]
+    }
+}
+```
+
+
+<div id="tracking-product-price-changes">
+  ### 跟踪商品价格变化
+</div>
+
+```javascript
+// JavaScript
+const result = await app.scrapeUrl('https://example.com/product', {
+  formats: ['markdown', 'changeTracking'],
+  changeTrackingOptions: {
+    modes: ['json'],
+    schema: {
+      type: 'object',
+      properties: {
+        price: { type: 'string' },
+        availability: { type: 'string' }
+      }
+    }
+  }
+});
+
+if (result.changeTracking.changeStatus === 'changed') {
+  console.log(`价格从 ${result.changeTracking.json.price.previous} 变为 ${result.changeTracking.json.price.current}`);
+}
+```
+
+```python
+# Python
+result = app.scrape_url('https://example.com/product',
+    formats=['markdown', 'changeTracking'],
+    changeTrackingOptions={
+        'modes': ['json'],
+        'schema': {
+            'type': 'object',
+            'properties': {
+                'price': {'type': 'string'},
+                'availability': {'type': 'string'}
+            }
+        }
+    }
+)
+
+if result.changeTracking.changeStatus == 'changed':
+    print(f"价格从 {result.changeTracking.json.price.previous} 变为 {result.changeTracking.json.price.current}")
+```
+
+
+<div id="monitoring-content-changes-with-git-diff">
+  ### 使用 Git-Diff 监控内容更改
+</div>
+
+```javascript
+// JavaScript
+const result = await app.scrapeUrl('https://example.com/blog', {
+  formats: ['markdown', 'changeTracking'],
+  changeTrackingOptions: {
+    modes: ['git-diff']
+  }
+});
+
+if (result.changeTracking.changeStatus === 'changed') {
+  console.log('内容已变更：');
+  console.log(result.changeTracking.diff.text);
+}
+```
+
+```python
+# Python
+result = app.scrape_url('https://example.com/blog',
+    formats=['markdown', 'changeTracking'],
+    changeTrackingOptions={
+        'modes': ['git-diff']
+    }
+)
+
+if result.changeTracking.changeStatus == 'changed':
+    print('内容已更改：')
+    print(result.changeTracking.diff.text)
+```
+
+
+<div id="billing">
+  ## 计费
+</div>
+
+changeTracking 功能目前处于测试阶段。使用基础的 changeTracking 功能和 `git-diff` 模式不收取额外费用。但如果你在进行结构化数据对比时使用 `json` 模式，则页面抓取将按每页 5 个积分计费。

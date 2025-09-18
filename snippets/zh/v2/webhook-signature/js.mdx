@@ -1,0 +1,43 @@
+```js Node/Express
+import crypto from 'crypto';
+import express from 'express';
+
+const app = express();
+
+// 使用原始请求体解析器进行签名校验
+app.use('/webhook/firecrawl', express.raw({ type: 'application/json' }));
+
+app.post('/webhook/firecrawl', (req, res) => {
+  const signature = req.get('X-Firecrawl-Signature');
+  const webhookSecret = process.env.FIRECRAWL_WEBHOOK_SECRET;
+  
+  if (!signature || !webhookSecret) {
+    return res.status(401).send('未授权');
+  }
+  
+  // 从签名头中提取哈希值
+  const [algorithm, hash] = signature.split('=');
+  if (algorithm !== 'sha256') {
+    return res.status(401).send('签名算法无效');
+  }
+  
+  // 计算期望的签名
+  const expectedSignature = crypto
+    .createHmac('sha256', webhookSecret)
+    .update(req.body)
+    .digest('hex');
+  
+  // 使用恒定时间比较进行签名校验
+  if (!crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(expectedSignature, 'hex'))) {
+    return res.status(401).send('签名无效');
+  }
+  
+  // 解析并处理已校验的 webhook
+  const event = JSON.parse(req.body);
+  console.log('已校验的 Firecrawl webhook：', event);
+  
+  res.status(200).send('ok');
+});
+
+app.listen(3000, () => console.log('监听端口 3000'));
+```

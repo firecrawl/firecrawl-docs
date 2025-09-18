@@ -1,0 +1,107 @@
+---
+title: "使用 Groq Llama 3 构建「网站聊天」功能"
+description: "了解如何使用 Firecrawl、Groq Llama 3 和 Langchain 构建一个“与网站聊天”的机器人。"
+og:title: "使用 Groq Llama 3 构建「网站聊天」功能 | Firecrawl"
+og:description: "了解如何使用 Firecrawl、Groq Llama 3 和 Langchain 构建一个“与网站聊天”的机器人。"
+---
+
+> 注意：本示例使用的是 [Firecrawl API 的 v0 版本](/zh/v0/introduction)。你可以为 Python SDK 安装 0.0.20 版本，或为 Node SDK 安装 0.0.36 版本。
+
+<div id="setup">
+  ## 设置
+</div>
+
+安装所需的 Python 依赖，包括 LangChain、Groq、FAISS、Ollama 和 firecrawl-py。
+
+```bash
+pip install --upgrade --quiet langchain langchain-community groq faiss-cpu ollama firecrawl-py
+```
+
+我们将使用 Ollama 生成 embeddings，你可以在[这里](https://ollama.com/)下载 Ollama。但你也可以使用任意你偏好的其他 embeddings 方案。
+
+<div id="load-website-with-firecrawl">
+  ## 使用 Firecrawl 加载网站
+</div>
+
+为获取网站的完整数据并确保输出尽可能干净，我们将使用 Firecrawl。Firecrawl 可作为文档加载器，轻松集成到 LangChain 中。
+
+以下是使用 Firecrawl 加载网站的方法：
+
+```python
+from langchain_community.document_loaders import FireCrawlLoader  # 导入 FirecrawlLoader
+
+url = "https://firecrawl.dev"
+loader = FirecrawlLoader(
+    api_key="fc-YOUR_API_KEY", # 注意：将 'YOUR_API_KEY' 替换为你的实际 FireCrawl API 密钥
+    url=url,  # 目标 URL（要爬取的地址）
+    mode="crawl"  # 将模式设为 'crawl'，以爬取所有可访问的子页面
+)
+docs = loader.load()
+```
+
+<div id="setup-the-vectorstore">
+  ## 设置向量存储（Vectorstore）
+</div>
+
+接下来，我们将设置向量存储。向量存储是一种用于保存和查询嵌入向量的数据结构。我们将使用 Ollama 的嵌入模型和 FAISS 向量存储。
+我们把文档切分为每段 1000 个字符，相邻段之间重叠 200 个字符。这样既能避免分段过小或过大，也能确保在查询时适配 LLM 的上下文窗口。
+
+```python
+from langchain_community.embeddings import OllamaEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+splits = text_splitter.split_documents(docs)
+vectorstore = FAISS.from_documents(documents=splits, embedding=OllamaEmbeddings())
+```
+
+<div id="retrieval-and-generation">
+  ## 检索与生成
+</div>
+
+现在我们的文档已加载完毕且向量存储已就绪，我们可以根据用户的问题执行相似度搜索，检索最相关的文档。这样就能将这些文档作为上下文提供给 LLM。
+
+```python
+question = "什么是 Firecrawl？"
+docs = vectorstore.similarity_search(query=question)
+```
+
+<div id="generation">
+  ## 生成
+</div>
+
+最后，你还可以使用 Groq 基于我们已加载的文档生成问题的回答。
+
+```python
+from groq import Groq
+
+client = Groq(
+    api_key="YOUR_GROQ_API_KEY",
+)
+
+completion = client.chat.completions.create(
+    model="llama3-8b-8192",
+    messages=[
+        {
+            "role": "user",
+            "content": f"你是一位友好的助手。请根据以下提供的文档回答用户的问题：\n文档：\n\n{docs}\n\n问题：{question}"
+        }
+    ],
+    temperature=1,
+    max_tokens=1024,
+    top_p=1,
+    stream=False,
+    stop=None,
+)
+
+print(completion.choices[0].message)
+```
+
+<div id="and-voila">
+  ## 大功告成！
+</div>
+
+你已经使用 Llama 3、Groq Llama 3、LangChain 和 Firecrawl 构建了一个“网站对话”机器人。现在，你可以用它基于站点文档来回答用户的问题。
+
+如有任何疑问或需要帮助，欢迎通过 [Firecrawl](https://firecrawl.dev) 与我们联系。
