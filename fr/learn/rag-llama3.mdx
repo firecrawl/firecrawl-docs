@@ -1,0 +1,107 @@
+---
+title: "Créer un « chat avec site web » avec Groq Llama 3"
+description: "Découvrez comment utiliser Firecrawl, Groq Llama 3 et LangChain pour créer un bot de « chat avec votre site web »."
+og:title: "Créer un « chat avec site web » avec Groq Llama 3 | Firecrawl"
+og:description: "Découvrez comment utiliser Firecrawl, Groq Llama 3 et LangChain pour créer un bot de « chat avec votre site web »."
+---
+
+> Remarque : cet exemple utilise la [version v0 de l’API Firecrawl](/fr/v0/introduction). Vous pouvez installer la version 0.0.20 du SDK Python ou la 0.0.36 du SDK Node.
+
+<div id="setup">
+  ## Configuration
+</div>
+
+Installez les dépendances Python requises, notamment langchain, groq, faiss, ollama et firecrawl-py.
+
+```bash
+pip install --upgrade --quiet langchain langchain-community groq faiss-cpu ollama firecrawl-py
+```
+
+Nous utiliserons Ollama pour les embeddings, vous pouvez télécharger Ollama [ici](https://ollama.com/). Vous pouvez toutefois utiliser d’autres embeddings si vous préférez.
+
+<div id="load-website-with-firecrawl">
+  ## Charger un site web avec Firecrawl
+</div>
+
+Pour récupérer l’ensemble des données d’un site et garantir un format irréprochable, nous allons utiliser Firecrawl. Firecrawl s’intègre très facilement à LangChain en tant que chargeur de documents.
+
+Voici comment charger un site avec Firecrawl :
+
+```python
+from langchain_community.document_loaders import FireCrawlLoader  # Import de FireCrawlLoader
+
+url = "https://firecrawl.dev"
+loader = FirecrawlLoader(
+    api_key="fc-YOUR_API_KEY", # Remarque : remplacez « YOUR_API_KEY » par votre clé API FireCrawl
+    url=url,  # URL cible à explorer
+    mode="crawl"  # Mode « crawl » pour explorer toutes les sous-pages accessibles
+)
+docs = loader.load()
+```
+
+<div id="setup-the-vectorstore">
+  ## Configurer le Vectorstore
+</div>
+
+Ensuite, nous allons configurer le vectorstore. Le vectorstore est une structure de données qui permet de stocker et d’interroger des embeddings. Nous utiliserons les embeddings d’Ollama et le vectorstore FAISS.
+Nous découpons les documents en blocs de 1 000 caractères, avec un chevauchement de 200 caractères. Cela garantit que les blocs ne sont ni trop petits ni trop grands — et qu’ils tiennent dans le modèle LLM lors des requêtes.
+
+```python
+from langchain_community.embeddings import OllamaEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+splits = text_splitter.split_documents(docs)
+vectorstore = FAISS.from_documents(documents=splits, embedding=OllamaEmbeddings())
+```
+
+<div id="retrieval-and-generation">
+  ## Récupération et génération
+</div>
+
+Maintenant que nos documents sont chargés et que le vectorstore est configuré, nous pouvons, en fonction de la question de l’utilisateur, effectuer une recherche par similarité pour récupérer les documents les plus pertinents. Nous pourrons ensuite fournir ces documents au modèle LLM.
+
+```python
+question = "Qu’est-ce que Firecrawl ?"
+docs = vectorstore.similarity_search(query=question)
+```
+
+<div id="generation">
+  ## Génération
+</div>
+
+Enfin, vous pouvez utiliser Groq pour générer une réponse à une question à partir des documents que nous avons chargés.
+
+```python
+from groq import Groq
+
+client = Groq(
+    api_key="YOUR_GROQ_API_KEY",
+)
+
+completion = client.chat.completions.create(
+    model="llama3-8b-8192",
+    messages=[
+        {
+            "role": "user",
+            "content": f"Vous êtes un assistant bienveillant. Votre rôle est de répondre à la question de l’utilisateur à partir de la documentation ci-dessous :\nDocs :\n\n{docs}\n\nQuestion : {question}"
+        }
+    ],
+    temperature=1,
+    max_tokens=1024,
+    top_p=1,
+    stream=False,
+    stop=None,
+)
+
+print(completion.choices[0].message)
+```
+
+<div id="and-voila">
+  ## Et voilà !
+</div>
+
+Vous avez maintenant créé un bot « Discutez avec votre site web » à l’aide de Llama 3, Groq Llama 3, LangChain et Firecrawl. Vous pouvez désormais utiliser ce bot pour répondre aux questions en s’appuyant sur la documentation de votre site web.
+
+Si vous avez des questions ou besoin d’aide, n’hésitez pas à nous contacter via [Firecrawl](https://firecrawl.dev).

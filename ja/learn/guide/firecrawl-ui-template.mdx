@@ -1,0 +1,749 @@
+---
+title: "Web Connector UI テンプレート"
+description: "Firecrawl を React で使用して、Web 取り込み用の UI をセットアップするためのガイド。"
+og:title: "Web Connector UI テンプレート | Firecrawl"
+og:description: "Firecrawl を React で使用して、Web 取り込み用の UI をセットアップする方法を学びます。"
+---
+
+> 注意: この例は [Firecrawl API の v0 バージョン](/ja/v0/introduction) を使用しています。Python SDK は 0.0.20、Node SDK は 0.0.36 をインストールできます。
+
+このテンプレートは、React を用いて Firecrawl 向けの Web コネクタ UI を手早く作成できるようにします。
+Firecrawl API と連携するプリビルトのコンポーネントが含まれており、Web のクロールとスクレイピング用インターフェースを素早く構築して、ユーザーが AI アプリケーション向けのデータを抽出できるようにします。
+![Firecrawl UI Template](/images/firecrawl-ui.png)
+
+このテンプレートでは、ユーザーがクロール対象の URL を入力できます。サブページが検出された場合はそれらもクロールし、見つかった URL の一覧を表示します。ユーザーはスクレイプする URL を選択でき、スクレイプしたコンテンツは AI アプリケーションに取り込まれ、UI に表示されます。
+
+> **セキュリティ上の注意: この例では、クライアントサイドのコードで Firecrawl の API キーが露出します。本番環境では、API キーを保護するために API 連携はサーバーサイド実装へ移すことを強く推奨します。**
+
+<div id="prerequisites">
+  ## 前提条件
+</div>
+
+* Node.js（v14 以上推奨）
+* npm
+* [shadcn](https://github.com/shadcn-ui/ui) をインストール済みであること
+* [tailwindcss](https://tailwindcss.com/docs/installation) をインストール済みであること
+
+<div id="getting-started">
+  ## はじめに
+</div>
+
+1. 依存関係をインストール:
+
+* 必要な [shadcn components](https://github.com/shadcn-ui/ui) をインストール:
+
+```
+npx shadcn-ui@latest add button card checkbox collapsible input label
+```
+
+* 残りの依存関係をインストールする：
+
+```
+npm install clsx lucide-react tailwind-merge tailwindcss-animate class-variance-authority
+```
+
+2. `lib/utils.ts` ファイルを作成し、次のコードを追加してください:
+
+```typescript
+import { type ClassValue, clsx } from "clsx"
+import { twMerge } from "tailwind-merge"
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs))
+}
+```
+
+3. メインのインジェスト用コンポーネントをコピー＆ペーストします。**必ず `FIRECRAWL_API_KEY` をご自身のキーに置き換えてください。**
+
+<Accordion title="取り込みコンポーネント（ingestion.tsx）">
+  ```jsx
+  import { useState, ChangeEvent, FormEvent, useEffect } from "react";
+  import {
+    Card,
+    CardHeader,
+    CardTitle,
+    CardContent,
+    CardFooter,
+  } from "@/components/ui/card";
+  import { Input } from "@/components/ui/input";
+  import { Button } from "@/components/ui/button";
+  import { Checkbox } from "@/components/ui/checkbox";
+  import { Label } from "@/components/ui/label";
+  import {
+    Collapsible,
+    CollapsibleContent,
+    CollapsibleTrigger,
+  } from "@/components/ui/collapsible";
+  import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
+
+  //! ハードコードされた値（本番環境では非推奨）
+  //! すべての Firecrawl API 呼び出しはバックエンド（例：Next.js の API ルート）へ移すことを強く推奨します
+  const FIRECRAWL_API_URL = "https://api.firecrawl.dev"; // Replace with your actual API URL whether it is local or using Firecrawl Cloud
+  const FIRECRAWL_API_KEY = "fc-YOUR_API_KEY"; // Replace with your actual API key
+
+  interface FormData {
+    url: string;
+    crawlSubPages: boolean;
+    limit: string;
+    maxDepth: string;
+    excludePaths: string;
+    includePaths: string;
+    extractMainContent: boolean;
+  }
+
+  interface CrawlerOptions {
+    includes?: string[];
+    excludes?: string[];
+    maxDepth?: number;
+    limit?: number;
+    returnOnlyUrls: boolean;
+  }
+
+  interface PageOptions {
+    onlyMainContent: boolean;
+  }
+
+  interface RequestBody {
+    url: string;
+    crawlerOptions?: CrawlerOptions;
+    pageOptions: PageOptions;
+  }
+
+  interface ScrapeResultMetadata {
+    title: string;
+    description: string;
+    language: string;
+    sourceURL: string;
+    pageStatusCode: number;
+    pageError?: string;
+    [key: string]: string | number | undefined;
+  }
+
+  interface ScrapeResultData {
+    markdown: string;
+    content: string;
+    html: string;
+    rawHtml: string;
+    metadata: ScrapeResultMetadata;
+    llm_extraction: Record<string, unknown>;
+    warning?: string;
+  }
+
+  interface ScrapeResult {
+    success: boolean;
+    data: ScrapeResultData;
+  }
+
+  export default function FirecrawlComponent() {
+    const [formData, setFormData] = useState<FormData>({
+      url: "",
+      crawlSubPages: false,
+      limit: "",
+      maxDepth: "",
+      excludePaths: "",
+      includePaths: "",
+      extractMainContent: false,
+    });
+    const [loading, setLoading] = useState<boolean>(false);
+    const [scrapingSelectedLoading, setScrapingSelectedLoading] =
+      useState<boolean>(false);
+    const [crawledUrls, setCrawledUrls] = useState<string[]>([]);
+    const [selectedUrls, setSelectedUrls] = useState<string[]>([]);
+    const [scrapeResults, setScrapeResults] = useState<
+      Record<string, ScrapeResult>
+    >({});
+    const [isCollapsibleOpen, setIsCollapsibleOpen] = useState(true);
+    const [crawlStatus, setCrawlStatus] = useState<{
+      current: number;
+      total: number | null;
+    }>({ current: 0, total: null });
+    const [elapsedTime, setElapsedTime] = useState<number>(0);
+    const [showCrawlStatus, setShowCrawlStatus] = useState<boolean>(false);
+    const [isScraping, setIsScraping] = useState<boolean>(false);
+    const [currentPage, setCurrentPage] = useState<number>(1);
+    const urlsPerPage = 10;
+
+    useEffect(() => {
+      let timer: NodeJS.Timeout;
+      if (loading) {
+        setShowCrawlStatus(true);
+        timer = setInterval(() => {
+          setElapsedTime((prevTime) => prevTime + 1);
+        }, 1000);
+      }
+      return () => {
+        if (timer) clearInterval(timer);
+      };
+    }, [loading]);
+
+    const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
+      const { name, value, type, checked } = e.target;
+      setFormData((prevData) => ({
+        ...prevData,
+        [name]: type === "checkbox" ? checked : value,
+      }));
+    };
+
+    const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
+      setLoading(true);
+      setIsCollapsibleOpen(false);
+      setElapsedTime(0);
+      setCrawlStatus({ current: 0, total: null });
+      setIsScraping(!formData.crawlSubPages);
+      setCrawledUrls([]);
+      setSelectedUrls([]);
+      setScrapeResults({});
+      setScrapingSelectedLoading(false);
+      setShowCrawlStatus(false);
+
+      try {
+        const endpoint = `${FIRECRAWL_API_URL}/v0/${
+          formData.crawlSubPages ? "crawl" : "scrape"
+        }`;
+
+        const requestBody: RequestBody = formData.crawlSubPages
+          ? {
+              url: formData.url,
+              crawlerOptions: {
+                includes: formData.includePaths
+                  ? formData.includePaths.split(",").map((p) => p.trim())
+                  : undefined,
+                excludes: formData.excludePaths
+                  ? formData.excludePaths.split(",").map((p) => p.trim())
+                  : undefined,
+                maxDepth: formData.maxDepth
+                  ? parseInt(formData.maxDepth)
+                  : undefined,
+                limit: formData.limit ? parseInt(formData.limit) : undefined,
+                returnOnlyUrls: true,
+              },
+              pageOptions: {
+                onlyMainContent: formData.extractMainContent,
+              },
+            }
+          : {
+              url: formData.url,
+              pageOptions: {
+                onlyMainContent: formData.extractMainContent,
+              },
+            };
+
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${FIRECRAWL_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (formData.crawlSubPages) {
+          const jobId = data.jobId;
+          if (jobId) {
+            const statusEndpoint = `${FIRECRAWL_API_URL}/v0/crawl/status/${jobId}`;
+            let statusData: {
+              status: string;
+              data?: { url: string }[];
+              current?: number;
+              total?: number;
+            };
+            do {
+              const statusResponse = await fetch(statusEndpoint, {
+                headers: {
+                  Authorization: `Bearer ${FIRECRAWL_API_KEY}`,
+                },
+              });
+              if (statusResponse.ok) {
+                statusData = await statusResponse.json();
+
+                const urls = statusData.data
+                  ? statusData.data.map((urlObj) => urlObj.url)
+                  : [];
+                setCrawledUrls(urls);
+                setSelectedUrls(urls);
+                setCrawlStatus({
+                  current: urls.length || 0,
+                  total: urls.length || null,
+                });
+                if (statusData.status !== "completed") {
+                  // Wait for 1 second before polling again
+                  await new Promise((resolve) => setTimeout(resolve, 1000));
+                  console.log("再度ポーリングします…");
+                  console.log(statusData);
+                } else {
+                  console.log("クロールが完了しました。ステータス:", statusData.status);
+                  console.log(statusData);
+                }
+              } else {
+                console.error("クロールステータスの取得に失敗しました");
+                break;
+              }
+            } while (statusData.status !== "completed");
+          } else {
+            console.error("クロールリクエストから jobId を受け取れませんでした");
+          }
+        } else {
+          setScrapeResults({ [formData.url]: data });
+          setCrawlStatus({ current: 1, total: 1 });
+        }
+      } catch (error) {
+        console.error("エラー:", error);
+        setScrapeResults({
+          error: {
+            success: false,
+            data: {
+              metadata: {
+                pageError: "データ取得中にエラーが発生しました",
+                title: "",
+                description: "",
+                language: "",
+                sourceURL: "",
+                pageStatusCode: 0,
+              },
+              markdown: "",
+              content: "",
+              html: "",
+              rawHtml: "",
+              llm_extraction: {},
+            },
+          },
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const handleScrapeSelected = async () => {
+      setLoading(true);
+      setElapsedTime(0);
+      setCrawlStatus({ current: 0, total: selectedUrls.length });
+      setIsScraping(true);
+      setScrapingSelectedLoading(true);
+      const newScrapeResults: Record<string, ScrapeResult> = {};
+
+      for (const [index, url] of selectedUrls.entries()) {
+        try {
+          const response = await fetch(`${FIRECRAWL_API_URL}/v0/scrape`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${FIRECRAWL_API_KEY}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              url: url,
+              pageOptions: {
+                onlyMainContent: formData.extractMainContent,
+              },
+            }),
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+
+          const data: ScrapeResult = await response.json();
+          newScrapeResults[url] = data;
+          setCrawlStatus((prev) => ({ ...prev, current: index + 1 }));
+          setScrapeResults({ ...scrapeResults, ...newScrapeResults });
+        } catch (error) {
+          console.error(`URL のスクレイピング中にエラーが発生しました: ${url}:`, error);
+          newScrapeResults[url] = {
+            success: false,
+            data: {
+              markdown: "",
+              content: "",
+              html: "",
+              rawHtml: "",
+              metadata: {
+                title: "",
+                description: "",
+                language: "",
+                sourceURL: url,
+                pageStatusCode: 0,
+                pageError: (error as Error).message,
+              },
+              llm_extraction: {},
+            },
+          };
+        }
+      }
+
+      setLoading(false);
+      setIsScraping(false);
+    };
+
+    const handlePageChange = (newPage: number) => {
+      setCurrentPage(newPage);
+    };
+
+    const paginatedUrls = crawledUrls.slice(
+      (currentPage - 1) * urlsPerPage,
+      currentPage * urlsPerPage
+    );
+
+    return (
+      <div className="max-w-2xl mx-auto p-4">
+        <Card>
+          <CardHeader className="flex items-start justify-between mb-0 pb-4">
+            <CardTitle className="flex items-center justify-between w-full space-x-2">
+              <span className="text-base">Web コンテンツの抽出</span>
+              <a
+                href="https://www.firecrawl.dev"
+                className="text-xs text-gray-500 font-normal px-3 py-1 bg-zinc-100 rounded-xl hover:bg-zinc-200 transition-colors"
+              >
+                Powered by Firecrawl 🔥
+              </a>
+            </CardTitle>
+            <div className="text-sm text-gray-500 w-11/12 items-center">
+              Use this component to quickly give your users the ability to connect
+              their AI apps to web data with Firecrawl. Learn more on the{" "}
+              <a
+                href="https://docs.firecrawl.dev/"
+                className="text-sm text-blue-500"
+              >
+                Firecrawl docs!
+              </a>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <form onSubmit={handleSubmit}>
+              <div className="flex items-center space-x-2">
+                <Input
+                  placeholder="https://www.firecrawl.dev/"
+                  className="flex-grow"
+                  name="url"
+                  value={formData.url}
+                  onChange={handleChange}
+                />
+                <Button type="submit" variant="default" disabled={loading}>
+                  {loading ? (
+                    <div
+                      role="status"
+                      className="flex items-center justify-between space-x-2"
+                    >
+                      <svg
+                        className="animate-spin  h-4 w-4 text-white"
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        ></circle>
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                        ></path>
+                      </svg>
+                      <span className="sr-only">読み込み中…</span>
+                    </div>
+                  ) : (
+                    "実行"
+                  )}
+                </Button>
+              </div>
+              <Collapsible
+                open={isCollapsibleOpen}
+                onOpenChange={setIsCollapsibleOpen}
+                className="mt-2"
+              >
+                <CollapsibleTrigger asChild>
+                  <Button variant="ghost" className="w-full justify-between pl-2">
+                    詳細オプション
+                    <ChevronDown className="h-4 w-4 opacity-50" />
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="space-y-4 mt-4 px-2">
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="crawlSubPages"
+                      name="crawlSubPages"
+                      checked={formData.crawlSubPages}
+                      onCheckedChange={(checked: boolean) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          crawlSubPages: checked,
+                        }))
+                      }
+                    />
+                    <label htmlFor="crawlSubPages" className="text-sm">
+                      サブページをクロール
+                    </label>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label
+                        htmlFor="limit"
+                        className="block text-left w-full pb-2"
+                      >
+                        上限 *
+                      </Label>
+                      <Input
+                        id="limit"
+                        name="limit"
+                        placeholder="10"
+                        value={formData.limit}
+                        onChange={handleChange}
+                      />
+                    </div>
+                    <div>
+                      <Label
+                        htmlFor="maxDepth"
+                        className="block text-left w-full pb-2"
+                      >
+                        最大深度
+                      </Label>
+                      <Input
+                        id="maxDepth"
+                        name="maxDepth"
+                        placeholder="5"
+                        value={formData.maxDepth}
+                        onChange={handleChange}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label
+                        htmlFor="excludePaths"
+                        className="block text-left w-full pb-2"
+                      >
+                        除外パス
+                      </Label>
+                      <Input
+                        id="excludePaths"
+                        name="excludePaths"
+                        placeholder="blog/, /about/"
+                        value={formData.excludePaths}
+                        onChange={handleChange}
+                      />
+                    </div>
+                    <div>
+                      <Label
+                        htmlFor="includePaths"
+                        className="block text-left w-full pb-2"
+                      >
+                        対象パスのみ
+                      </Label>
+                      <Input
+                        id="includePaths"
+                        name="includePaths"
+                        placeholder="articles/"
+                        value={formData.includePaths}
+                        onChange={handleChange}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="extractMainContent"
+                      name="extractMainContent"
+                      checked={formData.extractMainContent}
+                      onCheckedChange={(checked: boolean) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          extractMainContent: checked,
+                        }))
+                      }
+                    />
+                    <label htmlFor="extractMainContent" className="text-sm">
+                      主要コンテンツのみ抽出（ヘッダー、ナビ、フッター等を除外）
+                    </label>
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            </form>
+            {showCrawlStatus && (
+              <div className="flex items-center justify-between mb-2 space-x-2 bg-gray-100 p-2 rounded-md">
+                <div className="flex items-center space-x-2">
+                  {!isScraping &&
+                    crawledUrls.length > 0 &&
+                    !scrapingSelectedLoading && (
+                      <>
+                        <Checkbox
+                          id="selectAll"
+                          checked={selectedUrls.length === crawledUrls.length}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setSelectedUrls([...crawledUrls]);
+                            } else {
+                              setSelectedUrls([]);
+                            }
+                          }}
+                        />
+                        <label
+                          htmlFor="selectAll"
+                          className="text-sm cursor-pointer"
+                        >
+                          {selectedUrls.length === crawledUrls.length
+                            ? `すべて選択解除（${selectedUrls.length}）`
+                            : `すべて選択（${selectedUrls.length}）`}
+                        </label>
+                      </>
+                    )}
+                </div>
+                <div className="text-sm text-gray-600">
+                  {isScraping
+                    ? `スクレイピング済み ${crawlStatus.current} ページ（${elapsedTime}秒）`
+                    : `クロール済み ${crawlStatus.current} ページ（${elapsedTime}秒）`
+                </div>
+              </div>
+            )}
+
+            {crawledUrls.length > 0 &&
+              !scrapingSelectedLoading &&
+              !isScraping && (
+                <>
+                  <ul className="pl-2">
+                    {paginatedUrls.map((url, index) => (
+                      <li
+                        key={index}
+                        className="flex items-center space-x-2 my-2 text-sm"
+                      >
+                        <Checkbox
+                          checked={selectedUrls.includes(url)}
+                          onCheckedChange={() =>
+                            setSelectedUrls((prev) =>
+                              prev.includes(url)
+                                ? prev.filter((u) => u !== url)
+                                : [...prev, url]
+                            )
+                          }
+                        />
+                        <span className="flex items-center max-w-lg">
+                          {url.length > 70 ? `${url.slice(0, 70)}...` : url}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="flex items-center justify-between mt-4">
+                    <Button
+                      variant="outline"
+                      className="px-2"
+                      onClick={() => handlePageChange(currentPage - 1)}
+                      disabled={currentPage === 1}
+                    >
+                      <ChevronLeft className="h-5 w-5" />
+                    </Button>
+                    <span className="text-sm text-gray-500">
+                      ページ {currentPage} /{" "}
+                      {Math.ceil(crawledUrls.length / urlsPerPage)}
+                    </span>
+                    <Button
+                      variant="outline"
+                      className="px-2"
+                      onClick={() => handlePageChange(currentPage + 1)}
+                      disabled={currentPage * urlsPerPage >= crawledUrls.length}
+                    >
+                      <ChevronRight className="h-5 w-5 " />
+                    </Button>
+                  </div>
+                </>
+              )}
+          </CardContent>
+          <CardFooter className="w-full flex justify-center">
+            {crawledUrls.length > 0 && !scrapingSelectedLoading && (
+              <Button
+                variant="default"
+                className="w-full"
+                onClick={handleScrapeSelected}
+                disabled={loading || selectedUrls.length === 0}
+              >
+                選択した URL をスクレイピング
+              </Button>
+            )}
+          </CardFooter>
+        </Card>
+
+        {Object.keys(scrapeResults).length > 0 && (
+          <div className="mt-4">
+            <h2 className="text-base font-bold ">スクレイピング結果</h2>
+            <p className="text-sm text-gray-500">
+              スクレイピング結果は自由に活用できます。以下は Markdown の基本的な表示例です。
+              basic showcase of the markdown.
+            </p>
+            <div className="flex flex-col gap-4 mt-4 w-full">
+              {Object.entries(scrapeResults).map(([url, result]) => (
+                <Card key={url} className="relative p-4 w-full">
+                  <CardTitle className="text-sm font-normal flex flex-col">
+                    <span>{result.data.metadata.title}</span>
+                    <span className="text-xs text-gray-500">
+                      {url
+                        .replace(/^(https?:\/\/)?(www\.)?/, "")
+                        .replace(/\/$/, "")}
+                    </span>
+                  </CardTitle>
+                  <CardContent className="relative px-0 pt-2 !text-xs w-full">
+                    <div className=" overflow-y-auto h-32 bg-zinc-100 rounded-md p-2 w-full">
+                      {result.success ? (
+                        <>
+                          <pre className="text-xs whitespace-pre-wrap">
+                            {result.data.markdown.trim()}
+                          </pre>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-red-500">
+                            この URL のスクレイピングに失敗しました
+                          </p>
+                          <p className="text-zinc-500 font-mono">
+                            {result.toString()}
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+  ```
+</Accordion>
+
+<div id="customization">
+  ## カスタマイズ
+</div>
+
+これはライブラリではないため、UIは自由にカスタマイズできます。shadcn と同様に、コードを編集するだけでOKです。
+
+<div id="security-considerations">
+  ## セキュリティに関する考慮事項
+</div>
+
+本番環境では、次のセキュリティ対策を検討してください。
+
+* Firecrawl の API キーを保護するため、API とのやり取りはサーバーサイドで実装してください。
+
+<div id="learn-more">
+  ## さらに詳しく
+</div>
+
+Firecrawl とその API についての詳細は、[Firecrawl ドキュメント](https://docs.firecrawl.dev/)をご覧ください。
+
+<div id="contributing">
+  ## コントリビュート
+</div>
+
+貢献は大歓迎です！ぜひお気軽に Pull Request をお送りください。
+
+<div id="license">
+  ## ライセンス
+</div>
+
+Firecrawl Ingestion UI Template は MIT ライセンスのもとで提供されています。

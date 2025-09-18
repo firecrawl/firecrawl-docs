@@ -1,0 +1,43 @@
+```js Node/Express
+import crypto from 'crypto';
+import express from 'express';
+
+const app = express();
+
+// Usa el analizador de cuerpo en bruto para verificar la firma
+app.use('/webhook/firecrawl', express.raw({ type: 'application/json' }));
+
+app.post('/webhook/firecrawl', (req, res) => {
+  const signature = req.get('X-Firecrawl-Signature');
+  const webhookSecret = process.env.FIRECRAWL_WEBHOOK_SECRET;
+  
+  if (!signature || !webhookSecret) {
+    return res.status(401).send('No autorizado');
+  }
+  
+  // Extrae el hash del encabezado de la firma
+  const [algorithm, hash] = signature.split('=');
+  if (algorithm !== 'sha256') {
+    return res.status(401).send('Algoritmo de firma no válido');
+  }
+  
+  // Calcula la firma esperada
+  const expectedSignature = crypto
+    .createHmac('sha256', webhookSecret)
+    .update(req.body)
+    .digest('hex');
+  
+  // Verifica la firma usando una comparación segura contra ataques de temporización
+  if (!crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(expectedSignature, 'hex'))) {
+    return res.status(401).send('Firma no válida');
+  }
+  
+  // Analiza y procesa el webhook verificado
+  const event = JSON.parse(req.body);
+  console.log('Webhook de Firecrawl verificado:', event);
+  
+  res.status(200).send('ok');
+});
+
+app.listen(3000, () => console.log('Escuchando en el puerto 3000'));
+```

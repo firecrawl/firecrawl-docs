@@ -1,0 +1,109 @@
+---
+title: "使用 LLM 提取网站数据"
+description: "了解如何使用 Firecrawl 和 Groq 通过几行代码从网页提取结构化数据。"
+"og:image": "/images/og.png"
+"twitter:image": "/images/og.png"
+og:title: "使用 LLM 提取网站数据 | Firecrawl"
+og:description: "了解如何使用 Firecrawl 和 Groq 通过几行代码从网页提取结构化数据。"
+---
+
+> 注意：此示例使用的是 [Firecrawl API 的 v0 版本](/zh/v0/introduction)。你可以为 Python SDK 安装 0.0.20 版本，或为 Node SDK 安装 0.0.36 版本。
+
+<div id="setup">
+  ## 设置
+</div>
+
+安装所需的 Python 依赖项，包括 groq 和 firecrawl-py。
+
+```bash
+pip install groq firecrawl-py
+```
+
+<div id="getting-your-groq-and-firecrawl-api-keys">
+  ## 获取 Groq 和 Firecrawl 的 API 密钥
+</div>
+
+要使用 Groq 和 Firecrawl，你需要各自的 API 密钥。可在[此处](https://groq.com)获取 Groq 的 API 密钥，在[此处](https://firecrawl.dev)获取 Firecrawl 的 API 密钥。
+
+<div id="load-website-with-firecrawl">
+  ## 使用 Firecrawl 加载网站
+</div>
+
+为了从网页获取完整数据并确保其格式尽可能干净，我们将使用 [Firecrawl](https://firecrawl.dev)。它可以绕过受 JS 限制的网站，提取主要内容，并以便于 LLM 读取的格式输出，从而提升准确性。
+
+下面演示如何使用 Firecrawl 抓取网站 URL。我们还将设置 `pageOptions`，只提取网页的主体内容（`onlyMainContent: True`），排除导航、页脚等。
+
+```python
+from firecrawl import FirecrawlApp  # 导入 FirecrawlApp
+
+url = "https://about.fb.com/news/2024/04/introducing-our-open-mixed-reality-ecosystem/"
+
+firecrawl = FirecrawlApp(
+    api_key="fc-YOUR_FIRECRAWL_API_KEY",
+)
+page_content = firecrawl.scrape_url(url=url,  # 要抓取的目标URL
+    params={
+        "pageOptions":{
+            "onlyMainContent": True # 忽略导航、页脚等
+        }
+    })
+print(page_content)
+```
+
+太好了，我们已经从网站拿到干净的数据——可以直接交给 LLM 做数据提取了。
+
+<div id="extraction-and-generation">
+  ## 提取与生成
+</div>
+
+既然已经获取了网站数据，我们来用 Groq 提取所需信息。我们将以 JSON 模式使用 Groq 的 Llama 3 模型，从页面内容中筛选出特定字段。
+
+本示例使用的是 Llama 3 8B 模型。若想获得更好的效果，欢迎使用更大的模型。
+
+```python
+import json
+from groq import Groq
+
+client = Groq(
+    api_key="gsk_YOUR_GROQ_API_KEY",  # 注意：将“API_KEY”替换为你的实际 Groq API 密钥
+)
+
+# 在此定义我们希望从页面内容中提取的字段
+extract = ["summary","date","companies_building_with_quest","title_of_the_article","people_testimonials"]
+
+completion = client.chat.completions.create(
+    model="llama3-8b-8192",
+    messages=[
+        {
+            "role": "system",
+            "content": "你是一名法律顾问，将以 JSON 格式从文档中提取信息。"
+        },
+        {
+            "role": "user",
+            # 在此传入页面内容以及需要提取的字段
+            "content": f"请从所提供的文档中提取以下信息：\n页面内容：\n\n{page_content}\n\n需要提取的信息：{extract}"
+        }
+    ],
+    temperature=0,
+    max_tokens=1024,
+    top_p=1,
+    stream=False,
+    stop=None,
+    # 将响应格式设置为 JSON 对象
+    response_format={"type": "json_object"}
+)
+
+
+# 以更易读的方式打印 JSON 响应
+dataExtracted = json.dumps(str(completion.choices[0].message.content), indent=4)
+
+print(dataExtracted)
+```
+
+<div id="and-voila">
+  ## 大功告成！
+</div>
+
+你已经使用 Groq 和 Firecrawl 构建了一个数据提取机器人。现在可以用它从任意网站提取结构化数据。
+
+如果你有任何问题或需要帮助，欢迎通过 [Firecrawl](https://firecrawl.dev) 与我们联系。

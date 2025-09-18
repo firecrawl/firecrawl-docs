@@ -1,0 +1,97 @@
+---
+title: "Crie um agente que verifica contradições no site"
+description: "Usando Firecrawl e Claude para extrair dados do seu site e buscar contradições"
+og:title: "Crie um agente que verifica contradições no site | Firecrawl"
+og:description: "Usando Firecrawl e Claude para extrair dados do seu site e buscar contradições"
+---
+
+> Observação: este exemplo usa a [versão v0 da API do Firecrawl](/pt-BR/v0/introduction). Você pode instalar a versão 0.0.20 do SDK para Python ou a 0.0.36 para Node.
+
+<img className="block" src="/images/articles/hero-contradiction.png" alt="Imagem mostrando um site com uma contradição." />
+
+Neste tutorial rápido, você aprenderá a usar o Firecrawl e o Claude para extrair os dados do seu site e procurar contradições e inconsistências com poucas linhas de código. Quando você está lançando rápido, os dados tendem a ficar desatualizados; com o Firecrawl e LLMs, você pode garantir que seus dados públicos na web estejam sempre consistentes! Usaremos a enorme janela de contexto de 200k do Opus e a paralelização do Firecrawl, tornando esse processo preciso e rápido.
+
+<div id="setup">
+  ## Configuração
+</div>
+
+Instale nossas dependências do Python, incluindo Anthropic e firecrawl-py.
+
+```bash
+pip install firecrawl-py anthropic
+```
+
+<div id="getting-your-claude-and-firecrawl-api-keys">
+  ## Obtendo suas chaves de API do Claude e do Firecrawl
+</div>
+
+Para usar Claude Opus e o Firecrawl, você precisará obter suas chaves de API. Você pode obter sua chave de API da Anthropic [aqui](https://www.anthropic.com/) e sua chave de API do Firecrawl [aqui](https://firecrawl.dev).
+
+<div id="load-website-with-firecrawl">
+  ## Carregar site com Firecrawl
+</div>
+
+Para obter todos os dados da página do nosso site e colocá-los em um formato fácil para o LLM ler, usaremos o [Firecrawl](https://firecrawl.dev). Ele contorna sites bloqueados por JavaScript, extrai o conteúdo principal e gera um formato legível por LLM para aumentar a precisão.
+
+Veja como vamos extrair (scrape) a URL de um site usando o Firecrawl-py
+
+```python
+from firecrawl import FirecrawlApp
+
+app = FirecrawlApp(api_key="SUA-CHAVE")
+
+crawl_result = app.crawl_url('docs.firecrawl.dev', {'crawlerOptions': {'excludes': ['blog/*','usecases/*']}})
+
+print(crawl_result)
+```
+
+Com todos os dados da web que queremos extraídos e em um formato limpo, podemos seguir para a próxima etapa.
+
+<div id="combination-and-generation">
+  ## Combinação e Geração
+</div>
+
+Agora que temos os dados do site, vamos emparelhar cada página e executar cada combinação pelo Opus para análise.
+
+```python
+from itertools import combinations
+
+page_combinations = []
+
+for first_page, second_page in combinations(crawl_result, 2):
+    combined_string = "Primeira página:\n" + first_page['markdown'] + "\n\nSegunda página:\n" + second_page['markdown']
+    page_combinations.append(combined_string)
+
+import anthropic
+
+client = anthropic.Anthropic(
+    # por padrão, usa os.environ.get("ANTHROPIC_API_KEY")
+    api_key="YOUR-KEY",
+)
+
+final_output = []
+
+for page_combination in page_combinations:
+
+    prompt = "Aqui estão duas páginas do site de uma empresa. Sua tarefa é identificar quaisquer contradições ou divergências de opinião entre elas, o que pode ocorrer por informações desatualizadas ou outros motivos. Se encontrar contradições, liste-as e forneça uma breve explicação do motivo da contradição ou divergência. Certifique-se de que a explicação seja específica e concisa. Se não encontrar nenhuma contradição, diga apenas 'Nenhuma contradição encontrada' e nada mais. Aqui estão as páginas: " + "\n\n".join(page_combination)
+
+    message = client.messages.create(
+        model="claude-3-opus-20240229",
+        max_tokens=1000,
+        temperature=0.0,
+        system="Você é um assistente que ajuda a encontrar contradições ou divergências de opinião entre páginas no site e na base de conhecimento de uma empresa. Isso pode ocorrer por informações desatualizadas na base de conhecimento."
+        messages=[
+            {"role": "user", "content": prompt}
+        ]
+    )
+    final_output.append(message.content)
+
+```
+
+<div id="thats-about-it">
+  ## É isso!
+</div>
+
+Agora você criou um agente que analisa seu site e identifica possíveis inconsistências.
+
+Se tiver dúvidas ou precisar de ajuda, entre em contato conosco na [Firecrawl](https://firecrawl.dev).

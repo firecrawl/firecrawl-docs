@@ -1,0 +1,107 @@
+---
+title: "Groq Llama 3 で「Chat with website」を作る"
+description: "Firecrawl、Groq Llama 3、LangChain を使って「Chat with your website」ボットを構築する方法を解説します。"
+og:title: "Groq Llama 3 で「Chat with website」を作る | Firecrawl"
+og:description: "Firecrawl、Groq Llama 3、LangChain を使って「Chat with your website」ボットを構築する方法を解説します。"
+---
+
+> 注: この例では [Firecrawl API の v0 版](/ja/v0/introduction) を使用しています。Python SDK は 0.0.20、Node SDK は 0.0.36 をインストールしてください。
+
+<div id="setup">
+  ## セットアップ
+</div>
+
+langchain、groq、faiss、ollama、firecrawl-py などの Python 依存関係をインストールします。
+
+```bash
+pip install --upgrade --quiet langchain langchain-community groq faiss-cpu ollama firecrawl-py
+```
+
+埋め込みにはOllamaを使用します。Ollamaは[こちら](https://ollama.com/)からダウンロードできますが、好みの埋め込み手法を使っても問題ありません。
+
+<div id="load-website-with-firecrawl">
+  ## Firecrawl でウェブサイトを読み込む
+</div>
+
+ウェブサイトのデータを余すことなく取得し、可能な限りクリーンなフォーマットで扱うために、Firecrawl を使用します。Firecrawl はドキュメントローダーとして LangChain と容易に統合できます。
+
+以下は Firecrawl を使ってウェブサイトを読み込む方法です：
+
+```python
+from langchain_community.document_loaders import FireCrawlLoader  # FirecrawlLoader をインポート
+
+url = "https://firecrawl.dev"
+loader = FirecrawlLoader(
+    api_key="fc-YOUR_API_KEY", # 注: 'YOUR_API_KEY' を実際の Firecrawl API キーに置き換えてください
+    url=url,  # クロール対象のURL
+    mode="crawl"  # すべてのアクセス可能なサブページをクロールするために 'crawl' を指定
+)
+docs = loader.load()
+```
+
+<div id="setup-the-vectorstore">
+  ## ベクターストアのセットアップ
+</div>
+
+次に、ベクターストアをセットアップします。ベクターストアは、埋め込みを保存し検索できるデータ構造です。ここでは、Ollama の埋め込みと FAISS のベクターストアを使用します。
+ドキュメントは 1,000 文字ごとのチャンクに分割し、各チャンクを 200 文字分重ねます。これは、チャンクが小さすぎず大きすぎないようにし、クエリ時に LLM に収まるようにするためです。
+
+```python
+from langchain_community.embeddings import OllamaEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+splits = text_splitter.split_documents(docs)
+vectorstore = FAISS.from_documents(documents=splits, embedding=OllamaEmbeddings())
+```
+
+<div id="retrieval-and-generation">
+  ## 取得と生成
+</div>
+
+ドキュメントを読み込み、ベクトルストアをセットアップしたので、ユーザーの質問に基づいて類似度検索を行い、最も関連性の高いドキュメントを取得できます。取得したドキュメントをLLMに入力して活用します。
+
+```python
+question = "Firecrawl とは何ですか？"
+docs = vectorstore.similarity_search(query=question)
+```
+
+<div id="generation">
+  ## 生成
+</div>
+
+最後に、読み込んだドキュメントに基づいて質問への回答を生成するために、Groq を使用できます。
+
+```python
+from groq import Groq
+
+client = Groq(
+    api_key="YOUR_GROQ_API_KEY",
+)
+
+completion = client.chat.completions.create(
+    model="llama3-8b-8192",
+    messages=[
+        {
+            "role": "user",
+            "content": f"あなたは親切なアシスタントです。以下のドキュメントに基づいて、ユーザーの質問に回答してください。\nDocs:\n\n{docs}\n\n質問: {question}"
+        }
+    ],
+    temperature=1,
+    max_tokens=1024,
+    top_p=1,
+    stream=False,
+    stop=None,
+)
+
+print(completion.choices[0].message)
+```
+
+<div id="and-voila">
+  ## そして完成！
+</div>
+
+Llama 3、Groq Llama 3、LangChain、Firecrawl を使って「Chat with your website」ボットを構築できました。これで、このボットを使って自社サイトのドキュメントに基づく質問に回答できます。
+
+ご不明点やサポートが必要な場合は、[Firecrawl](https://firecrawl.dev) までお気軽にお問い合わせください。

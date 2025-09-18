@@ -1,0 +1,43 @@
+```js Node／Express
+import crypto from 'crypto';
+import express from 'express';
+
+const app = express();
+
+// 署名検証のために raw 本文パーサーを使用
+app.use('/webhook/firecrawl', express.raw({ type: 'application/json' }));
+
+app.post('/webhook/firecrawl', (req, res) => {
+  const signature = req.get('X-Firecrawl-Signature');
+  const webhookSecret = process.env.FIRECRAWL_WEBHOOK_SECRET;
+  
+  if (!signature || !webhookSecret) {
+    return res.status(401).send('認証されていません');
+  }
+  
+  // 署名ヘッダーからハッシュを抽出
+  const [algorithm, hash] = signature.split('=');
+  if (algorithm !== 'sha256') {
+    return res.status(401).send('無効な署名アルゴリズム');
+  }
+  
+  // 期待される署名を算出
+  const expectedSignature = crypto
+    .createHmac('sha256', webhookSecret)
+    .update(req.body)
+    .digest('hex');
+  
+  // タイミング安全な比較で署名を検証
+  if (!crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(expectedSignature, 'hex'))) {
+    return res.status(401).send('無効な署名');
+  }
+  
+  // 検証済みの webhook を解析して処理
+  const event = JSON.parse(req.body);
+  console.log('検証済みの Firecrawl webhook:', event);
+  
+  res.status(200).send('ok');
+});
+
+app.listen(3000, () => console.log('ポート 3000 で待機中'));
+```

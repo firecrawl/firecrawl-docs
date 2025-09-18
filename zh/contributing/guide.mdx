@@ -1,0 +1,168 @@
+---
+title: "本地运行"
+description: "了解如何在本地运行 Firecrawl，以便自行使用和/或为项目做出贡献。"
+og:title: "本地运行 | Firecrawl"
+og:description: "了解如何在本地运行 Firecrawl，以便自行使用和/或为项目做出贡献。"
+---
+
+欢迎来到 [Firecrawl](https://firecrawl.dev) 🔥！以下是一些在本地获取项目的说明，便于你自行运行（并参与贡献）。
+
+如果你打算参与贡献，请注意流程与其他开源仓库类似（fork firecrawl、进行修改、运行测试、提交 PR）。如有任何问题或需要上手帮助，请发送邮件至 help@firecrawl.com，或提交 issue！
+
+<div id="running-the-project-locally">
+  ## 本地运行项目
+</div>
+
+首先安装依赖：
+
+1. Node.js [安装说明](https://nodejs.org/en/learn/getting-started/how-to-install-nodejs)
+2. pnpm [安装说明](https://pnpm.io/installation)
+3. Redis [安装说明](https://redis.io/docs/latest/operate/oss_and_stack/install/install-redis/)
+4. PostgreSQL
+5. Docker（可选，用于运行 Postgres）
+
+你需要通过运行 `apps/nuq-postgres/nuq.sql` 中的 SQL 文件来初始化 PostgreSQL 数据库。最简单的方法是使用 `apps/nuq-postgres` 目录下的 Docker 镜像。在 Docker 已启动的情况下，构建该镜像：
+
+```bash
+docker build -t nuq-postgres .
+```
+
+然后执行：
+
+```bash
+docker run --name nuqdb \          
+  -e POSTGRES_PASSWORD=postgres \
+  -p 5433:5432 \
+  -v nuq-data:/var/lib/postgresql/data \
+  -d nuq-postgres
+```
+
+在 /apps/api/ 目录下的 .env 中设置环境变量，你可以从 .env.example 复制模板。
+
+开始时，我们先不配置身份验证，也不启用任何可选的子服务（PDF 解析、JS 阻断支持、AI 功能）。
+
+.env:
+
+```
+# ===== 必需的环境变量 ======
+NUM_WORKERS_PER_QUEUE=8
+PORT=3002
+HOST=0.0.0.0
+REDIS_URL=redis://localhost:6379
+REDIS_RATE_LIMIT_URL=redis://localhost:6379
+
+## 要启用数据库认证，你需要配置 Supabase。
+USE_DB_AUTHENTICATION=false
+
+## 使用 PostgreSQL 进行队列——如果凭据、主机或数据库不同，请修改
+NUQ_DATABASE_URL=postgres://postgres:postgres@localhost:5433/postgres
+
+# ===== 可选的环境变量 ======
+
+# Supabase 配置（用于支持数据库认证、增强日志等）
+SUPABASE_ANON_TOKEN=
+SUPABASE_URL=
+SUPABASE_SERVICE_TOKEN=
+
+# 其他可选项
+TEST_API_KEY= # 如果你已启用认证并想用真实 API 密钥进行测试，可在此填写
+OPENAI_API_KEY= # 如需启用依赖 LLM 的功能（例如生成图片替代文本），请添加
+BULL_AUTH_KEY= @
+PLAYWRIGHT_MICROSERVICE_URL=  # 如需启用 Playwright 回退，请设置
+LLAMAPARSE_API_KEY= # 如果你有 Llamaparse 密钥并想用于解析 PDF，请设置
+SLACK_WEBHOOK_URL= # 如需发送 Slack 服务器健康状态消息，请设置
+POSTHOG_API_KEY= # 如需发送 PostHog 事件（如作业日志），请设置
+POSTHOG_HOST= # 如需发送 PostHog 事件（如作业日志），请设置
+
+
+```
+
+
+<div id="installing-dependencies">
+  ### 安装依赖项
+</div>
+
+首先使用 pnpm 安装依赖项。
+
+```bash
+# cd apps/api # 确认你在正确的目录
+pnpm install # 确保 pnpm 版本为 9 或更高！
+```
+
+
+<div id="running-the-project">
+  ### 运行项目
+</div>
+
+你需要打开 3 个终端窗口。
+
+<div id="terminal-1-setting-up-redis">
+  ### 终端 1 - 设置 Redis
+</div>
+
+在项目中的任意目录运行该命令
+
+```bash
+redis-server
+```
+
+
+<div id="terminal-2-setting-up-the-service">
+  ### 终端 2 - 配置服务
+</div>
+
+现在，进入 apps/api/ 目录并运行：
+
+```bash
+pnpm start
+# 如果你要使用 [llm-extract 功能](https://github.com/firecrawl/firecrawl/pull/586/)，还需要导出 OPENAI_API_KEY=sk-______
+```
+
+这将启动用于处理爬取任务的 workers。
+
+
+<div id="terminal-3-sending-our-first-request">
+  ### 终端 3 - 发送我们的首个请求。
+</div>
+
+好了，现在让我们发送第一个请求。
+
+```curl
+curl -X GET http://localhost:3002/test
+```
+
+这将返回响应“Hello, world!”。
+
+如果你想测试 /crawl 端点，可以运行以下命令
+
+```curl
+curl -X POST http://localhost:3002/v1/crawl \
+    -H 'Content-Type: application/json' \
+    -d '{
+      "url": "https://mendable.ai"
+    }'
+```
+
+
+<div id="alternative-using-docker-compose">
+  ### 备选方案：使用 Docker Compose
+</div>
+
+为简化设置，你可以使用 Docker Compose 运行所有服务：
+
+1. 先决条件：确保已安装 Docker 和 Docker Compose
+2. 将 `/apps/api/` 目录中的 `.env.example` 复制为 `.env`，并按需配置
+3. 在项目根目录运行：
+
+```bash
+docker compose up
+```
+
+这将按正确配置自动启动 Redis、API 服务器和工作进程。
+
+
+<div id="tests">
+  ## 测试：
+</div>
+
+最佳方式是运行 `npm run test:snips` 来执行测试。

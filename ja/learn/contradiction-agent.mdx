@@ -1,0 +1,97 @@
+---
+title: "ウェブサイトの矛盾をチェックするエージェントを構築する"
+description: "Firecrawl と Claude を使ってウェブサイトのデータをスクレイピングし、矛盾を検出する"
+og:title: "ウェブサイトの矛盾をチェックするエージェントを構築する | Firecrawl"
+og:description: "Firecrawl と Claude を使ってウェブサイトのデータをスクレイピングし、矛盾を検出する"
+---
+
+> 注意: この例は [Firecrawl API の v0 版](/ja/v0/introduction)を使用しています。Python SDK は 0.0.20、Node SDK は 0.0.36 をインストールできます。
+
+<img className="block" src="/images/articles/hero-contradiction.png" alt="矛盾のあるウェブサイトを示す画像" />
+
+このクイックチュートリアルでは、数行のコードで Firecrawl と Claude を用いてウェブサイトのデータをスクレイピングし、矛盾や不整合を見つける方法を学びます。開発を高速に進めているとデータは陳腐化しがちですが、Firecrawl と LLM を使えば公開ウェブデータの一貫性を常に担保できます。ここでは Opus の大容量 200k コンテキストウィンドウと Firecrawl の並列化を活用し、正確かつ高速に処理します。
+
+<div id="setup">
+  ## セットアップ
+</div>
+
+anthropic と firecrawl-py を含む Python の依存関係をインストールします。
+
+```bash
+pip install firecrawl-py anthropic
+```
+
+<div id="getting-your-claude-and-firecrawl-api-keys">
+  ## Claude と Firecrawl の API キーを取得する
+</div>
+
+Claude Opus と Firecrawl を利用するには、API キーが必要です。Anthropic の API キーは[こちら](https://www.anthropic.com/)、Firecrawl の API キーは[こちら](https://firecrawl.dev)から取得できます。
+
+<div id="load-website-with-firecrawl">
+  ## Firecrawl でウェブサイトを読み込む
+</div>
+
+ウェブサイトのページから必要なデータをすべて取得し、LLM が読みやすいフォーマットに変換するために、[Firecrawl](https://firecrawl.dev) を使用します。Firecrawl は、JS によるブロックの回避、主要コンテンツの抽出、そして精度向上のための LLM 向けフォーマットでの出力までを処理します。
+
+以下は Firecrawl-py を使ってウェブサイトの URL をスクレイプする方法です
+
+```python
+from firecrawl import FirecrawlApp
+
+app = FirecrawlApp(api_key="YOUR-KEY")
+
+crawl_result = app.crawl_url('docs.firecrawl.dev', {'crawlerOptions': {'excludes': ['blog/*','usecases/*']}})
+
+print(crawl_result)
+```
+
+必要なWebデータをすべてスクレイピングして整ったフォーマットにできたので、次のステップに進みましょう。
+
+<div id="combination-and-generation">
+  ## 組み合わせと生成
+</div>
+
+ウェブサイトのデータが揃ったので、各ページを組み合わせ、あらゆる組み合わせを Opus に通して分析しましょう。
+
+```python
+from itertools import combinations
+
+page_combinations = []
+
+for first_page, second_page in combinations(crawl_result, 2):
+    combined_string = "First Page:\n" + first_page['markdown'] + "\n\nSecond Page:\n" + second_page['markdown']
+    page_combinations.append(combined_string)
+
+import anthropic
+
+client = anthropic.Anthropic(
+    # 既定では os.environ.get("ANTHROPIC_API_KEY") が使用されます
+    api_key="YOUR-KEY",
+)
+
+final_output = []
+
+for page_combination in page_combinations:
+
+    prompt = "ある企業のウェブサイトの2ページです。あなたの役割は、この2ページ間の矛盾や見解の不一致を見つけることです。これは古い情報などが原因の可能性があります。矛盾が見つかった場合は、それらを列挙し、なぜ矛盾または相違しているのかを具体的かつ簡潔に説明してください。矛盾が見つからなくても問題はありません。その場合は「矛盾は見つかりませんでした」とだけ述べ、他には何も書かないでください。以下がページです: " + "\n\n".join(page_combination)
+
+    message = client.messages.create(
+        model="claude-3-opus-20240229",
+        max_tokens=1000,
+        temperature=0.0,
+        system="あなたは、企業のウェブサイトやナレッジベース内のページ間の矛盾や見解の不一致を特定するのを支援するアシスタントです。これはナレッジベース内の古い情報が原因である可能性があります。",
+        messages=[
+            {"role": "user", "content": prompt}
+        ]
+    )
+    final_output.append(message.content)
+
+```
+
+<div id="thats-about-it">
+  ## 以上です！
+</div>
+
+これで、あなたのウェブサイトを確認し、矛盾や不整合を見つけてくれるエージェントが完成しました。
+
+ご不明点やサポートが必要な場合は、[Firecrawl](https://firecrawl.dev)までお気軽にお問い合わせください。
