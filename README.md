@@ -52,6 +52,27 @@ When contributing, please follow these guidelines:
 - Keep the documentation clear, concise, and easy to understand.
 - Use proper formatting and adhere to the existing document structure.
 - Test your changes locally before submitting a pull request.
+- **Validate Python code examples** before submitting to ensure they use proper syntax.
+
+### Validating Python Examples
+
+Before submitting changes to Python code examples, run the validation script to ensure all Python code blocks are syntactically valid:
+
+```bash
+# Validate all Python examples in the repository
+python3 scripts/validate_python_syntax.py
+
+# Validate a specific file
+python3 scripts/validate_python_syntax.py advanced-scraping-guide.mdx
+
+# Validate a specific directory
+python3 scripts/validate_python_syntax.py snippets/
+```
+
+This helps catch common syntax errors like:
+- Unquoted dictionary keys (use `{"key": "value"}` not `{ key: 'value' }`)
+- JavaScript-style semicolons in Python code
+- Invalid Python syntax that would confuse users
 
 ## Contact
 
