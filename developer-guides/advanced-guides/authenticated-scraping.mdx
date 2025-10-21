@@ -1,0 +1,320 @@
+---
+title: "Authenticated Scraping"
+description: "Learn how to scrape content behind authentication using cookies"
+---
+
+<Info>
+This guide shows you how to scrape authenticated content using session cookies from your browser's DevTools. Perfect for internal tools, admin dashboards, and authorized systems where you have login credentials.
+</Info>
+
+## Overview
+
+The recommended approach for authenticated scraping is **cookie-based authentication**, where you:
+1. Login manually to your application
+2. Extract the session cookie from DevTools
+3. Use the cookie with Firecrawl to access protected pages
+
+<Note>
+**Cookie Expiration Times:**
+- **Internal tools**: Often 7-30 days or longer
+- **Public websites**: Usually 1-24 hours
+- **Banking/sensitive sites**: 15-30 minutes
+
+Internal tools typically have longer cookie lifespans, making this method ideal for recurring scraping tasks.
+</Note>
+
+---
+
+## Setup
+
+<Steps>
+  <Step title="Get API Key">
+    Get your Firecrawl API key from [firecrawl.dev/app](https://firecrawl.dev/app)
+  </Step>
+
+  <Step title="Install Dependencies">
+    ```bash npm
+    npm install @mendable/firecrawl-js
+    ```
+
+    <Note>
+    **Node.js < v20**: If you're using Node.js version 19 or earlier, you'll also need to install `dotenv`:
+    ```bash
+    npm install dotenv
+    ```
+    And import it with `import 'dotenv/config'` at the top of your file.
+    </Note>
+  </Step>
+
+  <Step title="Configure Environment">
+    Create a `.env` file:
+    ```bash .env
+    FIRECRAWL_API_KEY=your_firecrawl_api_key
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Method 1: Cookie-Based Authentication
+
+### Step 1: Extract Cookies from DevTools
+
+<Note>
+**Demo Application**: You can practice with our demo app at [https://firecrawl-auth.vercel.app](https://firecrawl-auth.vercel.app)
+- Email: `test@example.com`
+- Password: `password123`
+</Note>
+
+<Steps>
+  <Step title="Login to Your Application">
+    1. Navigate to [https://firecrawl-auth.vercel.app](https://firecrawl-auth.vercel.app)
+    2. Login with the credentials above (or use your own application)
+    3. You should be redirected to the dashboard at `/dashboard`
+  </Step>
+
+  <Step title="Open DevTools">
+    - **Chrome/Edge**: Press `F12` or right-click → "Inspect"
+    - **Firefox**: Press `F12` or right-click → "Inspect Element"
+  </Step>
+
+  <Step title="Navigate to Application/Storage Tab">
+    - **Chrome**: Click the **Application** tab at the top
+    - **Firefox**: Click the **Storage** tab at the top
+
+    You should see a sidebar with various storage options.
+  </Step>
+
+  <Step title="Find Session Cookies">
+    1. In the left sidebar, expand **Cookies**
+    2. Click on your website's domain (e.g., `https://firecrawl-auth.vercel.app`)
+    3. You'll see a table showing all cookies for this domain
+    4. Look for cookies with names like:
+       - `session`
+       - `auth_token`
+       - `connect.sid`
+       - `JSESSIONID`
+       - `__Secure-next-auth.session-token`
+       - Any cookie with "session", "auth", or "token" in the name
+
+    <img src="/images/guides/dev-tools-cookie.png" alt="DevTools Cookies View" />
+    <sub>_Screenshot showing where to find cookies in Chrome DevTools Application tab_</sub>
+  </Step>
+
+  <Step title="Copy Cookie Information">
+    1. Click on the session cookie row in the table
+    2. Look at the **Value** column - this contains your session token
+    3. **Double-click** the Value field and copy it (`Cmd+C` / `Ctrl+C`)
+    4. Note the **Expires / Max-Age** column to see how long it's valid
+
+    For the demo app, the cookie format will look like:
+    ```
+    Name: connect.sid
+    Value: s%3A[long string of characters]
+    Expires: [Date in the future]
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+**Important:** Cookies are sensitive credentials. Never share them publicly or commit them to version control. Treat them like passwords.
+</Warning>
+
+### Step 2: Use Cookies with Firecrawl
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+
+const app = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+
+// Cookie extracted from DevTools
+// Format: "cookieName=cookieValue"
+const sessionCookie = 'connect.sid=s%3A...your-cookie-value...';
+
+async function scrapeAuthenticatedPage() {
+  const result = await app.scrape('https://firecrawl-auth.vercel.app/dashboard', {
+    formats: ['markdown'],
+    headers: {
+      'Cookie': sessionCookie
+    }
+  });
+
+  console.log(result.markdown);
+}
+
+scrapeAuthenticatedPage();
+```
+
+### Managing Multiple Cookies
+
+If your application uses multiple cookies for authentication:
+
+```typescript
+// If you need multiple cookies, join them with '; '
+const cookies = [
+  'connect.sid=s%3A...',
+  'csrf_token=xyz789...',
+  'user_id=12345'
+].join('; ');
+
+const result = await app.scrape('https://firecrawl-auth.vercel.app/dashboard', {
+  formats: ['markdown'],
+  headers: {
+    'Cookie': cookies
+  }
+});
+```
+
+---
+
+## Method 2: Form-Based Authentication
+
+For applications where cookies expire quickly, you can automate the login process:
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+
+const app = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+
+async function scrapeWithLogin() {
+  const result = await app.scrape('https://your-app.com/login', {
+    formats: ['markdown'],
+    actions: [
+      { type: 'wait', milliseconds: 2000 },
+
+      // Fill in email
+      { type: 'click', selector: 'input[name="email"]' },
+      { type: 'write', selector: 'input[name="email"]', text: 'your-email@example.com' },
+
+      // Fill in password
+      { type: 'click', selector: 'input[name="password"]' },
+      { type: 'write', selector: 'input[name="password"]', text: 'your-password' },
+
+      // Submit form
+      { type: 'click', selector: 'button[type="submit"]' },
+      { type: 'wait', milliseconds: 3000 }
+    ]
+  });
+
+  console.log(result.markdown);
+}
+
+scrapeWithLogin();
+```
+
+---
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Cookie Security" icon="lock">
+    - Store cookies in environment variables
+    - Never commit cookies to git
+    - Rotate cookies regularly
+    - Use `.gitignore` for `.env` files
+  </Card>
+
+  <Card title="Cookie Expiration" icon="clock">
+    - Check expiration times in DevTools
+    - Set up alerts before expiration
+    - Re-extract cookies when they expire
+    - Consider using form-based auth for short-lived cookies
+  </Card>
+
+  <Card title="Rate Limiting" icon="gauge">
+    - Respect the application's rate limits
+    - Add delays between requests
+    - Monitor for 429 (Too Many Requests) errors
+    - Use exponential backoff for retries
+  </Card>
+
+  <Card title="Error Handling" icon="shield">
+    - Check for 401/403 errors (expired cookies)
+    - Validate response content
+    - Log authentication failures
+    - Have fallback authentication methods
+  </Card>
+</CardGroup>
+
+---
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Getting 401 Unauthorized Errors" icon="ban">
+    **Possible causes:**
+    - Cookie has expired
+    - Cookie was copied incorrectly
+    - Application requires additional headers
+    - Session was invalidated on the server
+
+    **Solutions:**
+    - Re-extract cookies from DevTools after a fresh login
+    - Check if you need multiple cookies (session + CSRF token)
+    - Verify the cookie domain matches your target URL
+  </Accordion>
+
+  <Accordion title="Cookie Not Working" icon="cookie-bite">
+    **Check these:**
+    - Is the cookie name correct?
+    - Did you copy the entire cookie value?
+    - Does the cookie have the correct domain?
+    - Is there a `Path` restriction on the cookie?
+    - Are there multiple cookies required?
+
+    **Pro tip:** Copy all cookies from DevTools and test with all of them, then remove one by one to find which are required.
+  </Accordion>
+
+  <Accordion title="Session Expires Too Quickly" icon="hourglass">
+    **For short-lived sessions:**
+    - Use form-based authentication instead
+    - Automate the login process with actions
+    - Set up a cron job to refresh cookies
+    - Consider requesting longer session times from your internal tool's admin
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Example: Scraping Internal Dashboard
+
+Here's a complete example of scraping an internal admin dashboard:
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import fs from 'fs/promises';
+
+const app = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY! });
+
+// Session cookie extracted from DevTools (valid for 30 days)
+const SESSION_COOKIE = process.env.ADMIN_SESSION_COOKIE!;
+
+async function scrapeAdminDashboard() {
+  try {
+    // Scrape the main dashboard
+    const dashboard = await app.scrape('https://admin.yourcompany.com/dashboard', {
+      formats: ['markdown'],
+      headers: {
+        'Cookie': SESSION_COOKIE
+      }
+    });
+
+    // Save the results
+    await fs.writeFile('dashboard.md', dashboard.markdown);
+    console.log('✅ Dashboard scraped successfully');
+
+  } catch (error) {
+    if (error.message.includes('401')) {
+      console.error('❌ Cookie expired - please re-extract from DevTools');
+    } else {
+      console.error('❌ Error:', error.message);
+    }
+  }
+}
+
+scrapeAdminDashboard();
+```
+
+<Note>
+**Cookie Lifespan for Internal Tools:** Many internal tools set cookies with 7-30 day expiration times, making them ideal for recurring scraping tasks. Check your cookie's `Expires` field in DevTools to see how long it's valid.
+</Note>
