@@ -1,0 +1,186 @@
+---
+title: "LangChain"
+description: "将 Firecrawl 与 LangChain 集成，用于网页抓取与 AI 工作流"
+---
+
+将 Firecrawl 与 LangChain 集成，构建由网页数据驱动的 AI 应用。
+
+<div id="setup">
+  ## 安装与设置
+</div>
+
+```bash
+npm install @langchain/openai @mendable/firecrawl-js 
+```
+
+创建 `.env` 文件：
+
+```bash
+FIRECRAWL_API_KEY=your_firecrawl_key
+OPENAI_API_KEY=your_openai_key
+```
+
+> **注意：** 如果使用 Node 版本低于 20，请安装 `dotenv`，并在代码中添加 `import 'dotenv/config'`。
+
+
+<div id="scrape-chat">
+  ## 抓取 + 对话
+</div>
+
+本示例展示了一个简单的工作流：抓取网站并使用 LangChain 处理其内容。
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import { ChatOpenAI } from '@langchain/openai';
+import { HumanMessage } from '@langchain/core/messages';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+const chat = new ChatOpenAI({
+    model: 'gpt-5-nano',
+    apiKey: process.env.OPENAI_API_KEY
+});
+
+const scrapeResult = await firecrawl.scrape('https://firecrawl.dev', {
+    formats: ['markdown']
+});
+
+console.log('抓取内容长度:', scrapeResult.markdown?.length);
+
+const response = await chat.invoke([
+    new HumanMessage(`总结: ${scrapeResult.markdown}`)
+]);
+
+console.log('摘要:', response.content);
+```
+
+
+<div id="chains">
+  ## Chains
+</div>
+
+此示例演示如何构建一个 LangChain 链来处理和分析抓取到的内容。
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import { ChatOpenAI } from '@langchain/openai';
+import { ChatPromptTemplate } from '@langchain/core/prompts';
+import { StringOutputParser } from '@langchain/core/output_parsers';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+const model = new ChatOpenAI({
+    model: 'gpt-5-nano',
+    apiKey: process.env.OPENAI_API_KEY
+});
+
+const scrapeResult = await firecrawl.scrape('https://stripe.com', {
+    formats: ['markdown']
+});
+
+console.log('抓取内容长度:', scrapeResult.markdown?.length);
+
+// 创建处理链
+const prompt = ChatPromptTemplate.fromMessages([
+    ['system', '你是分析公司网站的专家。'],
+    ['user', '从以下内容中提取公司名称和主要产品: {content}']
+]);
+
+const chain = prompt.pipe(model).pipe(new StringOutputParser());
+
+// 执行链
+const result = await chain.invoke({
+    content: scrapeResult.markdown
+});
+
+console.log('链执行结果:', result);
+```
+
+
+<div id="tool-calling">
+  ## 工具调用
+</div>
+
+本示例演示如何使用 LangChain 的工具调用功能，让模型自行判断何时抓取网站。
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import { ChatOpenAI } from '@langchain/openai';
+import { DynamicStructuredTool } from '@langchain/core/tools';
+import { z } from 'zod';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+
+// 创建网页抓取工具
+const scrapeWebsiteTool = new DynamicStructuredTool({
+    name: 'scrape_website',
+    description: '从任意网站 URL 抓取内容',
+    schema: z.object({
+        url: z.string().url().describe('要抓取的 URL')
+    }),
+    func: async ({ url }) => {
+        console.log('正在抓取:', url);
+        const result = await firecrawl.scrape(url, {
+            formats: ['markdown']
+        });
+        console.log('抓取内容预览:', result.markdown?.substring(0, 200) + '...');
+        return result.markdown || '未抓取到内容';
+    }
+});
+
+const model = new ChatOpenAI({
+    model: 'gpt-5-nano',
+    apiKey: process.env.OPENAI_API_KEY
+}).bindTools([scrapeWebsiteTool]);
+
+const response = await model.invoke('什么是 Firecrawl?访问 firecrawl.dev 并告诉我相关信息。');
+
+console.log('响应:', response.content);
+console.log('工具调用:', response.tool_calls);
+```
+
+
+<div id="structured-data-extraction">
+  ## 结构化数据提取
+</div>
+
+本示例演示如何使用 LangChain 的结构化输出功能提取结构化数据。
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import { ChatOpenAI } from '@langchain/openai';
+import { z } from 'zod';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+
+const scrapeResult = await firecrawl.scrape('https://stripe.com', {
+    formats: ['markdown']
+});
+
+console.log('抓取内容长度:', scrapeResult.markdown?.length);
+
+const CompanyInfoSchema = z.object({
+    name: z.string(),
+    industry: z.string(),
+    description: z.string(),
+    products: z.array(z.string())
+});
+
+const model = new ChatOpenAI({
+    model: 'gpt-5-nano',
+    apiKey: process.env.OPENAI_API_KEY
+}).withStructuredOutput(CompanyInfoSchema);
+
+const companyInfo = await model.invoke([
+    {
+        role: 'system',
+        content: '从网站内容中提取公司信息。'
+    },
+    {
+        role: 'user',
+        content: `提取数据: ${scrapeResult.markdown}`
+    }
+]);
+
+console.log('提取的公司信息:', companyInfo);
+```
+
+更多示例请参阅 [LangChain 文档](https://js.langchain.com/docs)。

@@ -1,0 +1,147 @@
+---
+title: "LangGraph"
+description: "Integre o Firecrawl ao LangGraph para criar fluxos de trabalho de agentes"
+---
+
+Este guia mostra como integrar o Firecrawl ao LangGraph para criar fluxos de trabalho de agentes de IA capazes de extrair e processar conteúdo da web.
+
+<div id="setup">
+  ## Configuração
+</div>
+
+```bash
+npm install @langchain/langgraph @langchain/openai @mendable/firecrawl-js
+```
+
+Crie o arquivo `.env`:
+
+```bash
+FIRECRAWL_API_KEY=sua_chave_firecrawl
+OPENAI_API_KEY=sua_chave_openai
+```
+
+> **Observação:** Se estiver usando Node &lt; 20, instale o `dotenv` e adicione `import 'dotenv/config'` ao seu código.
+
+
+<div id="basic-workflow">
+  ## Fluxo básico
+</div>
+
+Este exemplo demonstra um fluxo básico do LangGraph que captura dados de um site e analisa o conteúdo.
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import { ChatOpenAI } from '@langchain/openai';
+import { StateGraph, MessagesAnnotation, START, END } from '@langchain/langgraph';
+
+// Inicializar o Firecrawl
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+
+// Inicializar o LLM
+const llm = new ChatOpenAI({
+    model: "gpt-5-nano",
+    apiKey: process.env.OPENAI_API_KEY
+});
+
+// Definir o nó de scrape
+async function scrapeNode(state: typeof MessagesAnnotation.State) {
+    console.log('Fazendo scrape...');
+    const result = await firecrawl.scrape('https://firecrawl.dev', { formats: ['markdown'] });
+    return {
+        messages: [{
+            role: "system",
+            content: `Conteúdo extraído: ${result.markdown}`
+        }]
+    };
+}
+
+// Definir o nó de análise
+async function analyzeNode(state: typeof MessagesAnnotation.State) {
+    console.log('Analisando...');
+    const response = await llm.invoke(state.messages);
+    return { messages: [response] };
+}
+
+// Construir o grafo
+const graph = new StateGraph(MessagesAnnotation)
+    .addNode("scrape", scrapeNode)
+    .addNode("analyze", analyzeNode)
+    .addEdge(START, "scrape")
+    .addEdge("scrape", "analyze")
+    .addEdge("analyze", END);
+
+// Compilar o grafo
+const app = graph.compile();
+
+// Executar o workflow
+const result = await app.invoke({
+    messages: [{ role: "user", content: "Resumir o site" }]
+});
+
+console.log(JSON.stringify(result, null, 2));
+```
+
+
+<div id="multi-step-workflow">
+  ## Fluxo em várias etapas
+</div>
+
+Este exemplo demonstra um fluxo de trabalho mais complexo que faz a raspagem de várias URLs e as processa.
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import { ChatOpenAI } from '@langchain/openai';
+import { StateGraph, Annotation, START, END } from '@langchain/langgraph';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+const llm = new ChatOpenAI({ model: "gpt-5-nano", apiKey: process.env.OPENAI_API_KEY });
+
+// Definir estado personalizado
+const WorkflowState = Annotation.Root({
+    urls: Annotation<string[]>(),
+    scrapedData: Annotation<Array<{ url: string; content: string }>>(),
+    summary: Annotation<string>()
+});
+
+// Fazer scrape de múltiplas URLs
+async function scrapeMultiple(state: typeof WorkflowState.State) {
+    const scrapedData = [];
+    for (const url of state.urls) {
+        const result = await firecrawl.scrape(url, { formats: ['markdown'] });
+        scrapedData.push({ url, content: result.markdown || '' });
+    }
+    return { scrapedData };
+}
+
+// Resumir todo o conteúdo coletado
+async function summarizeAll(state: typeof WorkflowState.State) {
+    const combinedContent = state.scrapedData
+        .map(item => `Conteúdo de ${item.url}:\n${item.content}`)
+        .join('\n\n');
+
+    const response = await llm.invoke([
+        { role: "user", content: `Resuma estes sites:\n${combinedContent}` }
+    ]);
+
+    return { summary: response.content as string };
+}
+
+// Construir o grafo do workflow
+const workflow = new StateGraph(WorkflowState)
+    .addNode("scrape", scrapeMultiple)
+    .addNode("summarize", summarizeAll)
+    .addEdge(START, "scrape")
+    .addEdge("scrape", "summarize")
+    .addEdge("summarize", END);
+
+const app = workflow.compile();
+
+// Executar workflow
+const result = await app.invoke({
+    urls: ["https://firecrawl.dev", "https://firecrawl.dev/pricing"]
+});
+
+console.log(result.summary);
+```
+
+Para mais exemplos, confira a [documentação do LangGraph](https://langchain-ai.github.io/langgraphjs/).

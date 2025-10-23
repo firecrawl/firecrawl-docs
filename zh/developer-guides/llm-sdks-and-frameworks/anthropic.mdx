@@ -1,0 +1,169 @@
+---
+title: "Anthropic"
+description: "将 Firecrawl 与 Claude 结合用于网页抓取与 AI 工作流"
+---
+
+将 Firecrawl 与 Claude 集成，构建由网页数据驱动的 AI 应用。
+
+<div id="setup">
+  ## 安装与配置
+</div>
+
+```bash
+npm install @mendable/firecrawl-js @anthropic-ai/sdk zod zod-to-json-schema
+```
+
+创建“.env”文件：
+
+```bash
+FIRECRAWL_API_KEY=your_firecrawl_key
+ANTHROPIC_API_KEY=your_anthropic_key
+```
+
+> **注意：** 如果使用 Node 版本低于 20，请安装 `dotenv`，并在代码中添加 `import 'dotenv/config'`。
+
+
+<div id="scrape-summarize">
+  ## 抓取 + 摘要
+</div>
+
+此示例展示一个简单的工作流：抓取网站并使用 Claude 对内容进行摘要。
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import Anthropic from '@anthropic-ai/sdk';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+const scrapeResult = await firecrawl.scrape('https://firecrawl.dev', {
+    formats: ['markdown']
+});
+
+console.log('抓取内容长度:', scrapeResult.markdown?.length);
+
+const message = await anthropic.messages.create({
+    model: 'claude-haiku-4-5',
+    max_tokens: 1024,
+    messages: [
+        { role: 'user', content: `用 100 字总结: ${scrapeResult.markdown}` }
+    ]
+});
+
+console.log('响应:', message);
+```
+
+
+<div id="tool-use">
+  ## 工具使用
+</div>
+
+本示例演示如何利用 Claude 的工具调用功能，让模型根据用户请求自主决定何时抓取网站。
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import { Anthropic } from '@anthropic-ai/sdk';
+import { z } from 'zod';
+import { zodToJsonSchema } from 'zod-to-json-schema';
+
+const firecrawl = new FirecrawlApp({
+    apiKey: process.env.FIRECRAWL_API_KEY
+});
+
+const anthropic = new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY
+});
+
+const ScrapeArgsSchema = z.object({
+    url: z.string()
+});
+
+console.log("正在向 Claude 发送用户消息并在必要时请求使用工具...");
+const response = await anthropic.messages.create({
+    model: 'claude-haiku-4-5',
+    max_tokens: 1024,
+    tools: [{
+        name: 'scrape_website',
+        description: '从网站 URL 抓取并提取 markdown 内容',
+        input_schema: zodToJsonSchema(ScrapeArgsSchema, 'ScrapeArgsSchema') as any
+    }],
+    messages: [{
+        role: 'user',
+        content: 'Firecrawl 是什么?访问 firecrawl.dev 查看'
+    }]
+});
+
+const toolUse = response.content.find(block => block.type === 'tool_use');
+
+if (toolUse && toolUse.type === 'tool_use') {
+    const input = toolUse.input as { url: string };
+    console.log(`调用工具: ${toolUse.name} | URL: ${input.url}`);
+
+    const result = await firecrawl.scrape(input.url, {
+        formats: ['markdown']
+    });
+
+    console.log(`抓取内容预览: ${result.markdown?.substring(0, 300)}...`);
+    // 根据需要继续对话或处理抓取的内容
+}
+```
+
+
+<div id="structured-extraction">
+  ## 结构化抽取
+</div>
+
+本示例演示如何使用 Claude 从抓取的网站内容中抽取结构化数据。
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import Anthropic from '@anthropic-ai/sdk';
+import { z } from 'zod';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+const CompanyInfoSchema = z.object({
+    name: z.string(),
+    industry: z.string().optional(),
+    description: z.string().optional()
+});
+
+const scrapeResult = await firecrawl.scrape('https://stripe.com', {
+    formats: ['markdown'],
+    onlyMainContent: true
+});
+
+const prompt = `从以下网站内容中提取公司信息。
+
+仅输出符合以下格式的有效 JSON(不含 markdown 标记,不含说明文字):
+
+{
+  "name": "公司名称",
+  "industry": "所属行业",
+  "description": "一句话简介"
+}
+
+网站内容:
+${scrapeResult.markdown}`;
+
+const message = await anthropic.messages.create({
+    model: 'claude-haiku-4-5',
+    max_tokens: 1024,
+    messages: [
+        { role: 'user', content: prompt },
+        { role: 'assistant', content: '{' }
+    ]
+});
+
+const textBlock = message.content.find(block => block.type === 'text');
+
+if (textBlock && textBlock.type === 'text') {
+    const jsonText = '{' + textBlock.text;
+    const companyInfo = CompanyInfoSchema.parse(JSON.parse(jsonText));
+  
+    console.log(companyInfo);
+}
+```
+
+更多示例，请参阅 [Claude 文档](https://docs.anthropic.com/claude/docs)。

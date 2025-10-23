@@ -1,0 +1,165 @@
+---
+title: "Vercel AI SDK"
+description: "Usa Firecrawl con Vercel AI SDK para scraping web y flujos de trabajo de IA"
+---
+
+Integra Firecrawl con Vercel AI SDK para crear aplicaciones de IA basadas en datos web.
+
+<div id="setup">
+  ## Configuración
+</div>
+
+```bash
+npm install ai @ai-sdk/openai @mendable/firecrawl-js 
+```
+
+Crea un archivo `.env`:
+
+```bash
+FIRECRAWL_API_KEY=tu_clave_firecrawl
+OPENAI_API_KEY=tu_clave_openai
+```
+
+> **Nota:** Si usas Node &lt; 20, instala `dotenv` y añade `import 'dotenv/config'` a tu código.
+
+
+<div id="scrape-generate-text">
+  ## Rastrear + Generar texto
+</div>
+
+Este ejemplo muestra un flujo de trabajo sencillo: rastrear un sitio web y generar texto con el Vercel AI SDK.
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import { openai } from '@ai-sdk/openai';
+import { generateText } from 'ai';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+
+const scrapeResult = await firecrawl.scrape('https://firecrawl.dev', {
+    formats: ['markdown']
+});
+
+console.log('Longitud del contenido scrapeado:', scrapeResult.markdown?.length);
+
+const { text } = await generateText({
+    model: openai('gpt-5-nano'),
+    prompt: `Resumir: ${scrapeResult.markdown}`
+});
+
+console.log('Resumen:', text);
+```
+
+
+<div id="scrape-stream-text">
+  ## Extraer + transmitir texto
+</div>
+
+Este ejemplo muestra cómo transmitir respuestas de la IA para mejorar la experiencia del usuario.
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import { openai } from '@ai-sdk/openai';
+import { streamText } from 'ai';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+
+const scrapeResult = await firecrawl.scrape('https://stripe.com', {
+    formats: ['markdown']
+});
+
+console.log('Longitud del contenido scrapeado:', scrapeResult.markdown?.length);
+
+const { textStream } = await streamText({
+    model: openai('gpt-5-nano'),
+    prompt: `Analiza esta empresa y enumera los productos clave: ${scrapeResult.markdown}`
+});
+
+for await (const chunk of textStream) {
+    process.stdout.write(chunk);
+}
+```
+
+
+<div id="tool-calling">
+  ## Llamadas a herramientas
+</div>
+
+Este ejemplo muestra cómo usar la función de llamadas a herramientas del Vercel AI SDK para permitir que el modelo decida cuándo rastrear sitios web.
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import { openai } from '@ai-sdk/openai';
+import { generateText, tool } from 'ai';
+import { z } from 'zod';
+
+console.log('Inicializando Firecrawl...');
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+
+const scrapeWebsiteTool = tool({
+    description: 'Extraer contenido de cualquier URL de sitio web',
+    inputSchema: z.object({
+        url: z.string().url().describe('La URL a extraer')
+    }),
+    execute: async ({ url }) => {
+        console.log('Extrayendo:', url);
+        const result = await firecrawl.scrape(url, {
+            formats: ['markdown']
+        });
+        console.log('Vista previa del contenido extraído:', result.markdown?.slice(0, 200) + '...');
+        return { content: result.markdown };
+    }
+});
+
+console.log('Generando texto con IA...');
+
+const { text, toolCalls } = await generateText({
+    model: openai('gpt-5-nano'),
+    prompt: '¿Qué es Firecrawl? Visita firecrawl.dev y cuéntame al respecto.',
+    tools: {
+        scrapeWebsite: scrapeWebsiteTool
+    },
+});
+
+console.log('Llamadas a herramientas:', toolCalls);
+// Continuar la conversación O usar el texto para algo más
+```
+
+
+<div id="structured-data-extraction">
+  ## Extracción de datos estructurados
+</div>
+
+Este ejemplo muestra cómo extraer datos estructurados usando la función de salida estructurada del Vercel AI SDK.
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import { openai } from '@ai-sdk/openai';
+import { generateObject } from 'ai';
+import { z } from 'zod';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+
+const scrapeResult = await firecrawl.scrape('https://stripe.com', {
+    formats: ['markdown']
+});
+
+console.log('Longitud del contenido scrapeado:', scrapeResult.markdown?.length);
+
+const CompanyInfoSchema = z.object({
+    name: z.string(),
+    industry: z.string(),
+    description: z.string(),
+    products: z.array(z.string())
+});
+
+const { object } = await generateObject({
+    model: openai('gpt-5-nano'),
+    schema: CompanyInfoSchema,
+    prompt: `Extrae la información de la empresa del siguiente contenido del sitio web: ${scrapeResult.markdown}`
+});
+
+console.log('Información de la empresa extraída:', object);
+```
+
+Para más ejemplos, consulta la [documentación del SDK de Vercel AI](https://sdk.vercel.ai/docs).

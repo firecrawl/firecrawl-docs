@@ -1,0 +1,169 @@
+---
+title: "Anthropic"
+description: "Use o Firecrawl com o Claude para scraping da web + fluxos de IA"
+---
+
+Integre o Firecrawl ao Claude para criar aplicativos de IA baseados em dados da web.
+
+<div id="setup">
+  ## Configuração
+</div>
+
+```bash
+npm install @mendable/firecrawl-js @anthropic-ai/sdk zod zod-to-json-schema
+```
+
+Crie o arquivo `.env`:
+
+```bash
+FIRECRAWL_API_KEY=sua_chave_firecrawl
+ANTHROPIC_API_KEY=sua_chave_anthropic
+```
+
+> **Nota:** Se estiver usando Node &lt; 20, instale `dotenv` e adicione `import 'dotenv/config'` ao seu código.
+
+
+<div id="scrape-summarize">
+  ## Extração + Resumo
+</div>
+
+Este exemplo demonstra um fluxo de trabalho simples: extrair um site e resumir o conteúdo usando o Claude.
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import Anthropic from '@anthropic-ai/sdk';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+const scrapeResult = await firecrawl.scrape('https://firecrawl.dev', {
+    formats: ['markdown']
+});
+
+console.log('Tamanho do conteúdo extraído:', scrapeResult.markdown?.length);
+
+const message = await anthropic.messages.create({
+    model: 'claude-haiku-4-5',
+    max_tokens: 1024,
+    messages: [
+        { role: 'user', content: `Resuma em 100 palavras: ${scrapeResult.markdown}` }
+    ]
+});
+
+console.log('Resposta:', message);
+```
+
+
+<div id="tool-use">
+  ## Uso de ferramentas
+</div>
+
+Este exemplo mostra como usar o recurso de ferramentas do Claude para permitir que o modelo decida quando fazer scraping de sites com base nas solicitações do usuário.
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import { Anthropic } from '@anthropic-ai/sdk';
+import { z } from 'zod';
+import { zodToJsonSchema } from 'zod-to-json-schema';
+
+const firecrawl = new FirecrawlApp({
+    apiKey: process.env.FIRECRAWL_API_KEY
+});
+
+const anthropic = new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY
+});
+
+const ScrapeArgsSchema = z.object({
+    url: z.string()
+});
+
+console.log("Enviando mensagem do usuário para o Claude e solicitando uso de ferramenta, se necessário...");
+const response = await anthropic.messages.create({
+    model: 'claude-haiku-4-5',
+    max_tokens: 1024,
+    tools: [{
+        name: 'scrape_website',
+        description: 'Fazer scrape e extrair conteúdo markdown de uma URL de site',
+        input_schema: zodToJsonSchema(ScrapeArgsSchema, 'ScrapeArgsSchema') as any
+    }],
+    messages: [{
+        role: 'user',
+        content: 'O que é o Firecrawl? Confira firecrawl.dev'
+    }]
+});
+
+const toolUse = response.content.find(block => block.type === 'tool_use');
+
+if (toolUse && toolUse.type === 'tool_use') {
+    const input = toolUse.input as { url: string };
+    console.log(`Chamando ferramenta: ${toolUse.name} | URL: ${input.url}`);
+
+    const result = await firecrawl.scrape(input.url, {
+        formats: ['markdown']
+    });
+
+    console.log(`Prévia do conteúdo extraído: ${result.markdown?.substring(0, 300)}...`);
+    // Continue com a conversa ou processe o conteúdo extraído conforme necessário
+}
+```
+
+
+<div id="structured-extraction">
+  ## Extração Estruturada
+</div>
+
+Este exemplo demonstra como usar o Claude para extrair dados estruturados de conteúdo de sites coletado por raspagem.
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import Anthropic from '@anthropic-ai/sdk';
+import { z } from 'zod';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+const CompanyInfoSchema = z.object({
+    name: z.string(),
+    industry: z.string().optional(),
+    description: z.string().optional()
+});
+
+const scrapeResult = await firecrawl.scrape('https://stripe.com', {
+    formats: ['markdown'],
+    onlyMainContent: true
+});
+
+const prompt = `Extraia as informações da empresa deste conteúdo do site.
+
+Retorne APENAS JSON válido neste formato exato (sem markdown, sem explicação):
+
+{
+  "name": "Nome da Empresa",
+  "industry": "Setor",
+  "description": "Descrição em uma frase"
+}
+
+Conteúdo do site:
+${scrapeResult.markdown}`;
+
+const message = await anthropic.messages.create({
+    model: 'claude-haiku-4-5',
+    max_tokens: 1024,
+    messages: [
+        { role: 'user', content: prompt },
+        { role: 'assistant', content: '{' }
+    ]
+});
+
+const textBlock = message.content.find(block => block.type === 'text');
+
+if (textBlock && textBlock.type === 'text') {
+    const jsonText = '{' + textBlock.text;
+    const companyInfo = CompanyInfoSchema.parse(JSON.parse(jsonText));
+  
+    console.log(companyInfo);
+}
+```
+
+Para mais exemplos, consulte a [documentação do Claude](https://docs.anthropic.com/claude/docs).
