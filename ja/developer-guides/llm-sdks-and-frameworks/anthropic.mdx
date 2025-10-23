@@ -1,0 +1,169 @@
+---
+title: "Anthropic"
+description: "Firecrawl を Claude と統合して、ウェブスクレイピングと AI ワークフローに活用する"
+---
+
+Firecrawl を Claude と統合して、ウェブデータを活用する AI アプリケーションを構築しましょう。
+
+<div id="setup">
+  ## セットアップ
+</div>
+
+```bash
+npm install @mendable/firecrawl-js @anthropic-ai/sdk zod zod-to-json-schema
+```
+
+「.env」ファイルを作成:
+
+```bash
+FIRECRAWL_API_KEY=your_firecrawl_key
+ANTHROPIC_API_KEY=your_anthropic_key
+```
+
+> **注意:** Node &lt; 20 を使用している場合は、`dotenv` をインストールし、コードに `import 'dotenv/config'` を追加してください。
+
+
+<div id="scrape-summarize">
+  ## スクレイプ + 要約
+</div>
+
+この例では、ウェブサイトをスクレイプし、Claude で内容を要約するというシンプルなワークフローを示します。
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import Anthropic from '@anthropic-ai/sdk';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+const scrapeResult = await firecrawl.scrape('https://firecrawl.dev', {
+    formats: ['markdown']
+});
+
+console.log('スクレイプしたコンテンツの長さ:', scrapeResult.markdown?.length);
+
+const message = await anthropic.messages.create({
+    model: 'claude-haiku-4-5',
+    max_tokens: 1024,
+    messages: [
+        { role: 'user', content: `100語で要約してください: ${scrapeResult.markdown}` }
+    ]
+});
+
+console.log('レスポンス:', message);
+```
+
+
+<div id="tool-use">
+  ## ツールの利用
+</div>
+
+この例では、ユーザーリクエストに応じていつウェブサイトをスクレイピングするかをモデルが判断できるようにする、Claudeのツール利用機能の使い方を示します。
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import { Anthropic } from '@anthropic-ai/sdk';
+import { z } from 'zod';
+import { zodToJsonSchema } from 'zod-to-json-schema';
+
+const firecrawl = new FirecrawlApp({
+    apiKey: process.env.FIRECRAWL_API_KEY
+});
+
+const anthropic = new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY
+});
+
+const ScrapeArgsSchema = z.object({
+    url: z.string()
+});
+
+console.log("Claudeにユーザーメッセージを送信し、必要に応じてツール使用をリクエスト中...");
+const response = await anthropic.messages.create({
+    model: 'claude-haiku-4-5',
+    max_tokens: 1024,
+    tools: [{
+        name: 'scrape_website',
+        description: 'ウェブサイトURLからマークダウンコンテンツをスクレイピングして抽出する',
+        input_schema: zodToJsonSchema(ScrapeArgsSchema, 'ScrapeArgsSchema') as any
+    }],
+    messages: [{
+        role: 'user',
+        content: 'Firecrawlとは何ですか？firecrawl.devを確認してください'
+    }]
+});
+
+const toolUse = response.content.find(block => block.type === 'tool_use');
+
+if (toolUse && toolUse.type === 'tool_use') {
+    const input = toolUse.input as { url: string };
+    console.log(`ツール呼び出し中: ${toolUse.name} | URL: ${input.url}`);
+
+    const result = await firecrawl.scrape(input.url, {
+        formats: ['markdown']
+    });
+
+    console.log(`スクレイピングしたコンテンツのプレビュー: ${result.markdown?.substring(0, 300)}...`);
+    // 必要に応じて会話を続けるか、スクレイピングしたコンテンツを処理
+}
+```
+
+
+<div id="structured-extraction">
+  ## 構造化抽出
+</div>
+
+この例では、スクレイピングしたウェブサイトのコンテンツから構造化データを抽出するためにClaudeを使う方法を示します。
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import Anthropic from '@anthropic-ai/sdk';
+import { z } from 'zod';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+const CompanyInfoSchema = z.object({
+    name: z.string(),
+    industry: z.string().optional(),
+    description: z.string().optional()
+});
+
+const scrapeResult = await firecrawl.scrape('https://stripe.com', {
+    formats: ['markdown'],
+    onlyMainContent: true
+});
+
+const prompt = `このウェブサイトのコンテンツから企業情報を抽出してください。
+
+有効なJSONのみを以下の形式で出力してください（マークダウンや説明文は不要）:
+
+{
+  "name": "企業名",
+  "industry": "業種",
+  "description": "一文での説明"
+}
+
+ウェブサイトのコンテンツ:
+${scrapeResult.markdown}`;
+
+const message = await anthropic.messages.create({
+    model: 'claude-haiku-4-5',
+    max_tokens: 1024,
+    messages: [
+        { role: 'user', content: prompt },
+        { role: 'assistant', content: '{' }
+    ]
+});
+
+const textBlock = message.content.find(block => block.type === 'text');
+
+if (textBlock && textBlock.type === 'text') {
+    const jsonText = '{' + textBlock.text;
+    const companyInfo = CompanyInfoSchema.parse(JSON.parse(jsonText));
+  
+    console.log(companyInfo);
+}
+```
+
+詳細な例は [Claude ドキュメント](https://docs.anthropic.com/claude/docs)をご覧ください。

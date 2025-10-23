@@ -1,0 +1,186 @@
+---
+title: "LangChain"
+description: "Utilisez Firecrawl avec LangChain pour le scraping web et des workflows d’IA"
+---
+
+Intégrez Firecrawl à LangChain pour créer des applications d’IA alimentées par des données web.
+
+<div id="setup">
+  ## Configuration
+</div>
+
+```bash
+npm install @langchain/openai @mendable/firecrawl-js 
+```
+
+Créez le fichier `.env` :
+
+```bash
+FIRECRAWL_API_KEY=votre_clé_firecrawl
+OPENAI_API_KEY=votre_clé_openai
+```
+
+> **Remarque :** Si vous utilisez Node &lt; 20, installez `dotenv` et ajoutez `import 'dotenv/config'` à votre code.
+
+
+<div id="scrape-chat">
+  ## Scrape + Chat
+</div>
+
+Cet exemple présente un flux de travail simple : récupérer le contenu d’un site web, puis le traiter avec LangChain.
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import { ChatOpenAI } from '@langchain/openai';
+import { HumanMessage } from '@langchain/core/messages';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+const chat = new ChatOpenAI({
+    model: 'gpt-5-nano',
+    apiKey: process.env.OPENAI_API_KEY
+});
+
+const scrapeResult = await firecrawl.scrape('https://firecrawl.dev', {
+    formats: ['markdown']
+});
+
+console.log('Longueur du contenu extrait :', scrapeResult.markdown?.length);
+
+const response = await chat.invoke([
+    new HumanMessage(`Résumez : ${scrapeResult.markdown}`)
+]);
+
+console.log('Résumé :', response.content);
+```
+
+
+<div id="chains">
+  ## Chaînes
+</div>
+
+Cet exemple montre comment construire une chaîne LangChain pour traiter et analyser le contenu extrait.
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import { ChatOpenAI } from '@langchain/openai';
+import { ChatPromptTemplate } from '@langchain/core/prompts';
+import { StringOutputParser } from '@langchain/core/output_parsers';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+const model = new ChatOpenAI({
+    model: 'gpt-5-nano',
+    apiKey: process.env.OPENAI_API_KEY
+});
+
+const scrapeResult = await firecrawl.scrape('https://stripe.com', {
+    formats: ['markdown']
+});
+
+console.log('Longueur du contenu récupéré :', scrapeResult.markdown?.length);
+
+// Créer la chaîne de traitement
+const prompt = ChatPromptTemplate.fromMessages([
+    ['system', 'Vous êtes un expert en analyse de sites web d'entreprises.'],
+    ['user', 'Extrayez le nom de l'entreprise et les principaux produits depuis : {content}']
+]);
+
+const chain = prompt.pipe(model).pipe(new StringOutputParser());
+
+// Exécuter la chaîne
+const result = await chain.invoke({
+    content: scrapeResult.markdown
+});
+
+console.log('Résultat de la chaîne :', result);
+```
+
+
+<div id="tool-calling">
+  ## Appel d’outils
+</div>
+
+Cet exemple montre comment utiliser la fonction d’appel d’outils de LangChain pour laisser le modèle décider quand lancer le scraping de sites web.
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import { ChatOpenAI } from '@langchain/openai';
+import { DynamicStructuredTool } from '@langchain/core/tools';
+import { z } from 'zod';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+
+// Créer l'outil de scraping
+const scrapeWebsiteTool = new DynamicStructuredTool({
+    name: 'scrape_website',
+    description: 'Scraper le contenu de n'importe quelle URL de site web',
+    schema: z.object({
+        url: z.string().url().describe('L'URL à scraper')
+    }),
+    func: async ({ url }) => {
+        console.log('Scraping :', url);
+        const result = await firecrawl.scrape(url, {
+            formats: ['markdown']
+        });
+        console.log('Aperçu du contenu scrapé :', result.markdown?.substring(0, 200) + '...');
+        return result.markdown || 'Aucun contenu scrapé';
+    }
+});
+
+const model = new ChatOpenAI({
+    model: 'gpt-5-nano',
+    apiKey: process.env.OPENAI_API_KEY
+}).bindTools([scrapeWebsiteTool]);
+
+const response = await model.invoke('Qu'est-ce que Firecrawl ? Visitez firecrawl.dev et parlez-moi-en.');
+
+console.log('Réponse :', response.content);
+console.log('Appels d'outils :', response.tool_calls);
+```
+
+
+<div id="structured-data-extraction">
+  ## Extraction de données structurées
+</div>
+
+Cet exemple montre comment extraire des données structurées à l’aide de la fonctionnalité de sortie structurée de LangChain.
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import { ChatOpenAI } from '@langchain/openai';
+import { z } from 'zod';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+
+const scrapeResult = await firecrawl.scrape('https://stripe.com', {
+    formats: ['markdown']
+});
+
+console.log('Longueur du contenu récupéré :', scrapeResult.markdown?.length);
+
+const CompanyInfoSchema = z.object({
+    name: z.string(),
+    industry: z.string(),
+    description: z.string(),
+    products: z.array(z.string())
+});
+
+const model = new ChatOpenAI({
+    model: 'gpt-5-nano',
+    apiKey: process.env.OPENAI_API_KEY
+}).withStructuredOutput(CompanyInfoSchema);
+
+const companyInfo = await model.invoke([
+    {
+        role: 'system',
+        content: 'Extraire les informations de l'entreprise à partir du contenu du site web.'
+    },
+    {
+        role: 'user',
+        content: `Extraire les données : ${scrapeResult.markdown}`
+    }
+]);
+
+console.log('Informations de l'entreprise extraites :', companyInfo);
+```
+
+Pour plus d’exemples, consultez la [documentation de LangChain](https://js.langchain.com/docs).

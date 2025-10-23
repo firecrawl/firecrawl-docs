@@ -1,0 +1,158 @@
+---
+title: "Mastra"
+description: "Firecrawl を Mastra と組み合わせて AI ワークフローを構築する"
+---
+
+Firecrawl を、AI エージェントやワークフローを構築するための TypeScript フレームワークである Mastra と統合します。
+
+<div id="setup">
+  ## セットアップ
+</div>
+
+```bash
+npm install @mastra/core @mendable/firecrawl-js zod
+```
+
+`.env` ファイルを作成する:
+
+```bash
+FIRECRAWL_API_KEY=your_firecrawl_key
+OPENAI_API_KEY=your_openai_key
+```
+
+> **注:** Node &lt; 20 を使用している場合は、`dotenv` をインストールし、コードに `import 'dotenv/config'` を追加してください。
+
+
+<div id="multi-step-workflow">
+  ## マルチステップ ワークフロー
+</div>
+
+この例では、Firecrawl と Mastra を使ってドキュメントを検索・スクレイプ・要約する、端から端までのワークフローを示します。
+
+```typescript
+import { createWorkflow, createStep } from "@mastra/core/workflows";
+import { z } from "zod";
+import Firecrawl from "@mendable/firecrawl-js";
+import { Agent } from "@mastra/core/agent";
+
+const firecrawl = new Firecrawl({
+  apiKey: process.env.FIRECRAWL_API_KEY || "fc-YOUR_API_KEY"
+});
+
+const agent = new Agent({
+  name: "summarizer",
+  instructions: "ドキュメントの簡潔な要約を作成する便利なアシスタントです。",
+  model: "openai/gpt-5-nano",
+});
+
+// ステップ1: Firecrawl SDKで検索
+const searchStep = createStep({
+  id: "search",
+  inputSchema: z.object({
+    query: z.string(),
+  }),
+  outputSchema: z.object({
+    url: z.string(),
+    title: z.string(),
+  }),
+  execute: async ({ inputData }: { inputData: { query: string } }) => {
+    console.log(`検索中: ${inputData.query}`);
+    const searchResults = await firecrawl.search(inputData.query, { limit: 1 });
+    const webResults = (searchResults as any)?.web;
+
+    if (!webResults || !Array.isArray(webResults) || webResults.length === 0) {
+      throw new Error("検索結果が見つかりません");
+    }
+
+    const firstResult = webResults[0];
+    console.log(`見つかりました: ${firstResult.title}`);
+    return {
+      url: firstResult.url,
+      title: firstResult.title,
+    };
+  },
+});
+
+// ステップ2: Firecrawl SDKでURLをスクレイピング
+const scrapeStep = createStep({
+  id: "scrape",
+  inputSchema: z.object({
+    url: z.string(),
+    title: z.string(),
+  }),
+  outputSchema: z.object({
+    markdown: z.string(),
+    title: z.string(),
+  }),
+  execute: async ({ inputData }: { inputData: { url: string; title: string } }) => {
+    console.log(`スクレイピング中: ${inputData.url}`);
+    const scrapeResult = await firecrawl.scrape(inputData.url, {
+      formats: ["markdown"],
+    });
+
+    console.log(`スクレイピング完了: ${scrapeResult.markdown?.length || 0}文字`);
+    return {
+      markdown: scrapeResult.markdown || "",
+      title: inputData.title,
+    };
+  },
+});
+
+// ステップ3: Claudeで要約
+const summarizeStep = createStep({
+  id: "summarize",
+  inputSchema: z.object({
+    markdown: z.string(),
+    title: z.string(),
+  }),
+  outputSchema: z.object({
+    summary: z.string(),
+  }),
+  execute: async ({ inputData }: { inputData: { markdown: string; title: string } }) => {
+    console.log(`要約中: ${inputData.title}`);
+
+    const prompt = `次のドキュメントを2〜3文で要約してください:\n\nタイトル: ${inputData.title}\n\n${inputData.markdown}`;
+    const result = await agent.generate(prompt);
+
+    console.log(`要約を生成しました`);
+    return { summary: result.text };
+  },
+});
+
+// ワークフローを作成
+export const workflow = createWorkflow({
+  id: "firecrawl-workflow",
+  inputSchema: z.object({
+    query: z.string(),
+  }),
+  outputSchema: z.object({
+    summary: z.string(),
+  }),
+  steps: [searchStep, scrapeStep, summarizeStep],
+})
+  .then(searchStep)
+  .then(scrapeStep)
+  .then(summarizeStep)
+  .commit();
+
+async function testWorkflow() {
+  const run = await workflow.createRunAsync();
+  const result = await run.start({
+    inputData: { query: "Firecrawl documentation" }
+  });
+
+  if (result.status === "success") {
+    const { summarize } = result.steps;
+
+    if (summarize.status === "success") {
+      console.log(`\n${summarize.output.summary}`);
+    }
+  } else {
+    console.error("ワークフローが失敗しました:", result.status);
+  }
+}
+
+testWorkflow().catch(console.error);
+```
+
+より多くの例については、[Mastraのドキュメント](https://mastra.ai/docs)をご覧ください。

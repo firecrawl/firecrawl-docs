@@ -1,0 +1,212 @@
+---
+title: "身份验证抓取"
+description: "了解如何使用 Cookie 抓取需登录访问的内容"
+---
+
+<Info>
+本指南演示如何使用浏览器 DevTools 中的会话 Cookie 抓取需要身份验证的内容。非常适合用于内部工具、管理后台，以及你拥有登录凭据的受控系统。
+</Info>
+
+<div id="overview">
+  ## 概览
+</div>
+
+进行需要身份验证的抓取，推荐使用**基于 Cookie 的身份验证**，步骤如下：
+
+1. 在你的应用中手动登录
+2. 从 DevTools 中提取会话 Cookie
+3. 使用该 Cookie 搭配 Firecrawl 访问受保护页面
+
+<Note>
+**Cookie 过期时间：**
+- **内部工具**：通常为 7–30 天或更长
+- **公共网站**：通常为 1–24 小时
+- **银行/敏感网站**：15–30 分钟
+
+内部工具的 Cookie 一般有效期更长，因此此方法非常适合需要定期重复的抓取任务。
+</Note>
+
+---
+
+<div id="setup">
+  ## 设置
+</div>
+
+<Steps>
+  <Step title="获取 API Key">
+    在 [firecrawl.dev/app](https://firecrawl.dev/app) 获取你的 Firecrawl API key
+  </Step>
+
+  <Step title="安装依赖">
+    ```bash npm
+    npm install @mendable/firecrawl-js
+    ```
+
+    <Note>
+    **Node.js < v20**：如果你使用的是 Node.js 19 或更早版本，还需要安装 `dotenv`：
+    ```bash
+    npm install dotenv
+    ```
+    并在文件顶部通过 `import 'dotenv/config'` 引入。
+    </Note>
+  </Step>
+
+  <Step title="配置环境">
+    创建一个 `.env` 文件：
+    ```bash .env
+    FIRECRAWL_API_KEY=your_firecrawl_api_key
+    ```
+  </Step>
+</Steps>
+
+---
+
+<div id="method-1-cookie-based-authentication">
+  ## 方法一：基于 Cookie 的认证
+</div>
+
+<div id="step-1-extract-cookies-from-devtools">
+  ### 步骤 1：从 DevTools 提取 Cookie
+</div>
+
+<Note>
+  **演示应用**：你可以在我们的演示应用中练习：[https://firecrawl-auth.vercel.app](https://firecrawl-auth.vercel.app)
+
+  * 邮箱：`test@example.com`
+  * 密码：`password123`
+</Note>
+
+<Steps>
+  <Step title="登录你的应用">
+    访问 [https://firecrawl-auth.vercel.app](https://firecrawl-auth.vercel.app) 并使用上述凭据登录
+  </Step>
+
+  <Step title="打开 DevTools">
+    按下 `F12` 或右键单击 → “Inspect”
+  </Step>
+
+  <Step title="进入 Application 选项卡">
+    点击 **Application** 选项卡（Chrome）或 **Storage** 选项卡（Firefox）
+  </Step>
+
+  <Step title="查找并复制 Cookie">
+    1. 在侧边栏展开 **Cookies**
+    2. 点击你的域名
+    3. 找到 `auth-token` cookie
+    4. 双击其 **Value** 并复制
+
+    <img src="/images/guides/dev-tools-cookie.png" alt="DevTools Cookies View" />
+  </Step>
+</Steps>
+
+对于演示应用，cookie 类似于：
+
+```
+auth-token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJleGFtcGxlLXVzZXItaWQiLCJlbWFpbCI6InRlc3RAZXhhbXBsZS5jb20ifQ.example-signature-hash
+```
+
+<Warning>
+  **重要：** Cookie 属于敏感凭证。切勿公开分享或提交到版本控制系统。请像对待密码一样对待它们。
+</Warning>
+
+
+<div id="step-2-use-cookies-with-firecrawl">
+  ### 步骤 2：在 Firecrawl 中使用 Cookie
+</div>
+
+```typescript
+import FirecrawlApp from "@mendable/firecrawl-js";
+
+const app = new FirecrawlApp({
+  apiKey: process.env.FIRECRAWL_API_KEY
+});
+
+const result = await app.scrape("https://firecrawl-auth.vercel.app/dashboard", {
+  formats: ["markdown", "screenshot"],
+  headers: {
+    Cookie: 'auth-token=COOKIE_GOES_HERE'
+  },
+  waitFor: 3000 // 等待 3 秒加载页面
+});
+
+console.log("=== Markdown ===\n" + result.markdown + "\n\n=== 截图 URL ===\n" + result.screenshot);
+```
+
+
+<div id="best-practices">
+  ## 最佳实践
+</div>
+
+<CardGroup cols={2}>
+  <Card title="Cookie 安全" icon="lock">
+    - 将 cookie 存放在环境变量中
+    - 切勿将 cookie 提交到 Git
+    - 定期轮换/更新 cookie
+    - 使用 `.gitignore` 忽略 `.env` 文件
+  </Card>
+
+  <Card title="Cookie 过期" icon="clock">
+    - 在 DevTools 中检查过期时间
+    - 在过期前设置告警/提醒
+    - 过期后重新获取 cookie
+    - 对于短期有效的 cookie，考虑使用基于表单的认证
+  </Card>
+
+  <Card title="速率限制" icon="gauge">
+    - 遵守应用的速率限制
+    - 在请求之间添加延迟
+    - 监控 429（请求过多）错误
+    - 重试时使用指数退避
+  </Card>
+
+  <Card title="错误处理" icon="shield">
+    - 检查 401/403 错误（cookie 过期）
+    - 验证响应内容
+    - 记录认证失败
+    - 预备备用的认证方式
+  </Card>
+</CardGroup>
+
+---
+
+<div id="troubleshooting">
+  ## 故障排查
+</div>
+
+<AccordionGroup>
+  <Accordion title="出现 401 Unauthorized 错误" icon="ban">
+    **可能原因：**
+    - Cookie 已过期
+    - Cookie 复制不完整或有误
+    - 应用需要额外请求头
+    - 服务器端会话已失效
+
+    **解决方案：**
+    - 重新登录后从 DevTools 重新导出 cookies
+    - 检查是否需要多个 cookies（session + CSRF token）
+    - 确认 cookie 的域与目标 URL 匹配
+  </Accordion>
+
+  <Accordion title="Cookie 不生效" icon="cookie-bite">
+    **请检查：**
+    - Cookie 名称是否正确？
+    - 是否复制了完整的 cookie 值？
+    - Cookie 的域是否正确？
+    - Cookie 是否存在 `Path` 限制？
+    - 是否需要多个 cookies？
+
+    **小技巧：** 从 DevTools 复制所有 cookies 并一并测试，然后逐个移除，找出必需的那些。
+  </Accordion>
+
+  <Accordion title="会话过快过期" icon="hourglass">
+    **针对短时会话：**
+    - 改用基于表单的身份验证
+    - 使用 actions 自动化登录流程
+    - 设置定时任务（cron）刷新 cookies
+    - 考虑向内部工具管理员申请更长的会话时长
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+**内部工具的 Cookie 有效期：** 许多内部工具设置 7–30 天的 cookie 过期时间，适合定期抓取任务。可在 DevTools 中查看 cookie 的 `Expires` 字段以了解有效期。
+</Note>

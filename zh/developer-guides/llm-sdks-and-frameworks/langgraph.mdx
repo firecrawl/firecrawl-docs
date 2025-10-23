@@ -1,0 +1,147 @@
+---
+title: "LangGraph"
+description: "将 Firecrawl 与 LangGraph 集成以构建智能体工作流"
+---
+
+本指南介绍如何将 Firecrawl 与 LangGraph 集成，以构建可抓取和处理网页内容的 AI 智能体工作流。
+
+<div id="setup">
+  ## 安装与配置
+</div>
+
+```bash
+npm install @langchain/langgraph @langchain/openai @mendable/firecrawl-js
+```
+
+创建一个 `.env` 文件：
+
+```bash
+FIRECRAWL_API_KEY=your_firecrawl_key
+OPENAI_API_KEY=your_openai_key
+```
+
+> **注意：** 如果使用 Node 版本低于 20，请安装 `dotenv` 并在代码中添加 `import 'dotenv/config'`。
+
+
+<div id="basic-workflow">
+  ## 基本工作流
+</div>
+
+本示例展示了一个基本的 LangGraph 工作流，用于抓取网站并分析其内容。
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import { ChatOpenAI } from '@langchain/openai';
+import { StateGraph, MessagesAnnotation, START, END } from '@langchain/langgraph';
+
+// 初始化 Firecrawl
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+
+// 初始化 LLM
+const llm = new ChatOpenAI({
+    model: "gpt-5-nano",
+    apiKey: process.env.OPENAI_API_KEY
+});
+
+// 定义爬取节点
+async function scrapeNode(state: typeof MessagesAnnotation.State) {
+    console.log('爬取中...');
+    const result = await firecrawl.scrape('https://firecrawl.dev', { formats: ['markdown'] });
+    return {
+        messages: [{
+            role: "system",
+            content: `爬取内容: ${result.markdown}`
+        }]
+    };
+}
+
+// 定义分析节点
+async function analyzeNode(state: typeof MessagesAnnotation.State) {
+    console.log('分析中...');
+    const response = await llm.invoke(state.messages);
+    return { messages: [response] };
+}
+
+// 构建图
+const graph = new StateGraph(MessagesAnnotation)
+    .addNode("scrape", scrapeNode)
+    .addNode("analyze", analyzeNode)
+    .addEdge(START, "scrape")
+    .addEdge("scrape", "analyze")
+    .addEdge("analyze", END);
+
+// 编译图
+const app = graph.compile();
+
+// 运行工作流
+const result = await app.invoke({
+    messages: [{ role: "user", content: "总结网站内容" }]
+});
+
+console.log(JSON.stringify(result, null, 2));
+```
+
+
+<div id="multi-step-workflow">
+  ## 多步工作流
+</div>
+
+本示例展示了一个更复杂的工作流，会抓取多个 URL 并对其进行处理。
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import { ChatOpenAI } from '@langchain/openai';
+import { StateGraph, Annotation, START, END } from '@langchain/langgraph';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+const llm = new ChatOpenAI({ model: "gpt-5-nano", apiKey: process.env.OPENAI_API_KEY });
+
+// 定义自定义状态
+const WorkflowState = Annotation.Root({
+    urls: Annotation<string[]>(),
+    scrapedData: Annotation<Array<{ url: string; content: string }>>(),
+    summary: Annotation<string>()
+});
+
+// 抓取多个 URL
+async function scrapeMultiple(state: typeof WorkflowState.State) {
+    const scrapedData = [];
+    for (const url of state.urls) {
+        const result = await firecrawl.scrape(url, { formats: ['markdown'] });
+        scrapedData.push({ url, content: result.markdown || '' });
+    }
+    return { scrapedData };
+}
+
+// 汇总所有抓取的内容
+async function summarizeAll(state: typeof WorkflowState.State) {
+    const combinedContent = state.scrapedData
+        .map(item => `来自 ${item.url} 的内容：\n${item.content}`)
+        .join('\n\n');
+
+    const response = await llm.invoke([
+        { role: "user", content: `汇总这些网站：\n${combinedContent}` }
+    ]);
+
+    return { summary: response.content as string };
+}
+
+// 构建工作流图
+const workflow = new StateGraph(WorkflowState)
+    .addNode("scrape", scrapeMultiple)
+    .addNode("summarize", summarizeAll)
+    .addEdge(START, "scrape")
+    .addEdge("scrape", "summarize")
+    .addEdge("summarize", END);
+
+const app = workflow.compile();
+
+// 执行工作流
+const result = await app.invoke({
+    urls: ["https://firecrawl.dev", "https://firecrawl.dev/pricing"]
+});
+
+console.log(result.summary);
+```
+
+更多示例请参见 [LangGraph 文档](https://langchain-ai.github.io/langgraphjs/)。

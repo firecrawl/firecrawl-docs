@@ -1,0 +1,212 @@
+---
+title: "認証付きスクレイピング"
+description: "Cookie を使って認証の裏側にあるコンテンツをスクレイピングする方法"
+---
+
+<Info>
+このガイドでは、ブラウザの DevTools から取得したセッション Cookie を使って、認証が必要なコンテンツをスクレイピングする方法を説明します。社内ツール、管理ダッシュボード、ログイン資格情報を持つユーザー向けの認可済みシステムに最適です。
+</Info>
+
+<div id="overview">
+  ## 概要
+</div>
+
+認証が必要なスクレイピングには、**Cookie ベースの認証**が推奨です。手順は次のとおりです：
+
+1. アプリケーションに手動でログインする
+2. DevTools からセッション Cookie を取得する
+3. Firecrawl にその Cookie を渡して保護されたページへアクセスする
+
+<Note>
+**Cookie の有効期限:**
+- **社内ツール**: 多くは 7～30 日、またはそれ以上
+- **一般公開サイト**: 通常 1～24 時間
+- **銀行/機密性の高いサイト**: 15～30 分
+
+社内ツールは一般的に Cookie の有効期間が長いため、この方法は定期的なスクレイピングに適しています。
+</Note>
+
+---
+
+<div id="setup">
+  ## セットアップ
+</div>
+
+<Steps>
+  <Step title="API キーを取得">
+    [firecrawl.dev/app](https://firecrawl.dev/app) で Firecrawl の API キーを取得します
+  </Step>
+
+  <Step title="依存関係をインストール">
+    ```bash npm
+    npm install @mendable/firecrawl-js
+    ```
+
+    <Note>
+    **Node.js < v20**: Node.js v19 以前を使用している場合は、`dotenv` もインストールしてください:
+    ```bash
+    npm install dotenv
+    ```
+    そのうえで、ファイルの先頭に `import 'dotenv/config'` を追加してください。
+    </Note>
+  </Step>
+
+  <Step title="環境を設定">
+    `.env` ファイルを作成します:
+    ```bash .env
+    FIRECRAWL_API_KEY=your_firecrawl_api_key
+    ```
+  </Step>
+</Steps>
+
+---
+
+<div id="method-1-cookie-based-authentication">
+  ## 方法1：Cookie ベース認証
+</div>
+
+<div id="step-1-extract-cookies-from-devtools">
+  ### ステップ 1: DevTools から Cookie を取得する
+</div>
+
+<Note>
+  **デモアプリケーション**: デモアプリは [https://firecrawl-auth.vercel.app](https://firecrawl-auth.vercel.app) で試せます
+
+  * Email: `test@example.com`
+  * Password: `password123`
+</Note>
+
+<Steps>
+  <Step title="アプリにログインする">
+    [https://firecrawl-auth.vercel.app](https://firecrawl-auth.vercel.app) にアクセスし、上記の認証情報でログインします
+  </Step>
+
+  <Step title="DevTools を開く">
+    `F12` を押すか、右クリック → 「検証」を選択します
+  </Step>
+
+  <Step title="Application タブに移動する">
+    **Application** タブ（Chrome）または **Storage** タブ（Firefox）をクリックします
+  </Step>
+
+  <Step title="Cookie を探してコピーする">
+    1. サイドバーの **Cookies** を展開する
+    2. 対象のドメインをクリックする
+    3. `auth-token` Cookie を見つける
+    4. **Value** をダブルクリックしてコピーする
+
+    <img src="/images/guides/dev-tools-cookie.png" alt="DevTools の Cookie ビュー" />
+  </Step>
+</Steps>
+
+デモアプリの場合、Cookie は次のようになります:
+
+```
+auth-token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJleGFtcGxlLXVzZXItaWQiLCJlbWFpbCI6InRlc3RAZXhhbXBsZS5jb20ifQ.example-signature-hash
+```
+
+<Warning>
+  **重要:** Cookie は機密性の高い認証情報です。公開したり、バージョン管理にコミットしたりしないでください。パスワード同様に扱ってください。
+</Warning>
+
+
+<div id="step-2-use-cookies-with-firecrawl">
+  ### ステップ2：Firecrawl でクッキーを使用する
+</div>
+
+```typescript
+import FirecrawlApp from "@mendable/firecrawl-js";
+
+const app = new FirecrawlApp({
+  apiKey: process.env.FIRECRAWL_API_KEY
+});
+
+const result = await app.scrape("https://firecrawl-auth.vercel.app/dashboard", {
+  formats: ["markdown", "screenshot"],
+  headers: {
+    Cookie: 'auth-token=COOKIE_GOES_HERE'
+  },
+  waitFor: 3000 // ページ読み込みを3秒待機
+});
+
+console.log("=== Markdown ===\n" + result.markdown + "\n\n=== スクリーンショットURL ===\n" + result.screenshot);
+```
+
+
+<div id="best-practices">
+  ## ベストプラクティス
+</div>
+
+<CardGroup cols={2}>
+  <Card title="Cookie Security" icon="lock">
+    - Cookieは環境変数に保存する
+    - Cookieをgitにコミットしない
+    - Cookieを定期的にローテーションする
+    - `.env`ファイルを`.gitignore`に含める
+  </Card>
+
+  <Card title="Cookie Expiration" icon="clock">
+    - DevToolsで有効期限を確認する
+    - 期限切れ前にアラートを設定する
+    - 期限が切れたらCookieを再取得する
+    - 短期のCookieにはフォームベース認証の利用を検討する
+  </Card>
+
+  <Card title="Rate Limiting" icon="gauge">
+    - アプリケーションのレート制限を遵守する
+    - リクエスト間に遅延を入れる
+    - 429（Too Many Requests）エラーを監視する
+    - リトライには指数バックオフを使用する
+  </Card>
+
+  <Card title="Error Handling" icon="shield">
+    - 401/403エラー（Cookieの期限切れ）を確認する
+    - レスポンス内容を検証する
+    - 認証失敗をログに記録する
+    - フォールバックの認証手段を用意する
+  </Card>
+</CardGroup>
+
+---
+
+<div id="troubleshooting">
+  ## トラブルシューティング
+</div>
+
+<AccordionGroup>
+  <Accordion title="401 Unauthorized エラーが発生する" icon="ban">
+    **考えられる原因:**
+    - Cookie の有効期限が切れている
+    - Cookie を正しくコピーできていない
+    - アプリケーションに追加のヘッダーが必要
+    - サーバー側でセッションが無効化された
+
+    **解決策:**
+    - 新規ログイン後に DevTools から Cookie を再取得する
+    - 複数の Cookie（session + CSRF token）が必要か確認する
+    - Cookie のドメインが対象の URL と一致しているか確認する
+  </Accordion>
+
+  <Accordion title="Cookie が機能しない" icon="cookie-bite">
+    **以下を確認:**
+    - Cookie 名は正しいか？
+    - Cookie の値をすべてコピーしたか？
+    - Cookie のドメインは正しいか？
+    - Cookie に `Path` 制限があるか？
+    - 複数の Cookie が必要か？
+
+    **ヒント:** DevTools からすべての Cookie をコピーしてまとめてテストし、その後不要なものを一つずつ外して必要なものを特定する。
+  </Accordion>
+
+  <Accordion title="セッションの有効期限が短すぎる" icon="hourglass">
+    **短期間で切れるセッションの場合:**
+    - 代わりにフォームベース認証を使う
+    - アクションでログイン処理を自動化する
+    - Cookie を更新する cron ジョブを設定する
+    - 内部ツールの管理者に長めのセッション時間を依頼することを検討する
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+**内部ツールの Cookie の有効期限:** 多くの内部ツールは 7〜30 日の有効期限で Cookie を設定しており、定期的なスクレイピングに適しています。DevTools の `Expires` フィールドで Cookie の有効期間を確認してください。
+</Note>
