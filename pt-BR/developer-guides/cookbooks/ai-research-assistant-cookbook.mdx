@@ -1,0 +1,786 @@
+---
+title: "Criando um Assistente de Pesquisa com IA usando Firecrawl e AI SDK"
+description: "Crie um assistente de pesquisa com IA completo, com recursos de scraping e busca na web"
+---
+
+Crie um assistente de pesquisa com IA completo que possa fazer scraping de sites e buscar na web para responder perguntas. O assistente decide automaticamente quando usar ferramentas de scraping ou de busca para reunir informações e, em seguida, fornece respostas abrangentes com base nos dados coletados.
+
+![Interface de chatbot de assistente de pesquisa com IA mostrando scraping em tempo real na web com Firecrawl e respostas conversacionais impulsionadas pela OpenAI](/images/guides/cookbooks/ai-sdk-cookbook/firecrawl-ai-sdk-chatbot.gif)
+
+<div id="what-youll-build">
+  ## O que você vai construir
+</div>
+
+Uma interface de chat com IA em que os usuários podem fazer perguntas sobre qualquer assunto. O assistente de IA decide automaticamente quando usar ferramentas de scraping ou de busca na web para reunir informações e, então, fornece respostas completas com base nos dados coletados.
+
+<div id="prerequisites">
+  ## Pré-requisitos
+</div>
+
+- Node.js 18 ou posterior instalado
+- Uma chave de API da OpenAI em [platform.openai.com](https://platform.openai.com)
+- Uma chave de API do Firecrawl em [firecrawl.dev](https://firecrawl.dev)
+- Conhecimentos básicos de React e Next.js
+
+<Steps>
+  <Step title="Criar um novo projeto do Next.js">
+    Comece criando um novo projeto Next.js e navegue até o diretório do projeto:
+
+    ```bash
+    npx create-next-app@latest ai-sdk-firecrawl && cd ai-sdk-firecrawl
+    ```
+
+    Quando solicitado, selecione as seguintes opções:
+
+    * TypeScript: Sim
+    * ESLint: Sim
+    * Tailwind CSS: Sim
+    * App Router: Sim
+    * Usar diretório `src/`: Não
+    * Alias de importação: Sim (@/*)
+  </Step>
+
+  <Step title="Instale as dependências">
+    ### Instalar pacotes do AI SDK
+
+    O AI SDK é um kit de ferramentas em TypeScript que fornece uma API unificada para trabalhar com diferentes provedores de LLM:
+
+    ```bash
+    npm i ai @ai-sdk/react zod
+    ```
+
+    Esses pacotes oferecem:
+
+    * `ai`: SDK principal com streaming, chamamento de ferramentas e tratamento de respostas
+    * `@ai-sdk/react`: Hooks do React como `useChat` para criar interfaces de chat
+    * `zod`: Validação de esquemas para entradas de ferramentas
+
+    Saiba mais em [ai-sdk.dev/docs](https://ai-sdk.dev/docs).
+
+    ### Instalar o AI Elements
+
+    O AI Elements fornece componentes de UI predefinidos para aplicações de IA. Execute o seguinte comando para gerar todos os componentes necessários:
+
+    ```bash
+    npx ai-elements@latest
+    ```
+
+    Isso configura os AI Elements no seu projeto, incluindo componentes de conversa, exibição de mensagens, campos de prompt e visualizações de chamadas de ferramentas.
+
+    Documentação: [ai-sdk.dev/elements/overview](https://ai-sdk.dev/elements/overview).
+
+    ### Instalar o provedor OpenAI
+
+    Instale o provedor OpenAI para se conectar aos modelos da OpenAI:
+
+    ```bash
+    npm install @ai-sdk/openai
+    ```
+  </Step>
+
+  <Step title="Crie a interface de chat do front-end">
+    Crie a página principal em `app/page.tsx` e copie o código da aba Code abaixo. Esta será a interface de chat onde os usuários interagem com o assistente de IA.
+
+    <Tabs>
+      <Tab title="Prévia">
+        ![Interface de chatbot de assistente de pesquisa em IA exibindo coleta de dados da web em tempo real com o Firecrawl e respostas conversacionais alimentadas pela OpenAI](/images/guides/cookbooks/ai-sdk-cookbook/firecrawl-ai-sdk-chatbot.gif)
+      </Tab>
+
+      <Tab title="Código">
+        ```typescript app/page.tsx
+        "use client";
+
+        import {
+          Conversation,
+          ConversationContent,
+          ConversationScrollButton,
+        } from "@/components/ai-elements/conversation";
+        import {
+          PromptInput,
+          PromptInputActionAddAttachments,
+          PromptInputActionMenu,
+          PromptInputActionMenuContent,
+          PromptInputActionMenuTrigger,
+          PromptInputAttachment,
+          PromptInputAttachments,
+          PromptInputBody,
+          PromptInputButton,
+          PromptInputHeader,
+          type PromptInputMessage,
+          PromptInputSelect,
+          PromptInputSelectContent,
+          PromptInputSelectItem,
+          PromptInputSelectTrigger,
+          PromptInputSelectValue,
+          PromptInputSubmit,
+          PromptInputTextarea,
+          PromptInputFooter,
+          PromptInputTools,
+        } from "@/components/ai-elements/prompt-input";
+        import {
+          MessageResponse,
+          Message,
+          MessageContent,
+          MessageActions,
+          MessageAction,
+        } from "@/components/ai-elements/message";
+
+        import { Fragment, useState } from "react";
+        import { useChat } from "@ai-sdk/react";
+        import type { ToolUIPart } from "ai";
+        import {
+          Tool,
+          ToolContent,
+          ToolHeader,
+          ToolInput,
+          ToolOutput,
+        } from "@/components/ai-elements/tool";
+
+        import { CopyIcon, GlobeIcon, RefreshCcwIcon } from "lucide-react";
+        import {
+          Source,
+          Sources,
+          SourcesContent,
+          SourcesTrigger,
+        } from "@/components/ai-elements/sources";
+        import {
+          Reasoning,
+          ReasoningContent,
+          ReasoningTrigger,
+        } from "@/components/ai-elements/reasoning";
+        import { Loader } from "@/components/ai-elements/loader";
+
+        const models = [
+          {
+            name: "GPT 5 Mini (Thinking)",
+            value: "gpt-5-mini",
+          },
+          {
+            name: "GPT 4o Mini",
+            value: "gpt-4o-mini",
+          },
+        ];
+
+        const ChatBotDemo = () => {
+          const [input, setInput] = useState("");
+          const [model, setModel] = useState<string>(models[0].value);
+          const [webSearch, setWebSearch] = useState(false);
+          const { messages, sendMessage, status, regenerate } = useChat();
+
+          const handleSubmit = (message: PromptInputMessage) => {
+            const hasText = Boolean(message.text);
+            const hasAttachments = Boolean(message.files?.length);
+
+            if (!(hasText || hasAttachments)) {
+              return;
+            }
+
+            sendMessage(
+              {
+                text: message.text || "Sent with attachments",
+                files: message.files,
+              },
+              {
+                body: {
+                  model: model,
+                  webSearch: webSearch,
+                },
+              }
+            );
+            setInput("");
+          };
+
+          return (
+            <div className="max-w-4xl mx-auto p-6 relative size-full h-screen">
+              <div className="flex flex-col h-full">
+                <Conversation className="h-full">
+                  <ConversationContent>
+                    {messages.map((message) => (
+                      <div key={message.id}>
+                        {message.role === "assistant" &&
+                          message.parts.filter((part) => part.type === "source-url")
+                            .length > 0 && (
+                            <Sources>
+                              <SourcesTrigger
+                                count={
+                                  message.parts.filter(
+                                    (part) => part.type === "source-url"
+                                  ).length
+                                }
+                              />
+                              {message.parts
+                                .filter((part) => part.type === "source-url")
+                                .map((part, i) => (
+                                  <SourcesContent key={`${message.id}-${i}`}>
+                                    <Source
+                                      key={`${message.id}-${i}`}
+                                      href={part.url}
+                                      title={part.url}
+                                    />
+                                  </SourcesContent>
+                                ))}
+                            </Sources>
+                          )}
+                        {message.parts.map((part, i) => {
+                          switch (part.type) {
+                            case "text":
+                              return (
+                                <Fragment key={`${message.id}-${i}`}>
+                                  <Message from={message.role}>
+                                    <MessageContent>
+                                      <MessageResponse>{part.text}</MessageResponse>
+                                    </MessageContent>
+                                  </Message>
+                                  {message.role === "assistant" &&
+                                    i === messages.length - 1 && (
+                                      <MessageActions className="mt-2">
+                                        <MessageAction
+                                          onClick={() => regenerate()}
+                                          label="Tentar novamente"
+                                        >
+                                          <RefreshCcwIcon className="size-3" />
+                                        </MessageAction>
+                                        <MessageAction
+                                          onClick={() =>
+                                            navigator.clipboard.writeText(part.text)
+                                          }
+                                          label="Copiar"
+                                        >
+                                          <CopyIcon className="size-3" />
+                                        </MessageAction>
+                                      </MessageActions>
+                                    )}
+                                </Fragment>
+                              );
+                            case "reasoning":
+                              return (
+                                <Reasoning
+                                  key={`${message.id}-${i}`}
+                                  className="w-full"
+                                  isStreaming={
+                                    status === "streaming" &&
+                                    i === message.parts.length - 1 &&
+                                    message.id === messages.at(-1)?.id
+                                  }
+                                >
+                                  <ReasoningTrigger />
+                                  <ReasoningContent>{part.text}</ReasoningContent>
+                                </Reasoning>
+                              );
+                            default: {
+                              if (part.type.startsWith("tool-")) {
+                                const toolPart = part as ToolUIPart;
+                                return (
+                                  <Tool
+                                    key={`${message.id}-${i}`}
+                                    defaultOpen={toolPart.state === "output-available"}
+                                  >
+                                    <ToolHeader
+                                      type={toolPart.type}
+                                      state={toolPart.state}
+                                    />
+                                    <ToolContent>
+                                      <ToolInput input={toolPart.input} />
+                                      <ToolOutput
+                                        output={toolPart.output}
+                                        errorText={toolPart.errorText}
+                                      />
+                                    </ToolContent>
+                                  </Tool>
+                                );
+                              }
+                              return null;
+                            }
+                          }
+                        })}
+                      </div>
+                    ))}
+                    {status === "submitted" && <Loader />}
+                  </ConversationContent>
+                  <ConversationScrollButton />
+                </Conversation>
+
+                <PromptInput
+                  onSubmit={handleSubmit}
+                  className="mt-4"
+                  globalDrop
+                  multiple
+                >
+                  <PromptInputHeader>
+                    <PromptInputAttachments>
+                      {(attachment) => <PromptInputAttachment data={attachment} />}
+                    </PromptInputAttachments>
+                  </PromptInputHeader>
+                  <PromptInputBody>
+                    <PromptInputTextarea
+                      onChange={(e) => setInput(e.target.value)}
+                      value={input}
+                      placeholder="Digite sua mensagem..."
+                    />
+                  </PromptInputBody>
+                  <PromptInputFooter>
+                    <PromptInputTools>
+                      <PromptInputActionMenu>
+                        <PromptInputActionMenuTrigger />
+                        <PromptInputActionMenuContent>
+                          <PromptInputActionAddAttachments />
+                        </PromptInputActionMenuContent>
+                      </PromptInputActionMenu>
+                      <PromptInputButton
+                        variant={webSearch ? "default" : "ghost"}
+                        onClick={() => setWebSearch(!webSearch)}
+                      >
+                        <GlobeIcon size={16} />
+                        <span>Buscar</span>
+                      </PromptInputButton>
+                      <PromptInputSelect
+                        onValueChange={(value) => {
+                          setModel(value);
+                        }}
+                        value={model}
+                      >
+                        <PromptInputSelectTrigger>
+                          <PromptInputSelectValue />
+                        </PromptInputSelectTrigger>
+                        <PromptInputSelectContent>
+                          {models.map((model) => (
+                            <PromptInputSelectItem
+                              key={model.value}
+                              value={model.value}
+                            >
+                              {model.name}
+                            </PromptInputSelectItem>
+                          ))}
+                        </PromptInputSelectContent>
+                      </PromptInputSelect>
+                    </PromptInputTools>
+                    <PromptInputSubmit disabled={!input && !status} status={status} />
+                  </PromptInputFooter>
+                </PromptInput>
+              </div>
+            </div>
+          );
+        };
+
+        export default ChatBotDemo;
+        ```
+      </Tab>
+    </Tabs>
+
+    ### Entendendo o Frontend
+
+    O frontend utiliza componentes AI Elements para fornecer uma interface de chat completa:
+
+    **Principais Recursos:**
+
+    * **Exibição da conversa**: O componente `Conversation` lida automaticamente com a rolagem e a exibição das mensagens
+    * **Renderização de mensagens**: Cada parte da mensagem é renderizada conforme seu tipo (texto, raciocínio, chamadas de ferramentas)
+    * **Visualização de ferramentas**: As chamadas de ferramenta são exibidas em seções recolhíveis que mostram entradas e saídas
+    * **Controles interativos**: os usuários podem ativar/desativar a pesquisa na web, escolher modelos e anexar arquivos
+    * **Ações de mensagem**: opções de copiar e tentar novamente para mensagens do assistente
+  </Step>
+
+  <Step title="Adicionar suporte para renderização de Markdown">
+    Para garantir que o Markdown gerado pelo LLM seja renderizado corretamente, adicione a seguinte importação ao arquivo `app/globals.css`:
+
+    ```css
+    @source "../node_modules/streamdown/dist/index.js";
+    ```
+
+    Isso importa os estilos necessários para renderizar conteúdo em Markdown nas respostas de mensagens.
+  </Step>
+
+  <Step title="Crie a rota básica da API">
+    Crie o endpoint da API de chat em `app/api/chat/route.ts`. Essa rota vai lidar com as mensagens recebidas e transmitir as respostas da IA.
+
+    ```typescript
+    import { streamText, UIMessage, convertToModelMessages } from "ai";
+    import { createOpenAI } from "@ai-sdk/openai";
+
+    const openai = createOpenAI({
+      apiKey: process.env.OPENAI_API_KEY!,
+    });
+
+    // Permite respostas em streaming por até 5 minutos
+    export const maxDuration = 300;
+
+    export async function POST(req: Request) {
+      const {
+        messages,
+        model,
+        webSearch,
+      }: {
+        messages: UIMessage[];
+        model: string;
+        webSearch: boolean;
+      } = await req.json();
+
+      const result = streamText({
+        model: openai(model),
+        messages: convertToModelMessages(messages),
+        system:
+          "Você é um assistente útil que pode responder perguntas e ajudar com tarefas.",
+      });
+
+      // envia fontes e raciocínio de volta para o cliente
+      return result.toUIMessageStreamResponse({
+        sendSources: true,
+        sendReasoning: true,
+      });
+    }
+    ```
+
+    Esta rota básica:
+
+    * Recebe mensagens do frontend
+    * Usa o modelo da OpenAI selecionado pelo usuário
+    * Transmite as respostas de volta para o cliente
+    * Ainda não inclui ferramentas — vamos adicioná-las em seguida
+  </Step>
+
+  <Step title="Configurar variáveis de ambiente">
+    Crie um arquivo `.env.local` na raiz do projeto:
+
+    ```bash
+    touch .env.local
+    ```
+
+    Adicione sua chave de API da OpenAI:
+
+    ```env
+    OPENAI_API_KEY=sk-your-openai-api-key
+    ```
+
+    A variável `OPENAI_API_KEY` é necessária para o funcionamento do modelo de IA.
+  </Step>
+
+  <Step title="Teste o chat básico">
+    Agora você pode testar o chatbot do SDK de IA sem integração com o Firecrawl. Inicie o servidor de desenvolvimento:
+
+    ```bash
+    npm run dev
+    ```
+
+    Abra [localhost:3000](http://localhost:3000) no seu navegador e teste a funcionalidade básica de chat. O assistente deve responder às mensagens, mas ainda não terá recursos de web scraping ou de pesquisa.
+
+    ![Chatbot de IA básico sem recursos de web scraping](/images/guides/cookbooks/ai-sdk-cookbook/simple-ai-sdk-chatbot.gif)
+  </Step>
+
+  <Step title="Adicionar ferramentas do Firecrawl">
+    Agora vamos aprimorar o assistente com recursos de extração de dados da web e busca usando o Firecrawl.
+
+    ### Instalar o SDK do Firecrawl
+
+    O Firecrawl converte sites em formatos prontos para LLM, com recursos de extração e busca:
+
+    ```bash
+    npm i @mendable/firecrawl-js
+    ```
+
+    ### Crie o arquivo de ferramentas
+
+    Crie uma pasta `lib` e adicione um arquivo `tools.ts` dentro dela:
+
+    ```bash
+    mkdir lib && touch lib/tools.ts
+    ```
+
+    Adicione o seguinte código para definir as ferramentas de raspagem e busca na web:
+
+    ```typescript lib/tools.ts
+    import FirecrawlApp from "@mendable/firecrawl-js";
+    import { tool } from "ai";
+    import { z } from "zod";
+
+    const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+
+    export const scrapeWebsiteTool = tool({
+      description: 'Extrair conteúdo de qualquer URL',
+      inputSchema: z.object({
+        url: z.string().url().describe('A URL a ser extraída')
+      }),
+      execute: async ({ url }) => {
+        console.log('Extraindo:', url);
+        const result = await firecrawl.scrape(url, {
+          formats: ['markdown'],
+          onlyMainContent: true,
+          timeout: 30000
+        });
+        console.log('Prévia do conteúdo extraído:', result.markdown?.slice(0, 200) + '...');
+        return { content: result.markdown };
+      }
+    });
+
+    export const searchWebTool = tool({
+      description: 'Buscar na web usando Firecrawl',
+      inputSchema: z.object({
+        query: z.string().describe('A consulta de busca'),
+        limit: z.number().optional().describe('Número de resultados'),
+        location: z.string().optional().describe('Localização para resultados regionalizados'),
+        tbs: z.string().optional().describe('Filtro de tempo (qdr:h, qdr:d, qdr:w, qdr:m, qdr:y)'),
+        sources: z.array(z.enum(['web', 'news', 'images'])).optional().describe('Tipos de resultado'),
+        categories: z.array(z.enum(['github', 'research', 'pdf'])).optional().describe('Categorias de filtro'),
+      }),
+      execute: async ({ query, limit, location, tbs, sources, categories }) => {
+        console.log('Buscando:', query);
+        const response = await firecrawl.search(query, {
+          ...(limit && { limit }),
+          ...(location && { location }),
+          ...(tbs && { tbs }),
+          ...(sources && { sources }),
+          ...(categories && { categories }),
+        }) as { web?: Array<{ title?: string; url?: string; description?: string }> };
+
+        const results = (response.web || []).map((item) => ({
+          title: item.title || item.url || 'Sem título',
+          url: item.url || '',
+          description: item.description || '',
+        }));
+
+        console.log('Resultados da busca:', results.length);
+        return { results };
+      },
+    });
+    ```
+
+    ### Entendendo as Ferramentas
+
+    **Ferramenta de Scrape de Site:**
+
+    * Aceita uma URL como entrada (validada por um esquema Zod)
+    * Usa o método `scrape` do Firecrawl para obter a página em markdown
+    * Extrai apenas o conteúdo principal para reduzir o uso de tokens
+    * Retorna o conteúdo extraído para a IA analisar
+
+    **Ferramenta de Busca na Web:**
+
+    * Aceita uma consulta com filtros opcionais
+    * Usa o método `search` do Firecrawl para encontrar páginas relevantes
+    * Suporta filtros avançados, como localização, intervalo de tempo e categorias de conteúdo
+    * Retorna resultados estruturados com títulos, URLs e descrições
+
+    Saiba mais sobre as ferramentas: [ai-sdk.dev/docs/foundations/tools](https://ai-sdk.dev/docs/foundations/tools).
+  </Step>
+
+  <Step title="Atualize a rota da API com as ferramentas do Firecrawl">
+    Agora atualize o arquivo `app/api/chat/route.ts` para incluir as ferramentas do Firecrawl que acabamos de criar.
+
+    <Accordion title="Ver código completo de app/api/chat/route.ts">
+      ```typescript
+      import { streamText, UIMessage, stepCountIs, convertToModelMessages } from "ai";
+      import { createOpenAI } from "@ai-sdk/openai";
+      import { scrapeWebsiteTool, searchWebTool } from "@/lib/tools";
+
+      const openai = createOpenAI({
+        apiKey: process.env.OPENAI_API_KEY!,
+      });
+
+      export const maxDuration = 300;
+
+      export async function POST(req: Request) {
+        const {
+          messages,
+          model,
+          webSearch,
+        }: {
+          messages: UIMessage[];
+          model: string;
+          webSearch: boolean;
+        } = await req.json();
+
+        const result = streamText({
+          model: openai(model),
+          messages: convertToModelMessages(messages),
+          system:
+            "You are a helpful assistant that can answer questions and help with tasks.",
+          // Adicione as ferramentas do Firecrawl aqui
+          tools: {
+            scrapeWebsite: scrapeWebsiteTool,
+            searchWeb: searchWebTool,
+          },
+          stopWhen: stepCountIs(5),
+          toolChoice: webSearch ? "auto" : "none",
+        });
+
+        return result.toUIMessageStreamResponse({
+          sendSources: true,
+          sendReasoning: true,
+        });
+      }
+      ```
+    </Accordion>
+
+    As principais mudanças em relação à rota básica:
+
+    * Importe `stepCountIs` do AI SDK
+    * Importe as ferramentas do Firecrawl de `@/lib/tools`
+    * Adicione o objeto `tools` com as ferramentas `scrapeWebsite` e `searchWeb`
+    * Adicione `stopWhen: stepCountIs(5)` para limitar as etapas de execução
+    * Defina `toolChoice` como &quot;auto&quot; quando a pesquisa na web estiver ativada e &quot;none&quot; caso contrário
+
+    Saiba mais sobre `streamText`: [ai-sdk.dev/docs/reference/ai-sdk-core/stream-text](https://ai-sdk.dev/docs/reference/ai-sdk-core/stream-text).
+  </Step>
+
+  <Step title="Adicione sua chave de API do Firecrawl">
+    Atualize seu arquivo `.env.local` para incluir sua chave de API da Firecrawl:
+
+    ```env
+    OPENAI_API_KEY=sk-your-openai-api-key
+    FIRECRAWL_API_KEY=fc-your-firecrawl-api-key
+    ```
+
+    Obtenha sua chave de API do Firecrawl em [firecrawl.dev](https://firecrawl.dev).
+  </Step>
+
+  <Step title="Teste o aplicativo completo">
+    Reinicie o servidor de desenvolvimento:
+
+    ```bash
+    npm run dev
+    ```
+
+    ![Chatbot de IA com ferramentas do Firecrawl ativas](/images/guides/cookbooks/ai-sdk-cookbook/active-firecrawl-tools-ai-sdk.gif)
+
+    Abra [localhost:3000](http://localhost:3000) e teste o assistente aprimorado:
+
+    1. Ative o botão &quot;Search&quot; para habilitar a pesquisa na web
+    2. Pergunte: &quot;Quais são os recursos mais recentes do firecrawl.dev?&quot;
+    3. Observe enquanto a IA chama a ferramenta `searchWeb` ou `scrapeWebsite`
+    4. Veja a execução da ferramenta na UI com entradas e saídas
+    5. Leia a análise da IA com base nos dados extraídos
+  </Step>
+</Steps>
+
+<div id="how-it-works">
+  ## Como funciona
+</div>
+
+<div id="message-flow">
+  ### Fluxo de mensagens
+</div>
+
+1. **Usuário envia uma mensagem**: O usuário digita uma pergunta e clica em Enviar
+2. **Frontend envia a solicitação**: `useChat` envia a mensagem para `/api/chat` com o modelo selecionado e a configuração de busca na web
+3. **Backend processa a mensagem**: A rota da API recebe a mensagem e chama `streamText`
+4. **IA decide sobre as ferramentas**: O modelo analisa a pergunta e decide se deve usar `scrapeWebsite` ou `searchWeb` (apenas se a busca na web estiver ativada)
+5. **Ferramentas executam**: Se as ferramentas forem chamadas, o Firecrawl faz o scraping ou realiza a busca na web
+6. **IA gera a resposta**: O modelo analisa os resultados das ferramentas e gera uma resposta em linguagem natural
+7. **Frontend exibe os resultados**: A UI mostra as chamadas de ferramentas e a resposta final em tempo real
+
+<div id="tool-calling-process">
+  ### Processo de Chamada de Ferramentas
+</div>
+
+O sistema de chamada de ferramentas do AI SDK ([ai-sdk.dev/docs/foundations/tools](https://ai-sdk.dev/docs/foundations/tools)) funciona da seguinte forma:
+
+1. O modelo recebe a mensagem do usuário e as descrições das ferramentas disponíveis
+2. Se o modelo determinar que é necessário usar uma ferramenta, ele gera uma chamada de ferramenta com parâmetros
+3. O SDK executa a função da ferramenta com esses parâmetros
+4. O resultado da ferramenta é enviado de volta ao modelo
+5. O modelo usa o resultado para gerar sua resposta final
+
+Tudo isso acontece automaticamente em uma única chamada a `streamText`, com os resultados sendo transmitidos para o frontend em tempo real.
+
+<div id="key-features">
+  ## Principais recursos
+</div>
+
+<div id="model-selection">
+  ### Seleção de modelo
+</div>
+
+O aplicativo oferece suporte a vários modelos da OpenAI:
+
+- **GPT-5 Mini (Thinking)**: Modelo recente da OpenAI com capacidades avançadas de raciocínio
+- **GPT-4o Mini**: Modelo rápido e econômico
+
+Os usuários podem alternar entre os modelos usando o seletor suspenso.
+
+<div id="web-search-toggle">
+  ### Alternância de busca na web
+</div>
+
+O botão Search controla se a IA pode usar as ferramentas do Firecrawl:
+
+- **Ativado**: a IA pode chamar as ferramentas `scrapeWebsite` e `searchWeb` conforme necessário
+- **Desativado**: a IA responde apenas com o conhecimento com o qual foi treinada
+
+Isso dá aos usuários controle sobre quando usar dados da web versus o conhecimento embutido no modelo.
+
+<div id="customization-ideas">
+  ## Ideias de customização
+</div>
+
+<div id="add-more-tools">
+  ### Adicionar mais ferramentas
+</div>
+
+Amplie o assistente com ferramentas adicionais:
+
+- Consultas ao banco de dados para dados internos da empresa
+- Integração ao CRM para buscar informações de clientes
+- Envio de e-mails
+- Geração de documentos
+
+Cada ferramenta segue o mesmo padrão: defina um schema com Zod, implemente a função execute e registre-a no objeto `tools`.
+
+<div id="change-the-ai-model">
+  ### Alterar o modelo de IA
+</div>
+
+Substitua o OpenAI por outro provedor:
+
+```typescript
+import { anthropic } from "@ai-sdk/anthropic";
+
+const result = streamText({
+  model: anthropic("claude-4.5-sonnet"),
+  // ... restante da config
+});
+```
+
+O SDK de IA oferece suporte a mais de 20 provedores com a mesma API. Saiba mais: [ai-sdk.dev/docs/foundations/providers-and-models](https://ai-sdk.dev/docs/foundations/providers-and-models).
+
+
+<div id="customize-the-ui">
+  ### Personalize a interface
+</div>
+
+Os componentes do AI Elements são baseados no shadcn/ui, então você pode:
+
+- Modificar os estilos nos arquivos dos próprios componentes
+- Adicionar novas variantes aos componentes existentes
+- Criar componentes personalizados que sigam o sistema de design
+
+<div id="best-practices">
+  ## Melhores práticas
+</div>
+
+1. **Use as ferramentas certas**: Escolha `searchWeb` para primeiro encontrar páginas relevantes, `scrapeWebsite` para páginas individuais ou deixe a IA decidir
+
+2. **Monitore o uso da API**: Acompanhe o uso das APIs da Firecrawl e da OpenAI para evitar custos inesperados
+
+3. **Trate erros de forma adequada**: As ferramentas incluem tratamento de erros, mas considere adicionar mensagens voltadas ao usuário
+
+4. **Otimize o desempenho**: Use streaming para fornecer feedback imediato e considere colocar em cache conteúdo acessado com frequência
+
+5. **Defina limites razoáveis**: `stopWhen: stepCountIs(5)` evita chamadas excessivas de ferramentas e custos fora de controle
+
+---
+
+<div id="related-resources">
+  ## Recursos relacionados
+</div>
+
+<CardGroup cols={2}>
+  <Card title="Documentação do AI SDK" href="https://ai-sdk.dev/docs">
+    Explore o AI SDK para criar aplicativos com IA com streaming, chamadas de
+    ferramentas e suporte a múltiplos provedores.
+  </Card>
+  <Card
+    title="Componentes do AI Elements"
+    href="https://ai-sdk.dev/elements/overview"
+  >
+    Componentes de UI pré‑construídos para aplicativos de IA baseados em shadcn/ui.
+  </Card>
+</CardGroup>

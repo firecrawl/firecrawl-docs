@@ -1,0 +1,784 @@
+---
+title: "使用 Firecrawl 与 AI SDK 构建 AI 研究助手"
+description: "构建一款具备网页抓取与搜索能力的完整 AI 驱动研究助手"
+---
+
+构建一款完整的 AI 驱动研究助手，能够抓取网站并在网上搜索来回答问题。助手会自动判断何时使用网页抓取或搜索工具来收集信息，并基于汇总的数据提供全面的答案。
+
+![AI 研究助手聊天界面，展示使用 Firecrawl 实时进行网页抓取以及由 OpenAI 驱动的对话式回复](/images/guides/cookbooks/ai-sdk-cookbook/firecrawl-ai-sdk-chatbot.gif)
+
+<div id="what-youll-build">
+  ## 你将构建的内容
+</div>
+
+一个 AI 聊天界面，用户可以就任意主题提问。AI 助手会自动判断何时使用网页爬取或搜索工具收集信息，并基于所获取的数据提供全面答案。
+
+<div id="prerequisites">
+  ## 前置条件
+</div>
+
+- 已安装 Node.js 18 或更高版本
+- 来自 [platform.openai.com](https://platform.openai.com) 的 OpenAI API 密钥
+- 来自 [firecrawl.dev](https://firecrawl.dev) 的 Firecrawl API 密钥
+- 具备 React 和 Next.js 的基础知识
+
+<Steps>
+  <Step title="创建新的 Next.js 项目">
+    先创建一个全新的 Next.js 应用，并进入项目目录：
+
+    ```bash
+    npx create-next-app@latest ai-sdk-firecrawl && cd ai-sdk-firecrawl
+    ```
+
+    在出现提示时，选择以下选项：
+
+    * TypeScript：是
+    * ESLint：是
+    * Tailwind CSS：是
+    * App Router：是
+    * 使用 `src/` 目录：否
+    * 导入别名：是（@/*）
+  </Step>
+
+  <Step title="安装依赖项">
+    ### 安装 AI SDK 包
+
+    AI SDK 是一个 TypeScript 工具包，提供统一的 API，便于与不同的 LLM 服务提供商对接：
+
+    ```bash
+    npm i ai @ai-sdk/react zod
+    ```
+
+    这些软件包提供：
+
+    * `ai`：包含流式传输、工具调用和响应处理的核心 SDK
+    * `@ai-sdk/react`：用于构建聊天界面的 React Hooks（如 `useChat`）
+    * `zod`：用于工具输入的架构校验
+
+    在 [ai-sdk.dev/docs](https://ai-sdk.dev/docs) 了解更多。
+
+    ### 安装 AI Elements
+
+    AI Elements 提供用于 AI 应用的预构建 UI 组件。运行以下命令以生成所有必需的组件脚手架：
+
+    ```bash
+    npx ai-elements@latest
+    ```
+
+    这会在你的项目中初始化 AI Elements，包括会话组件、消息展示、提示输入和工具调用可视化。
+
+    文档：[ai-sdk.dev/elements/overview](https://ai-sdk.dev/elements/overview)。
+
+    ### 安装 OpenAI Provider
+
+    安装 OpenAI Provider 以连接到 OpenAI 的模型：
+
+    ```bash
+    npm install @ai-sdk/openai
+    ```
+  </Step>
+
+  <Step title="构建前端聊天界面">
+    在 `app/page.tsx` 创建主页面，并从下方的 Code 标签页复制代码。这将是用户与 AI 助手交互的聊天界面。
+
+    <Tabs>
+      <Tab title="预览">
+        ![AI 研究助理聊天机器人界面：借助 Firecrawl 实时抓取网页，并由 OpenAI 驱动的对话式回答](/images/guides/cookbooks/ai-sdk-cookbook/firecrawl-ai-sdk-chatbot.gif)
+      </Tab>
+
+      <Tab title="代码">
+        ```typescript app/page.tsx
+        "use client";
+
+        import {
+          Conversation,
+          ConversationContent,
+          ConversationScrollButton,
+        } from "@/components/ai-elements/conversation";
+        import {
+          PromptInput,
+          PromptInputActionAddAttachments,
+          PromptInputActionMenu,
+          PromptInputActionMenuContent,
+          PromptInputActionMenuTrigger,
+          PromptInputAttachment,
+          PromptInputAttachments,
+          PromptInputBody,
+          PromptInputButton,
+          PromptInputHeader,
+          type PromptInputMessage,
+          PromptInputSelect,
+          PromptInputSelectContent,
+          PromptInputSelectItem,
+          PromptInputSelectTrigger,
+          PromptInputSelectValue,
+          PromptInputSubmit,
+          PromptInputTextarea,
+          PromptInputFooter,
+          PromptInputTools,
+        } from "@/components/ai-elements/prompt-input";
+        import {
+          MessageResponse,
+          Message,
+          MessageContent,
+          MessageActions,
+          MessageAction,
+        } from "@/components/ai-elements/message";
+
+        import { Fragment, useState } from "react";
+        import { useChat } from "@ai-sdk/react";
+        import type { ToolUIPart } from "ai";
+        import {
+          Tool,
+          ToolContent,
+          ToolHeader,
+          ToolInput,
+          ToolOutput,
+        } from "@/components/ai-elements/tool";
+
+        import { CopyIcon, GlobeIcon, RefreshCcwIcon } from "lucide-react";
+        import {
+          Source,
+          Sources,
+          SourcesContent,
+          SourcesTrigger,
+        } from "@/components/ai-elements/sources";
+        import {
+          Reasoning,
+          ReasoningContent,
+          ReasoningTrigger,
+        } from "@/components/ai-elements/reasoning";
+        import { Loader } from "@/components/ai-elements/loader";
+
+        const models = [
+          {
+            name: "GPT 5 Mini (Thinking)",
+            value: "gpt-5-mini",
+          },
+          {
+            name: "GPT 4o Mini",
+            value: "gpt-4o-mini",
+          },
+        ];
+
+        const ChatBotDemo = () => {
+          const [input, setInput] = useState("");
+          const [model, setModel] = useState<string>(models[0].value);
+          const [webSearch, setWebSearch] = useState(false);
+          const { messages, sendMessage, status, regenerate } = useChat();
+
+          const handleSubmit = (message: PromptInputMessage) => {
+            const hasText = Boolean(message.text);
+            const hasAttachments = Boolean(message.files?.length);
+
+            if (!(hasText || hasAttachments)) {
+              return;
+            }
+
+            sendMessage(
+              {
+                text: message.text || "已发送附件",
+                files: message.files,
+              },
+              {
+                body: {
+                  model: model,
+                  webSearch: webSearch,
+                },
+              }
+            );
+            setInput("");
+          };
+
+          return (
+            <div className="max-w-4xl mx-auto p-6 relative size-full h-screen">
+              <div className="flex flex-col h-full">
+                <Conversation className="h-full">
+                  <ConversationContent>
+                    {messages.map((message) => (
+                      <div key={message.id}>
+                        {message.role === "assistant" &&
+                          message.parts.filter((part) => part.type === "source-url")
+                            .length > 0 && (
+                            <Sources>
+                              <SourcesTrigger
+                                count={
+                                  message.parts.filter(
+                                    (part) => part.type === "source-url"
+                                  ).length
+                                }
+                              />
+                              {message.parts
+                                .filter((part) => part.type === "source-url")
+                                .map((part, i) => (
+                                  <SourcesContent key={`${message.id}-${i}`}>
+                                    <Source
+                                      key={`${message.id}-${i}`}
+                                      href={part.url}
+                                      title={part.url}
+                                    />
+                                  </SourcesContent>
+                                ))}
+                            </Sources>
+                          )}
+                        {message.parts.map((part, i) => {
+                          switch (part.type) {
+                            case "text":
+                              return (
+                                <Fragment key={`${message.id}-${i}`}>
+                                  <Message from={message.role}>
+                                    <MessageContent>
+                                      <MessageResponse>{part.text}</MessageResponse>
+                                    </MessageContent>
+                                  </Message>
+                                  {message.role === "assistant" &&
+                                    i === messages.length - 1 && (
+                                      <MessageActions className="mt-2">
+                                        <MessageAction
+                                          onClick={() => regenerate()}
+                                          label="重试"
+                                        >
+                                          <RefreshCcwIcon className="size-3" />
+                                        </MessageAction>
+                                        <MessageAction
+                                          onClick={() =>
+                                            navigator.clipboard.writeText(part.text)
+                                          }
+                                          label="复制"
+                                        >
+                                          <CopyIcon className="size-3" />
+                                        </MessageAction>
+                                      </MessageActions>
+                                    )}
+                                </Fragment>
+                              );
+                            case "reasoning":
+                              return (
+                                <Reasoning
+                                  key={`${message.id}-${i}`}
+                                  className="w-full"
+                                  isStreaming={
+                                    status === "streaming" &&
+                                    i === message.parts.length - 1 &&
+                                    message.id === messages.at(-1)?.id
+                                  }
+                                >
+                                  <ReasoningTrigger />
+                                  <ReasoningContent>{part.text}</ReasoningContent>
+                                </Reasoning>
+                              );
+                            default: {
+                              if (part.type.startsWith("tool-")) {
+                                const toolPart = part as ToolUIPart;
+                                return (
+                                  <Tool
+                                    key={`${message.id}-${i}`}
+                                    defaultOpen={toolPart.state === "output-available"}
+                                  >
+                                    <ToolHeader
+                                      type={toolPart.type}
+                                      state={toolPart.state}
+                                    />
+                                    <ToolContent>
+                                      <ToolInput input={toolPart.input} />
+                                      <ToolOutput
+                                        output={toolPart.output}
+                                        errorText={toolPart.errorText}
+                                      />
+                                    </ToolContent>
+                                  </Tool>
+                                );
+                              }
+                              return null;
+                            }
+                          }
+                        })}
+                      </div>
+                    ))}
+                    {status === "submitted" && <Loader />}
+                  </ConversationContent>
+                  <ConversationScrollButton />
+                </Conversation>
+
+                <PromptInput
+                  onSubmit={handleSubmit}
+                  className="mt-4"
+                  globalDrop
+                  multiple
+                >
+                  <PromptInputHeader>
+                    <PromptInputAttachments>
+                      {(attachment) => <PromptInputAttachment data={attachment} />}
+                    </PromptInputAttachments>
+                  </PromptInputHeader>
+                  <PromptInputBody>
+                    <PromptInputTextarea
+                      onChange={(e) => setInput(e.target.value)}
+                      value={input}
+                    />
+                  </PromptInputBody>
+                  <PromptInputFooter>
+                    <PromptInputTools>
+                      <PromptInputActionMenu>
+                        <PromptInputActionMenuTrigger />
+                        <PromptInputActionMenuContent>
+                          <PromptInputActionAddAttachments />
+                        </PromptInputActionMenuContent>
+                      </PromptInputActionMenu>
+                      <PromptInputButton
+                        variant={webSearch ? "default" : "ghost"}
+                        onClick={() => setWebSearch(!webSearch)}
+                      >
+                        <GlobeIcon size={16} />
+                        <span>搜索</span>
+                      </PromptInputButton>
+                      <PromptInputSelect
+                        onValueChange={(value) => {
+                          setModel(value);
+                        }}
+                        value={model}
+                      >
+                        <PromptInputSelectTrigger>
+                          <PromptInputSelectValue />
+                        </PromptInputSelectTrigger>
+                        <PromptInputSelectContent>
+                          {models.map((model) => (
+                            <PromptInputSelectItem
+                              key={model.value}
+                              value={model.value}
+                            >
+                              {model.name}
+                            </PromptInputSelectItem>
+                          ))}
+                        </PromptInputSelectContent>
+                      </PromptInputSelect>
+                    </PromptInputTools>
+                    <PromptInputSubmit disabled={!input && !status} status={status} />
+                  </PromptInputFooter>
+                </PromptInput>
+              </div>
+            </div>
+          );
+        };
+
+        export default ChatBotDemo;
+        ```
+      </Tab>
+    </Tabs>
+
+    ### 了解前端
+
+    前端使用 AI Elements 组件提供完整的聊天界面:
+
+    **核心功能：**
+
+    * **会话显示**：`Conversation` 组件会自动处理消息的滚动与呈现
+    * **消息渲染**：每个消息片段会根据其类型（文本、推理、工具调用）进行渲染
+    * **工具可视化**：工具调用以可折叠的部分展示其输入和输出
+    * **交互控件**：用户可切换网页搜索、选择模型并附加文件
+    * **消息 actions**：为 assistant 消息提供复制与重试的 actions
+  </Step>
+
+  <Step title="添加 Markdown 渲染功能">
+    为确保 LLM 输出的 Markdown 正确渲染，请在你的 `app/globals.css` 文件中添加以下 import：
+
+    ```css
+    @source "../node_modules/streamdown/dist/index.js";
+    ```
+
+    这将导入在消息回复中渲染 Markdown 内容所需的样式。
+  </Step>
+
+  <Step title="构建基础型 API 路由">
+    在 `app/api/chat/route.ts` 中创建聊天 API 端点。该路由将处理传入消息，并以流式方式返回来自 AI 的响应。
+
+    ```typescript
+    import { streamText, UIMessage, convertToModelMessages } from "ai";
+    import { createOpenAI } from "@ai-sdk/openai";
+
+    const openai = createOpenAI({
+      apiKey: process.env.OPENAI_API_KEY!,
+    });
+
+    // 允许流式响应最长 5 分钟
+    export const maxDuration = 300;
+
+    export async function POST(req: Request) {
+      const {
+        messages,
+        model,
+        webSearch,
+      }: {
+        messages: UIMessage[];
+        model: string;
+        webSearch: boolean;
+      } = await req.json();
+
+      const result = streamText({
+        model: openai(model),
+        messages: convertToModelMessages(messages),
+        system:
+          "你是一个实用的助手,可以回答问题并协助完成任务。",
+      });
+
+      // 将数据源和推理过程返回给客户端
+      return result.toUIMessageStreamResponse({
+        sendSources: true,
+        sendReasoning: true,
+      });
+    }
+    ```
+
+    这个基础路由：
+
+    * 接收来自前端的消息
+    * 使用用户选择的 OpenAI 模型
+    * 将响应以流式方式返回给客户端
+    * 尚未包含工具——我们稍后会添加
+  </Step>
+
+  <Step title="配置环境变量">
+    在项目根目录下创建一个 `.env.local` 文件：
+
+    ```bash
+    touch .env.local
+    ```
+
+    添加你的 OpenAI API Key：
+
+    ```env
+    OPENAI_API_KEY=sk-your-openai-api-key
+    ```
+
+    `OPENAI_API_KEY` 是 AI 模型正常运行所必需的。
+  </Step>
+
+  <Step title="测试基础聊天">
+    现在你可以在未集成 Firecrawl 的情况下测试 AI SDK 聊天机器人。启动开发服务器：
+
+    ```bash
+    npm run dev
+    ```
+
+    在浏览器中打开 [localhost:3000](http://localhost:3000) 并测试基础聊天功能。助手应能回复消息，但暂不具备网页抓取或搜索能力。
+
+    ![不具备网页抓取功能的基础 AI 聊天机器人](/images/guides/cookbooks/ai-sdk-cookbook/simple-ai-sdk-chatbot.gif)
+  </Step>
+
+  <Step title="添加 Firecrawl 工具">
+    现在，让我们使用 Firecrawl 为助手增强网页抓取和搜索功能。
+
+    ### 安装 Firecrawl SDK
+
+    Firecrawl 通过抓取和搜索，将网站转换为适用于 LLM 的 formats：
+
+    ```bash
+    npm i @mendable/firecrawl-js
+    ```
+
+    ### 创建工具文件
+
+    创建一个 `lib` 文件夹，并在其中添加一个 `tools.ts` 文件：
+
+    ```bash
+    mkdir lib && touch lib/tools.ts
+    ```
+
+    添加以下代码以定义网页抓取与搜索工具：
+
+    ```typescript lib/tools.ts
+    import FirecrawlApp from "@mendable/firecrawl-js";
+    import { tool } from "ai";
+    import { z } from "zod";
+
+    const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+
+    export const scrapeWebsiteTool = tool({
+      description: '抓取任意网站 URL 的内容',
+      inputSchema: z.object({
+        url: z.string().url().describe('要抓取的 URL')
+      }),
+      execute: async ({ url }) => {
+        console.log('正在抓取:', url);
+        const result = await firecrawl.scrape(url, {
+          formats: ['markdown'],
+          onlyMainContent: true,
+          timeout: 30000
+        });
+        console.log('抓取内容预览:', result.markdown?.slice(0, 200) + '...');
+        return { content: result.markdown };
+      }
+    });
+
+    export const searchWebTool = tool({
+      description: '使用 Firecrawl 搜索网页',
+      inputSchema: z.object({
+        query: z.string().describe('搜索查询内容'),
+        limit: z.number().optional().describe('返回结果数量'),
+        location: z.string().optional().describe('本地化结果的地理位置'),
+        tbs: z.string().optional().describe('时间过滤器 (qdr:h, qdr:d, qdr:w, qdr:m, qdr:y)'),
+        sources: z.array(z.enum(['web', 'news', 'images'])).optional().describe('结果类型'),
+        categories: z.array(z.enum(['github', 'research', 'pdf'])).optional().describe('筛选类别'),
+      }),
+      execute: async ({ query, limit, location, tbs, sources, categories }) => {
+        console.log('正在搜索:', query);
+        const response = await firecrawl.search(query, {
+          ...(limit && { limit }),
+          ...(location && { location }),
+          ...(tbs && { tbs }),
+          ...(sources && { sources }),
+          ...(categories && { categories }),
+        }) as { web?: Array<{ title?: string; url?: string; description?: string }> };
+
+        const results = (response.web || []).map((item) => ({
+          title: item.title || item.url || '无标题',
+          url: item.url || '',
+          description: item.description || '',
+        }));
+
+        console.log('搜索结果:', results.length);
+        return { results };
+      },
+    });
+    ```
+
+    ### 了解这些工具
+
+    **Scrape Website 工具：**
+
+    * 接收一个 URL 作为输入（由 Zod 架构验证）
+    * 使用 Firecrawl 的 `scrape` 方法以 Markdown 获取页面内容
+    * 仅提取主要内容以减少 token 消耗
+    * 返回抓取的内容供 AI 分析
+
+    **Search Web 工具：**
+
+    * 接收带可选筛选条件的搜索查询
+    * 使用 Firecrawl 的 `search` 方法查找相关网页
+    * 支持位置、时间范围、内容类别等高级筛选
+    * 返回包含标题、URL 和描述的结构化结果
+
+    了解更多关于工具的信息：[ai-sdk.dev/docs/foundations/tools](https://ai-sdk.dev/docs/foundations/tools)。
+  </Step>
+
+  <Step title="使用 Firecrawl 工具更新 API 路径">
+    现在更新你的 `app/api/chat/route.ts`，把我们刚创建的 Firecrawl 工具加入进去。
+
+    <Accordion title="查看完整的 app/api/chat/route.ts 代码">
+      ```typescript
+      import { streamText, UIMessage, stepCountIs, convertToModelMessages } from "ai";
+      import { createOpenAI } from "@ai-sdk/openai";
+      import { scrapeWebsiteTool, searchWebTool } from "@/lib/tools";
+
+      const openai = createOpenAI({
+        apiKey: process.env.OPENAI_API_KEY!,
+      });
+
+      export const maxDuration = 300;
+
+      export async function POST(req: Request) {
+        const {
+          messages,
+          model,
+          webSearch,
+        }: {
+          messages: UIMessage[];
+          model: string;
+          webSearch: boolean;
+        } = await req.json();
+
+        const result = streamText({
+          model: openai(model),
+          messages: convertToModelMessages(messages),
+          system:
+            "You are a helpful assistant that can answer questions and help with tasks.",
+          // 在此添加 Firecrawl 工具
+          tools: {
+            scrapeWebsite: scrapeWebsiteTool,
+            searchWeb: searchWebTool,
+          },
+          stopWhen: stepCountIs(5),
+          toolChoice: webSearch ? "auto" : "none",
+        });
+
+        return result.toUIMessageStreamResponse({
+          sendSources: true,
+          sendReasoning: true,
+        });
+      }
+      ```
+    </Accordion>
+
+    与基础路由相比的关键改动：
+
+    * 从 AI SDK 引入 `stepCountIs`
+    * 从 `@/lib/tools` 引入 Firecrawl 工具
+    * 添加包含 `scrapeWebsite` 和 `searchWeb` 的 `tools` 对象
+    * 添加 `stopWhen: stepCountIs(5)` 以限制执行步数
+    * 启用网页搜索时将 `toolChoice` 设为 “auto”，否则为 “none”
+
+    了解更多关于 `streamText`：[ai-sdk.dev/docs/reference/ai-sdk-core/stream-text](https://ai-sdk.dev/docs/reference/ai-sdk-core/stream-text)。
+  </Step>
+
+  <Step title="添加你的 Firecrawl API 密钥">
+    将你的 `.env.local` 文件更新为包含 Firecrawl API 密钥：
+
+    ```env
+    OPENAI_API_KEY=sk-your-openai-api-key
+    FIRECRAWL_API_KEY=fc-your-firecrawl-api-key
+    ```
+
+    在 [firecrawl.dev](https://firecrawl.dev) 获取你的 Firecrawl API 密钥。
+  </Step>
+
+  <Step title="测试完整应用程序">
+    重启开发服务器：
+
+    ```bash
+    npm run dev
+    ```
+
+    ![启用了 Firecrawl 工具的 AI 聊天机器人](/images/guides/cookbooks/ai-sdk-cookbook/active-firecrawl-tools-ai-sdk.gif)
+
+    打开 [localhost:3000](http://localhost:3000) 测试增强版助手：
+
+    1. 切换“Search”按钮以启用网页搜索
+    2. 提问：“What are the latest features from firecrawl.dev?”
+    3. 观察 AI 调用 `searchWeb` 或 `scrapeWebsite` 工具
+    4. 在 UI 中查看工具执行的输入与输出
+    5. 阅读基于抓取数据的 AI 分析
+  </Step>
+</Steps>
+
+<div id="how-it-works">
+  ## 工作机制
+</div>
+
+<div id="message-flow">
+  ### 消息流
+</div>
+
+1. **用户发送消息**：用户输入问题并点击提交
+2. **前端发送请求**：`useChat` 携带所选模型和网页搜索设置，将消息发送到 `/api/chat`
+3. **后端处理消息**：API 路由接收消息并调用 `streamText`
+4. **AI 选择工具**：模型分析问题并决定是否使用 `scrapeWebsite` 或 `searchWeb`（仅在启用网页搜索时）
+5. **工具执行**：若调用了工具，Firecrawl 将执行网页抓取或搜索
+6. **AI 生成响应**：模型分析工具结果并生成自然语言响应
+7. **前端展示结果**：UI 实时显示工具调用与最终响应
+
+<div id="tool-calling-process">
+  ### 工具调用流程
+</div>
+
+AI SDK 的工具调用系统（[ai-sdk.dev/docs/foundations/tools](https://ai-sdk.dev/docs/foundations/tools)）工作方式如下：
+
+1. 模型接收用户消息和可用的工具描述
+2. 如果模型判断需要使用工具，则生成带参数的工具调用
+3. SDK 使用这些参数执行工具函数
+4. 将工具结果返回给模型
+5. 模型基于结果生成最终响应
+
+以上过程会在一次 `streamText` 调用中自动完成，并将结果实时流式传输到前端。
+
+<div id="key-features">
+  ## 核心功能
+</div>
+
+<div id="model-selection">
+  ### 模型选择
+</div>
+
+该应用支持多种 OpenAI 模型：
+
+- **GPT-5 Mini（Thinking）**：OpenAI 的新近模型，具备更强的推理能力
+- **GPT-4o Mini**：速度快、成本友好的模型
+
+用户可以通过下拉菜单在不同模型之间切换。
+
+<div id="web-search-toggle">
+  ### Web Search 开关
+</div>
+
+Search 按钮用于控制 AI 是否可以使用 Firecrawl 工具：
+
+- **启用**：AI 可按需调用 `scrapeWebsite` 和 `searchWeb` 工具
+- **禁用**：AI 仅基于其训练知识作答
+
+这让用户可以掌控何时使用网页数据，而非依赖模型的内置知识。
+
+<div id="customization-ideas">
+  ## 自定义方案思路
+</div>
+
+<div id="add-more-tools">
+  ### 添加更多工具
+</div>
+
+使用其他工具扩展助手：
+
+- 查询公司内部数据的数据库
+- 集成 CRM 以获取客户信息
+- 发送电子邮件
+- 生成文档
+
+每个工具遵循相同模式：使用 Zod 定义模式（schema），实现 execute 函数，并将其注册到 `tools` 对象中。
+
+<div id="change-the-ai-model">
+  ### 更换 AI 模型
+</div>
+
+将 OpenAI 切换为其他供应商：
+
+```typescript
+import { anthropic } from "@ai-sdk/anthropic";
+
+const result = streamText({
+  model: anthropic("claude-4.5-sonnet"),
+  // ... 其余配置
+});
+```
+
+AI SDK 通过同一套 API 支持 20 多家提供商。了解更多：[ai-sdk.dev/docs/foundations/providers-and-models](https://ai-sdk.dev/docs/foundations/providers-and-models)。
+
+
+<div id="customize-the-ui">
+  ### 自定义 UI
+</div>
+
+AI Elements 组件基于 shadcn/ui 构建，因此你可以：
+
+- 在组件文件中修改组件样式
+- 为现有组件添加新的变体
+- 创建符合设计体系的自定义组件
+
+<div id="best-practices">
+  ## 最佳实践
+</div>
+
+1. **使用合适的工具**：优先用 `searchWeb` 搜索相关页面，单页用 `scrapeWebsite`，或交由 AI 决定
+
+2. **监控 API 使用**：跟踪你的 Firecrawl 与 OpenAI API 使用量，以避免意外开销
+
+3. **优雅处理错误**：工具内置错误处理，但建议补充面向用户的错误提示
+
+4. **优化性能**：使用流式输出提供即时反馈，并考虑缓存高频访问的内容
+
+5. **设置合理的限制**：通过 `stopWhen: stepCountIs(5)` 避免过多工具调用与成本失控
+
+---
+
+<div id="related-resources">
+  ## 相关资源
+</div>
+
+<CardGroup cols={2}>
+  <Card title="AI SDK 文档" href="https://ai-sdk.dev/docs">
+    了解 AI SDK，用于构建支持流式传输、工具调用和多服务商的 AI 应用。
+  </Card>
+  <Card
+    title="AI Elements 组件"
+    href="https://ai-sdk.dev/elements/overview"
+  >
+    基于 shadcn/ui 的 AI 应用预构建 UI 组件库。
+  </Card>
+</CardGroup>
