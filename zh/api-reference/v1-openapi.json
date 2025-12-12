@@ -1,0 +1,3656 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Firecrawl API",
+    "version": "v1",
+    "description": "用于与 Firecrawl 服务交互，以进行网页抓取和爬取任务的 API。",
+    "contact": {
+      "name": "Firecrawl Support",
+      "url": "https://firecrawl.dev/support",
+      "email": "support@firecrawl.dev"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.firecrawl.dev/v1"
+    }
+  ],
+  "paths": {
+    "/scrape": {
+      "post": {
+        "summary": "抓取单个 URL，并可选择使用 LLM 提取信息",
+        "operationId": "scrapeAndExtractFromUrl",
+        "tags": [
+          "Scraping"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "url": {
+                        "type": "string",
+                        "format": "uri",
+                        "description": "要爬取的 URL"
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ]
+                  },
+                  {
+                    "$ref": "#/components/schemas/ScrapeOptions"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "zeroDataRetention": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "如果为 true，将对本次抓取启用零数据保留策略。要开启此功能，请联系 help@firecrawl.dev"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScrapeResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "需要付费",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求次数过多",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/batch/scrape": {
+      "post": {
+        "summary": "抓取多个 URL，并可选用 LLM 提取信息",
+        "operationId": "scrapeAndExtractFromUrls",
+        "tags": [
+          "Scraping"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "urls": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "format": "uri",
+                          "description": "要爬取的 URL"
+                        }
+                      },
+                      "webhook": {
+                        "type": "object",
+                        "description": "Webhook 规范对象。",
+                        "properties": {
+                          "url": {
+                            "type": "string",
+                            "description": "用于接收 webhook 的 URL。该 webhook 会在批量抓取开始时触发（batch_scrape.started）、每个页面被抓取时触发（batch_scrape.page），以及在批量抓取完成时触发（batch_scrape.completed 或 batch_scrape.failed）。其响应与 `/scrape` 端点相同。"
+                          },
+                          "headers": {
+                            "type": "object",
+                            "description": "发送到 webhook URL 的请求头。",
+                            "additionalProperties": {
+                              "type": "string"
+                            }
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "description": "将包含在此次抓取的所有 webhook 负载中的自定义元数据",
+                            "additionalProperties": true
+                          },
+                          "events": {
+                            "type": "array",
+                            "description": "要发送到 webhook URL 的事件类型（默认：全部）",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "completed",
+                                "page",
+                                "failed",
+                                "started"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "url"
+                        ]
+                      },
+                      "maxConcurrency": {
+                        "type": "integer",
+                        "description": "最大并发抓取数量。此参数用于为本次批量抓取设置并发上限。若未指定，则本次批量抓取将遵循你的团队并发限制。"
+                      },
+                      "ignoreInvalidURLs": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "如果在 urls 数组中指定了无效 URL，这些 URL 会被忽略。它们不会导致整个请求失败，而是会基于剩余的有效 URL 创建一个批量抓取任务，并在响应的 invalidURLs 字段中返回这些无效 URL。"
+                      }
+                    },
+                    "required": [
+                      "urls"
+                    ]
+                  },
+                  {
+                    "$ref": "#/components/schemas/ScrapeOptions"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "zeroDataRetention": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "若为 true，则此次批量抓取任务将不保留任何数据。要启用此功能，请联系 help@firecrawl.dev"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchScrapeResponseObj"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "需要付费",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求过于频繁",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/batch/scrape/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "description": "批量抓取作业的 ID",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "summary": "获取批量抓取作业的状态",
+        "operationId": "getBatchScrapeStatus",
+        "tags": [
+          "Scraping"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchScrapeStatusResponseObj"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "需要付费",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求次数过多",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "取消批量抓取作业",
+        "operationId": "cancelBatchScrape",
+        "tags": [
+          "Scraping"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "取消成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Batch scrape job successfully cancelled."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "未找到批量抓取任务",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Batch scrape job not found."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/batch/scrape/{id}/errors": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "description": "批量抓取任务 ID",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "summary": "获取批量抓取作业的错误信息",
+        "operationId": "getBatchScrapeErrors",
+        "tags": [
+          "Scraping"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrawlErrorsResponseObj"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "需要付费",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求过于频繁",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/crawl/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "description": "抓取任务 ID",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "summary": "获取爬取任务状态",
+        "operationId": "getCrawlStatus",
+        "tags": [
+          "Crawling"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功的响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrawlStatusResponseObj"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "需要付费",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求过多",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "取消抓取作业",
+        "operationId": "cancelCrawl",
+        "tags": [
+          "Crawling"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "已成功取消",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "cancelled"
+                      ],
+                      "example": "cancelled"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "未找到抓取任务",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Crawl job not found."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/crawl/{id}/errors": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "description": "抓取任务的 ID",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "summary": "获取爬取任务的错误信息",
+        "operationId": "getCrawlErrors",
+        "tags": [
+          "Crawling"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功的响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrawlErrorsResponseObj"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "需要付款",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求次数过多",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/crawl": {
+      "post": {
+        "summary": "根据选项爬取多个 URL",
+        "operationId": "crawlUrls",
+        "tags": [
+          "Crawling"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "开始爬取时使用的起始 URL"
+                  },
+                  "excludePaths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "根据 URL pathname 的正则表达式模式，将匹配的 URL 排除在抓取之外。例如，如果你在基础 URL firecrawl.dev 上设置 `\"excludePaths\": [\"blog/.*\"]`，那么所有匹配该模式的结果都会被排除，例如：https://www.firecrawl.dev/blog/firecrawl-launch-week-1-recap。"
+                  },
+                  "includePaths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "用于在抓取中指定要包含哪些 URL 的 URL 路径名正则表达式模式。只有与指定模式匹配的路径才会包含在响应中。例如，如果你为基础 URL firecrawl.dev 设置 `\"includePaths\": [\"blog/.*\"]`，则只有与该模式匹配的结果会被包含，例如：https://www.firecrawl.dev/blog/firecrawl-launch-week-1-recap。"
+                  },
+                  "maxDepth": {
+                    "type": "integer",
+                    "description": "从输入 URL 的基础路径开始可爬取的最大绝对深度。简单来说，就是被抓取 URL 的路径名中允许包含的斜杠数量上限。",
+                    "default": 10
+                  },
+                  "maxDiscoveryDepth": {
+                    "type": "integer",
+                    "description": "基于发现顺序的最大抓取深度。根站点及站点地图中的页面的发现深度为 0。比如，如果你将其设置为 1，并启用 ignoreSitemap，你只会抓取输入的 URL，以及该页面上所有被链接到的 URL。"
+                  },
+                  "ignoreSitemap": {
+                    "type": "boolean",
+                    "description": "爬取时忽略网站的 sitemap",
+                    "default": false
+                  },
+                  "ignoreQueryParameters": {
+                    "type": "boolean",
+                    "description": "请勿对同一路径使用不同（或无）查询参数进行重复抓取",
+                    "default": false
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "description": "要抓取的最大页面数。默认上限为 10000。",
+                    "default": 10000
+                  },
+                  "allowBackwardLinks": {
+                    "type": "boolean",
+                    "description": "⚠️ 已弃用：请改用“crawlEntireDomain”。此选项允许爬虫跟踪指向同级或父级 URL 的内部链接，而不仅限于子路径。",
+                    "default": false,
+                    "deprecated": true
+                  },
+                  "crawlEntireDomain": {
+                    "type": "boolean",
+                    "description": "允许爬虫跟踪到同级或父级的站内链接，而不仅仅是子路径。\n\nfalse：只爬取更深层（子级）URL。\n→ 例如 /features/feature-1 → /features/feature-1/tips ✅\n→ 不会跟踪 /pricing 或 / ❌\n\ntrue：爬取任意站内链接，包括同级和父级。\n→ 例如 /features/feature-1 → /pricing、/ 等 ✅\n\n当需要在嵌套路径之外更广泛地覆盖站内链接时，将其设置为 true。",
+                    "default": false
+                  },
+                  "allowExternalLinks": {
+                    "type": "boolean",
+                    "description": "允许爬虫跟随链接访问外部网站。",
+                    "default": false
+                  },
+                  "allowSubdomains": {
+                    "type": "boolean",
+                    "description": "允许爬虫跟随指向主域子域的链接。",
+                    "default": false
+                  },
+                  "delay": {
+                    "type": "number",
+                    "description": "每次抓取之间的延迟时间（秒）。有助于遵守网站的速率限制。"
+                  },
+                  "maxConcurrency": {
+                    "type": "integer",
+                    "description": "最大抓取并发数。该参数用于为本次抓取任务设置并发上限；如果未指定，将沿用你团队的并发限制。"
+                  },
+                  "webhook": {
+                    "type": "object",
+                    "description": "Webhook 规范对象。",
+                    "properties": {
+                      "url": {
+                        "type": "string",
+                        "description": "用于接收 webhook 的 URL。该 webhook 会在以下事件中触发：当爬取开始时（crawl.started）、每完成一页爬取时（crawl.page），以及爬取结束时（crawl.completed 或 crawl.failed）。响应将与 `/scrape` 端点相同。"
+                      },
+                      "headers": {
+                        "type": "object",
+                        "description": "要发送到 webhook URL 的 HTTP 请求头。",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "metadata": {
+                        "type": "object",
+                        "description": "将包含在本次抓取所有 webhook 负载中的自定义元数据",
+                        "additionalProperties": true
+                      },
+                      "events": {
+                        "type": "array",
+                        "description": "要发送到 webhook URL 的事件类型。（默认：全部）",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "completed",
+                            "page",
+                            "failed",
+                            "started"
+                          ]
+                        }
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ]
+                  },
+                  "scrapeOptions": {
+                    "$ref": "#/components/schemas/ScrapeOptions"
+                  },
+                  "zeroDataRetention": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "如果为 true，则本次爬取将不会保留任何数据。若要启用此功能，请联系 help@firecrawl.dev"
+                  }
+                },
+                "required": [
+                  "url"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功的响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrawlResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "需要付费",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求次数过多",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/map": {
+      "post": {
+        "summary": "基于选项对多个 URL 进行映射",
+        "operationId": "mapUrls",
+        "tags": [
+          "Mapping"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "开始爬取时使用的基础 URL"
+                  },
+                  "search": {
+                    "type": "string",
+                    "description": "用于映射的搜索查询。在 Alpha 阶段，搜索功能中的「智能」部分最多只会处理 500 条搜索结果。不过，如果 Map 找到更多结果，则不会对这些结果施加任何限制。"
+                  },
+                  "ignoreSitemap": {
+                    "type": "boolean",
+                    "description": "抓取网站时忽略其 sitemap。",
+                    "default": true
+                  },
+                  "sitemapOnly": {
+                    "type": "boolean",
+                    "description": "仅返回网站站点地图中包含的链接",
+                    "default": false
+                  },
+                  "includeSubdomains": {
+                    "type": "boolean",
+                    "description": "包含该网站子域名",
+                    "default": true
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "description": "要返回的最大链接数",
+                    "default": 5000,
+                    "maximum": 30000
+                  },
+                  "timeout": {
+                    "type": "integer",
+                    "description": "超时时间（毫秒）。默认情况下没有超时限制。"
+                  },
+                  "location": {
+                    "type": "object",
+                    "description": "请求的地理位置设置。指定后（如果可用），将使用相应的代理，并模拟对应的语言和时区设置。如果未指定，默认值为“US”。",
+                    "properties": {
+                      "country": {
+                        "type": "string",
+                        "description": "ISO 3166-1 alpha-2 国家代码（例如：US、AU、DE、JP）",
+                        "pattern": "^[A-Z]{2}$",
+                        "default": "US"
+                      },
+                      "languages": {
+                        "type": "array",
+                        "description": "请求中按优先级排序的首选语言和区域设置。默认使用指定位置的语言。参见 https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Accept-Language",
+                        "items": {
+                          "type": "string",
+                          "example": "en-US"
+                        }
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "url"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "需要付款",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求过于频繁",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/extract": {
+      "post": {
+        "summary": "利用 LLM 从网页中提取结构化数据",
+        "operationId": "extractData",
+        "tags": [
+          "Extraction"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "urls": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uri",
+                      "description": "用于提取数据的 URL。URL 应采用 glob 格式。"
+                    }
+                  },
+                  "prompt": {
+                    "type": "string",
+                    "description": "用于引导抽取过程的提示词"
+                  },
+                  "schema": {
+                    "type": "object",
+                    "description": "用于定义提取后数据结构的模式。必须符合 [JSON Schema](https://json-schema.org/) 规范。"
+                  },
+                  "enableWebSearch": {
+                    "type": "boolean",
+                    "description": "当设为 true 时，提取过程会通过网页搜索获取更多数据",
+                    "default": false
+                  },
+                  "ignoreSitemap": {
+                    "type": "boolean",
+                    "description": "为 true 时，网站扫描过程中会忽略 sitemap.xml 文件",
+                    "default": false
+                  },
+                  "includeSubdomains": {
+                    "type": "boolean",
+                    "description": "设为 true 时，还会扫描所提供 URL 的子域名",
+                    "default": true
+                  },
+                  "showSources": {
+                    "type": "boolean",
+                    "description": "如果为 true，用于提取数据的来源将会包含在响应的 `sources` 字段中",
+                    "default": false
+                  },
+                  "scrapeOptions": {
+                    "$ref": "#/components/schemas/ScrapeOptions"
+                  },
+                  "ignoreInvalidURLs": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "如果在 urls 数组中指定了无效 URL，这些 URL 会被忽略。请求不会因此整体失败，而是会使用剩余的有效 URL 执行提取操作，并在响应的 invalidURLs 字段中返回这些无效 URL。"
+                  }
+                },
+                "required": [
+                  "urls"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "提取成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtractResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "无效请求",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Invalid input data."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/extract/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "description": "提取任务的 ID",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "summary": "获取提取任务的状态",
+        "operationId": "getExtractStatus",
+        "tags": [
+          "Extraction"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtractStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/crawl/active": {
+      "get": {
+        "summary": "获取当前已认证团队的所有活跃抓取任务",
+        "operationId": "getActiveCrawls",
+        "tags": [
+          "Crawling"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功的响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "crawls": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "description": "爬取任务的唯一标识符"
+                          },
+                          "teamId": {
+                            "type": "string",
+                            "description": "拥有此抓取任务的团队 ID"
+                          },
+                          "url": {
+                            "type": "string",
+                            "format": "uri",
+                            "description": "爬取的起始 URL"
+                          },
+                          "options": {
+                            "type": "object",
+                            "description": "本次抓取使用的爬虫配置",
+                            "properties": {
+                              "scrapeOptions": {
+                                "$ref": "#/components/schemas/ScrapeOptions"
+                              }
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "teamId",
+                          "url",
+                          "status",
+                          "options"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "需要付款",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "请求过多",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/deep-research": {
+      "post": {
+        "summary": "针对查询启动深度研究操作",
+        "operationId": "startDeepResearch",
+        "tags": [
+          "Research"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "需要研究的查询"
+                  },
+                  "maxDepth": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 12,
+                    "default": 7,
+                    "description": "研究迭代最大深度"
+                  },
+                  "timeLimit": {
+                    "type": "integer",
+                    "minimum": 30,
+                    "maximum": 600,
+                    "default": 300,
+                    "description": "时间限制（秒）"
+                  },
+                  "maxUrls": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000,
+                    "default": 20,
+                    "description": "要分析的 URL 数量上限"
+                  },
+                  "analysisPrompt": {
+                    "type": "string",
+                    "description": "用于最终分析的提示词。可用于按特定方式格式化最终分析的 Markdown。"
+                  },
+                  "systemPrompt": {
+                    "type": "string",
+                    "description": "供研究代理使用的系统提示词，可用于将其引导到特定的研究方向。"
+                  },
+                  "formats": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "markdown",
+                        "json"
+                      ],
+                      "default": [
+                        "markdown"
+                      ]
+                    }
+                  },
+                  "jsonOptions": {
+                    "type": "object",
+                    "description": "JSON 输出选项",
+                    "properties": {
+                      "schema": {
+                        "type": "object",
+                        "description": "用于 JSON 输出的模式定义。必须符合 [JSON Schema](https://json-schema.org/) 规范。"
+                      },
+                      "systemPrompt": {
+                        "type": "string",
+                        "description": "用于生成 JSON 输出的系统提示"
+                      },
+                      "prompt": {
+                        "type": "string",
+                        "description": "用于生成 JSON 输出的提示"
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "query"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "研究任务已成功开始",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "description": "研究任务的 ID"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求参数无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Invalid parameters provided"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/deep-research/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "description": "研究任务 ID",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "summary": "获取深度研究任务的状态和结果",
+        "operationId": "getDeepResearchStatus",
+        "tags": [
+          "Research"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功的响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "finalAnalysis": {
+                          "type": "string"
+                        },
+                        "json": {
+                          "type": "object",
+                          "description": "仅在使用 JSON 格式时显示",
+                          "nullable": true
+                        },
+                        "activities": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string"
+                              },
+                              "message": {
+                                "type": "string"
+                              },
+                              "timestamp": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "depth": {
+                                "type": "integer"
+                              }
+                            }
+                          }
+                        },
+                        "sources": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "url": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "oneOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                ],
+                                "description": "从页面提取的标题，类型可以是字符串或字符串数组"
+                              },
+                              "description": {
+                                "oneOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                ],
+                                "description": "从页面中提取的描述，可以是字符串或字符串数组"
+                              },
+                              "favicon": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "processing",
+                            "completed",
+                            "failed"
+                          ]
+                        },
+                        "error": {
+                          "type": "string"
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "currentDepth": {
+                          "type": "integer"
+                        },
+                        "maxDepth": {
+                          "type": "integer"
+                        },
+                        "totalUrls": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "未找到研究作业",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Research job not found"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/team/credit-usage": {
+      "get": {
+        "summary": "获取当前团队的剩余额度",
+        "operationId": "getCreditUsage",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功的响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "remaining_credits": {
+                          "type": "number",
+                          "description": "团队剩余额度",
+                          "example": 1000
+                        },
+                        "plan_credits": {
+                          "type": "number",
+                          "description": "当前套餐内的基础积分数量。本数值不包括优惠券积分、积分包或自动充值获得的积分。",
+                          "example": 500000
+                        },
+                        "billing_period_start": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "计费周期的开始日期。如果使用免费方案，则为 null",
+                          "example": "2025-01-01T00:00:00Z",
+                          "nullable": true
+                        },
+                        "billing_period_end": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "计费周期结束日期。使用免费方案时为 null",
+                          "example": "2025-01-31T23:59:59Z",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "未找到额度使用情况信息",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Could not find credit usage information"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Internal server error while fetching credit usage"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/team/credit-usage/historical": {
+      "get": {
+        "summary": "获取已认证团队的历史额度使用记录",
+        "operationId": "getHistoricalCreditUsage",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "byApiKey",
+            "in": "query",
+            "description": "按 API 密钥获取历史额度使用记录",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "periods": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "startDate": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "计费周期开始日期",
+                            "example": "2025-01-01T00:00:00Z"
+                          },
+                          "endDate": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "账单周期结束日期",
+                            "example": "2025-01-31T23:59:59Z"
+                          },
+                          "apiKey": {
+                            "type": "string",
+                            "description": "计费周期中使用的 API 密钥名称。如果 byApiKey 为 false（默认值），则为 null。",
+                            "nullable": true
+                          },
+                          "totalCredits": {
+                            "type": "integer",
+                            "description": "计费周期内已使用的总额度",
+                            "example": 1000
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Internal server error while fetching historical credit usage"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/team/token-usage": {
+      "get": {
+        "summary": "获取当前已认证团队的剩余 Token（仅限 Extract）",
+        "operationId": "getTokenUsage",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功的响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "remaining_tokens": {
+                          "type": "number",
+                          "description": "团队剩余 Token 数量",
+                          "example": 1000
+                        },
+                        "plan_tokens": {
+                          "type": "number",
+                          "description": "方案中包含的 Token 数量。不包括优惠券提供的 Token。",
+                          "example": 500000
+                        },
+                        "billing_period_start": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "计费周期的起始日期。若使用免费计划，则为 null",
+                          "example": "2025-01-01T00:00:00Z",
+                          "nullable": true
+                        },
+                        "billing_period_end": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "计费周期结束日期。使用免费套餐时为 null",
+                          "example": "2025-01-31T23:59:59Z",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "未找到 Token 使用情况",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Could not find token usage information"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Internal server error while fetching token usage"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/team/token-usage/historical": {
+      "get": {
+        "summary": "获取已认证团队的历史 Token 用量（仅限 Extract）",
+        "operationId": "getHistoricalTokenUsage",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "byApiKey",
+            "in": "query",
+            "description": "按 API 密钥获取历史 Token 使用量",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "periods": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "startDate": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "计费周期开始日期",
+                            "example": "2025-01-01T00:00:00Z"
+                          },
+                          "endDate": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "计费周期结束日期",
+                            "example": "2025-01-31T23:59:59Z"
+                          },
+                          "apiKey": {
+                            "type": "string",
+                            "description": "在该计费周期内使用的 API 密钥名称。若 byApiKey 为 false（默认），则为 null",
+                            "nullable": true
+                          },
+                          "totalTokens": {
+                            "type": "integer",
+                            "description": "计费周期内消耗的 Token 总数",
+                            "example": 1000
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Internal server error while fetching historical token usage"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/team/queue-status": {
+      "get": {
+        "summary": "团队抓取队列指标",
+        "operationId": "getQueueStatus",
+        "tags": [
+          "Miscellaneous"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功的响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "jobsInQueue": {
+                      "type": "number",
+                      "description": "当前队列中的任务数量"
+                    },
+                    "activeJobsInQueue": {
+                      "type": "number",
+                      "description": "当前正在运行的任务数"
+                    },
+                    "waitingJobsInQueue": {
+                      "type": "number",
+                      "description": "当前排队中的任务数"
+                    },
+                    "maxConcurrency": {
+                      "type": "number",
+                      "description": "根据你的套餐可同时运行的最大并发任务数"
+                    },
+                    "mostRecentSuccess": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "最近一次成功作业的时间戳",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/search": {
+      "post": {
+        "summary": "搜索并按需抓取搜索结果",
+        "operationId": "searchAndScrape",
+        "tags": [
+          "Search"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "搜索查询"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "description": "返回的最大结果数",
+                    "default": 5,
+                    "maximum": 100,
+                    "minimum": 1
+                  },
+                  "tbs": {
+                    "type": "string",
+                    "description": "基于时间的搜索参数。支持预定义时间范围（`qdr:h`、`qdr:d`、`qdr:w`、`qdr:m`、`qdr:y`）以及自定义日期范围（`cdr:1,cd_min:MM/DD/YYYY,cd_max:MM/DD/YYYY`）。"
+                  },
+                  "location": {
+                    "type": "string",
+                    "description": "搜索结果的 location 参数"
+                  },
+                  "timeout": {
+                    "type": "integer",
+                    "description": "超时时间（毫秒）",
+                    "default": 60000
+                  },
+                  "ignoreInvalidURLs": {
+                    "type": "boolean",
+                    "description": "会从搜索结果中排除对其他 Firecrawl 端点无效的 URL。这样当你将搜索结果数据传递到其他 Firecrawl API 端点时，可以减少出错。",
+                    "default": false
+                  },
+                  "scrapeOptions": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/BaseScrapeOptions"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "formats": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "markdown",
+                                "html",
+                                "rawHtml",
+                                "links",
+                                "screenshot",
+                                "screenshot@fullPage",
+                                "json",
+                                "extract"
+                              ]
+                            },
+                            "default": []
+                          }
+                        }
+                      }
+                    ],
+                    "description": "搜索结果抓取选项",
+                    "default": {}
+                  }
+                },
+                "required": [
+                  "query"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "title": {
+                            "type": "string",
+                            "description": "来自搜索结果的标题"
+                          },
+                          "description": {
+                            "type": "string",
+                            "description": "搜索结果中的描述"
+                          },
+                          "url": {
+                            "type": "string",
+                            "description": "搜索结果的URL"
+                          },
+                          "markdown": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "在请求抓取时返回的 Markdown 内容"
+                          },
+                          "html": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "若在 formats 中指定，则返回 HTML 内容"
+                          },
+                          "rawHtml": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "如果在 formats 中请求，则会返回原始 HTML 内容"
+                          },
+                          "links": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "如果在 formats 中有请求，则返回发现的链接"
+                          },
+                          "screenshot": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "如果在 formats 中请求了截图，将返回截图的 URL。截图在 24 小时后过期，之后将无法再下载。"
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "properties": {
+                              "title": {
+                                "oneOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                ],
+                                "description": "从页面中提取的标题，可以是字符串或字符串数组。"
+                              },
+                              "description": {
+                                "oneOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                ],
+                                "description": "从页面提取的描述，可以是字符串或字符串数组"
+                              },
+                              "sourceURL": {
+                                "type": "string"
+                              },
+                              "statusCode": {
+                                "type": "integer"
+                              },
+                              "error": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "warning": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "出现问题时显示的警告信息"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "请求超时",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Request timed out"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/llmstxt": {
+      "post": {
+        "summary": "为网站生成 LLMs.txt 文件",
+        "operationId": "generateLLMsTxt",
+        "tags": [
+          "LLMs.txt"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "用于生成 LLMs.txt 的源 URL"
+                  },
+                  "maxUrls": {
+                    "type": "integer",
+                    "description": "要分析的 URL 最大数量",
+                    "default": 2
+                  },
+                  "showFullText": {
+                    "type": "boolean",
+                    "description": "在响应中包含全文内容",
+                    "default": false
+                  }
+                },
+                "required": [
+                  "url"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "LLMs.txt 生成任务已成功启动",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "description": "LLMs.txt 生成作业的 ID"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "无效的请求参数",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Invalid parameters provided"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/llmstxt/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "description": "LLMs.txt 生成作业的 ID",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "summary": "获取 LLMs.txt 生成作业的状态和结果",
+        "operationId": "getLLMsTxtStatus",
+        "tags": [
+          "LLMs.txt"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功响应",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "processing",
+                        "completed",
+                        "failed"
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "llmstxt": {
+                          "type": "string",
+                          "description": "生成的 LLMs.txt 文件内容"
+                        },
+                        "llmsfulltxt": {
+                          "type": "string",
+                          "description": "当 showFullText 为 true 时的完整文本内容"
+                        }
+                      }
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "生成内容何时过期"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "未找到 LLMs.txt 生成作业",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "LLMs.txt generation job not found"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "BaseScrapeOptions": {
+        "type": "object",
+        "properties": {
+          "onlyMainContent": {
+            "type": "boolean",
+            "description": "仅返回页面的主体内容，不包括页眉、导航、页脚等。",
+            "default": true
+          },
+          "includeTags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "需要包含在输出中的标签。"
+          },
+          "excludeTags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "在输出结果中要排除的标签。"
+          },
+          "maxAge": {
+            "type": "integer",
+            "description": "如果页面的缓存版本的生成时间距现在小于此值（毫秒），则返回该缓存版本；如果缓存版本早于此值，则会重新抓取页面。如果你不需要极其实时的数据，启用此选项可以将抓取速度最多提升 5 倍。默认值为 0，表示禁用缓存。",
+            "default": 0
+          },
+          "headers": {
+            "type": "object",
+            "description": "随请求发送的请求头。可用于携带 cookies、user-agent 等信息。"
+          },
+          "waitFor": {
+            "type": "integer",
+            "description": "设置在获取内容前的延迟时间（毫秒），以便页面有足够时间加载完成。",
+            "default": 0
+          },
+          "mobile": {
+            "type": "boolean",
+            "description": "若要模拟移动端抓取，请将其设置为 true。适用于测试响应式页面并获取移动端截图。",
+            "default": false
+          },
+          "skipTlsVerification": {
+            "type": "boolean",
+            "description": "在发送请求时跳过 TLS 证书校验",
+            "default": false
+          },
+          "timeout": {
+            "type": "integer",
+            "description": "请求超时时间（毫秒）",
+            "default": 30000
+          },
+          "parsePDF": {
+            "type": "boolean",
+            "description": "控制在爬取过程中如何处理 PDF 文件。为 true 时，会提取 PDF 内容并转换为 Markdown 格式，按页数计费（每页 1 个积分）。为 false 时，会返回以 base64 编码的 PDF 文件，统一按 1 个积分计费。",
+            "default": true
+          },
+          "jsonOptions": {
+            "type": "object",
+            "description": "JSON 配置对象",
+            "properties": {
+              "schema": {
+                "type": "object",
+                "description": "用于提取的数据模式（可选）。必须符合 [JSON Schema](https://json-schema.org/) 规范。"
+              },
+              "systemPrompt": {
+                "type": "string",
+                "description": "用于抽取的系统提示（可选）"
+              },
+              "prompt": {
+                "type": "string",
+                "description": "在无 schema 情况下用于抽取的数据提示词（可选）"
+              }
+            }
+          },
+          "actions": {
+            "type": "array",
+            "description": "在抓取页面内容前需要执行的 actions",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "title": "Wait",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "wait"
+                      ],
+                      "description": "等待指定的毫秒数"
+                    },
+                    "milliseconds": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "等待的时间（毫秒）"
+                    },
+                    "selector": {
+                      "type": "string",
+                      "description": "用于定位该元素的查询选择器",
+                      "example": "#my-element"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "title": "Screenshot",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "screenshot"
+                      ],
+                      "description": "进行截图。链接将位于响应的 `actions.screenshots` 数组中。"
+                    },
+                    "fullPage": {
+                      "type": "boolean",
+                      "description": "是否截取整页截图，或仅截取当前视口。",
+                      "default": false
+                    },
+                    "quality": {
+                      "type": "integer",
+                      "description": "截图质量，取值范围为 1 至 100，100 为最高质量。"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "title": "Click",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "click"
+                      ],
+                      "description": "单击元素"
+                    },
+                    "selector": {
+                      "type": "string",
+                      "description": "用于查找元素的查询选择器",
+                      "example": "#load-more-button"
+                    },
+                    "all": {
+                      "type": "boolean",
+                      "description": "点击所有匹配该选择器的元素，而不仅仅是第一个元素。如果没有元素匹配该选择器，也不会抛出错误。",
+                      "default": false
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "selector"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "title": "Write text",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "write"
+                      ],
+                      "description": "在输入框、文本区域或 contenteditable 元素中写入文本。注意：在写入之前，必须先通过一次“click”操作使该元素获得焦点。文本将以逐字符输入的方式进行，以模拟键盘敲击。"
+                    },
+                    "text": {
+                      "type": "string",
+                      "description": "输入文本",
+                      "example": "Hello, world!"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "text"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "title": "Press a key",
+                  "description": "请在页面上按下任意键。按键代码请参考：https://asawicki.info/nosense/doc/devices/keyboard/key_codes.html。",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "press"
+                      ],
+                      "description": "在页面上按下任意键"
+                    },
+                    "key": {
+                      "type": "string",
+                      "description": "按键",
+                      "example": "Enter"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "key"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "title": "Scroll",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "scroll"
+                      ],
+                      "description": "滚动页面或特定元素"
+                    },
+                    "direction": {
+                      "type": "string",
+                      "enum": [
+                        "up",
+                        "down"
+                      ],
+                      "description": "滚动方向",
+                      "default": "down"
+                    },
+                    "selector": {
+                      "type": "string",
+                      "description": "需要滚动的元素的查询选择器",
+                      "example": "#my-element"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "title": "Scrape",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "scrape"
+                      ],
+                      "description": "抓取当前页面内容，同时返回其 URL 和 HTML。"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "title": "Execute JavaScript",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "executeJavascript"
+                      ],
+                      "description": "在页面上执行 JavaScript 代码"
+                    },
+                    "script": {
+                      "type": "string",
+                      "description": "待执行的 JavaScript 代码",
+                      "example": "document.querySelector('.button').click();"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "script"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "title": "Generate PDF",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "pdf"
+                      ],
+                      "description": "生成当前页面的 PDF。该 PDF 将在响应中的 `actions.pdfs` 数组里返回。"
+                    },
+                    "format": {
+                      "type": "string",
+                      "enum": [
+                        "A0",
+                        "A1",
+                        "A2",
+                        "A3",
+                        "A4",
+                        "A5",
+                        "A6",
+                        "Letter",
+                        "Legal",
+                        "Tabloid",
+                        "Ledger"
+                      ],
+                      "description": "生成的 PDF 的页面大小",
+                      "default": "Letter"
+                    },
+                    "landscape": {
+                      "type": "boolean",
+                      "description": "是否以横向页面方向生成 PDF 文件",
+                      "default": false
+                    },
+                    "scale": {
+                      "type": "number",
+                      "description": "生成的 PDF 的缩放比例",
+                      "default": 1
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                }
+              ]
+            }
+          },
+          "location": {
+            "type": "object",
+            "description": "请求的地理位置设置。指定后，如果可用，将使用合适的代理服务器，并模拟相应的语言和时区设置。如果未指定，默认值为“US”。",
+            "properties": {
+              "country": {
+                "type": "string",
+                "description": "ISO 3166-1 alpha-2 两位字母国家代码（例如：“US”、“AU”、“DE”、“JP”）",
+                "pattern": "^[A-Z]{2}$",
+                "default": "US"
+              },
+              "languages": {
+                "type": "array",
+                "description": "按照优先级为本次请求指定首选语言和区域设置。默认使用所指定地区的语言。详见：https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Accept-Language",
+                "items": {
+                  "type": "string",
+                  "example": "en-US"
+                }
+              }
+            }
+          },
+          "removeBase64Images": {
+            "type": "boolean",
+            "description": "从输出中移除所有 Base64 图片，以避免内容过于冗长。图片的替代文本（alt 文本）会保留在输出中，但其 URL 会被占位符替换。",
+            "default": true
+          },
+          "blockAds": {
+            "type": "boolean",
+            "description": "启用广告拦截和 Cookie 弹窗屏蔽。",
+            "default": true
+          },
+          "proxy": {
+            "type": "string",
+            "enum": [
+              "basic",
+              "stealth",
+              "auto"
+            ],
+            "description": "指定要使用的代理类型。\n\n - **basic**：用于抓取没有或仅有基础反爬虫机制的网站的代理。速度快，通常可用。\n - **stealth**：用于抓取具备高级反爬虫机制的网站的隐身代理。速度较慢，但在某些网站上更可靠。每次请求最多消耗 5 点积分。\n - **auto**：如果 basic 代理抓取失败，Firecrawl 将自动改用 stealth 代理重试抓取。如果使用 stealth 的重试成功，本次抓取将收取 5 点积分；如果首次使用 basic 抓取就成功，则仅收取常规费用。\n\n如果你未指定代理类型，Firecrawl 将默认使用 basic。"
+          },
+          "storeInCache": {
+            "type": "boolean",
+            "description": "如果为 true，该页面将被存储到 Firecrawl 的索引和缓存中。若你的抓取活动可能涉及数据保护方面的问题，将其设置为 false 会更合适。使用某些与敏感抓取相关的参数（如 actions、headers）时，该参数会被强制设为 false。",
+            "default": true
+          }
+        }
+      },
+      "ScrapeOptions": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/BaseScrapeOptions"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "formats": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "markdown",
+                    "html",
+                    "rawHtml",
+                    "links",
+                    "screenshot",
+                    "screenshot@fullPage",
+                    "json",
+                    "changeTracking"
+                  ]
+                },
+                "description": "输出中要包含的formats。",
+                "default": [
+                  "markdown"
+                ]
+              },
+              "changeTrackingOptions": {
+                "type": "object",
+                "description": "用于 changeTracking 的选项（Beta）。仅当在 formats 中包含 'changeTracking' 时才适用。使用 changeTracking 时，还必须同时指定 'markdown' 格式。",
+                "properties": {
+                  "modes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "git-diff",
+                        "json"
+                      ]
+                    },
+                    "description": "用于更改跟踪的模式。`git-diff` 提供详细的差异对比，而 `json` 用于比较提取的 JSON 数据。"
+                  },
+                  "schema": {
+                    "type": "object",
+                    "description": "在使用 `json` 模式时用于 JSON 提取的 schema。用于定义要提取和对比的数据结构。必须符合 [JSON Schema](https://json-schema.org/) 规范。"
+                  },
+                  "prompt": {
+                    "type": "string",
+                    "description": "在使用 JSON 模式进行变更跟踪时要使用的提示。如果未提供，则会使用默认提示。"
+                  },
+                  "tag": {
+                    "type": "string",
+                    "nullable": true,
+                    "default": null,
+                    "description": "用于变更跟踪的标签。标签可以将变更跟踪历史划分为不同的「分支」，使用特定标签的变更跟踪只会与同一标签下的抓取结果进行比较。如果未提供，则会使用默认标签（null）。"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "ScrapeResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "markdown": {
+                "type": "string"
+              },
+              "html": {
+                "type": "string",
+                "nullable": true,
+                "description": "当 `formats` 中包含 `html` 时，返回该页面内容的 HTML 版本"
+              },
+              "rawHtml": {
+                "type": "string",
+                "nullable": true,
+                "description": "如果 `formats` 中包含 `rawHtml`，则为页面的原始 HTML 内容"
+              },
+              "screenshot": {
+                "type": "string",
+                "nullable": true,
+                "description": "如果在 `formats` 中包含 `screenshot`，将返回该页面的截图。截图将在 24 小时后失效，之后将无法再下载。"
+              },
+              "links": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "当 `formats` 中包含 `links` 时，页面上的链接列表"
+              },
+              "actions": {
+                "type": "object",
+                "nullable": true,
+                "description": "`actions` 参数中各项 actions 的执行结果。仅当请求中提供了 `actions` 参数时才会包含此字段。",
+                "properties": {
+                  "screenshots": {
+                    "type": "array",
+                    "description": "截图 URL，与提供的截图 actions 顺序一致。截图将在 24 小时后过期，之后将无法再下载。",
+                    "items": {
+                      "type": "string",
+                      "format": "url"
+                    }
+                  },
+                  "scrapes": {
+                    "type": "array",
+                    "description": "按照提供的 scrape actions 的顺序抓取内容。",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string"
+                        },
+                        "html": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "javascriptReturns": {
+                    "type": "array",
+                    "description": "JavaScript 的返回值，其顺序与提供的 executeJavascript actions 相同。",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "value": {}
+                      }
+                    }
+                  },
+                  "pdfs": {
+                    "type": "array",
+                    "description": "生成的 PDF，其顺序与提供的 pdf actions 保持一致。",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "metadata": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "language": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "sourceURL": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "keywords": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    ],
+                    "description": "从页面中提取的关键词，可以为字符串或字符串数组"
+                  },
+                  "ogLocaleAlternate": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "此页面的其他语言版本"
+                  },
+                  "<any other metadata> ": {
+                    "type": "string"
+                  },
+                  "statusCode": {
+                    "type": "integer",
+                    "description": "页面状态码"
+                  },
+                  "error": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "页面错误信息"
+                  }
+                }
+              },
+              "llm_extraction": {
+                "type": "object",
+                "description": "在使用 LLM 提取时显示。根据定义的 schema 从页面中提取的数据。",
+                "nullable": true
+              },
+              "warning": {
+                "type": "string",
+                "nullable": true,
+                "description": "在使用 LLM Extraction 时显示。警告信息会提示你提取过程中的任何问题。"
+              },
+              "changeTracking": {
+                "type": "object",
+                "nullable": true,
+                "description": "当 `formats` 中包含 `changeTracking` 时，会返回变更追踪信息。仅在请求 `changeTracking` format 时才会提供。",
+                "properties": {
+                  "previousScrapeAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true,
+                    "description": "用于与当前页面进行比较的上一次抓取时间戳。如果不存在之前的抓取记录，则为 null。"
+                  },
+                  "changeStatus": {
+                    "type": "string",
+                    "enum": [
+                      "new",
+                      "same",
+                      "changed",
+                      "removed"
+                    ],
+                    "description": "两个页面版本比较的结果。`new` 表示该页面之前不存在，`same` 表示内容没有变化，`changed` 表示内容发生了变化，`removed` 表示该页面已被移除。"
+                  },
+                  "visibility": {
+                    "type": "string",
+                    "enum": [
+                      "visible",
+                      "hidden"
+                    ],
+                    "description": "当前页面/URL 的可见性。\"visible\" 表示该 URL 是通过自然路径（链接或 sitemap）发现的，\"hidden\" 表示该 URL 是通过之前抓取结果的记忆发现的。"
+                  },
+                  "diff": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "在使用“git-diff”模式时生成的 Git 风格差异（diff）。仅在模式设置为“git-diff”时才会出现。"
+                  },
+                  "json": {
+                    "type": "object",
+                    "nullable": true,
+                    "description": "在使用 `json` 模式时的 JSON 比较结果。仅在模式设置为 `json` 时可用。它会根据 `schema` 中定义的类型，返回 `previous` 和 `current` 抓取结果中所有键及其对应值的列表。示例参见[这里](/features/change-tracking)"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "CrawlStatusResponseObj": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "当前爬取任务的状态。可能为 `scraping`、`completed` 或 `failed` 之一。"
+          },
+          "total": {
+            "type": "integer",
+            "description": "尝试爬取的页面总数。"
+          },
+          "completed": {
+            "type": "integer",
+            "description": "成功爬取的页面数量。"
+          },
+          "creditsUsed": {
+            "type": "integer",
+            "description": "本次爬取所消耗的额度数。"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "抓取任务到期的日期和时间。"
+          },
+          "next": {
+            "type": "string",
+            "nullable": true,
+            "description": "用于获取后续 10MB 数据的 URL。如果抓取尚未完成或响应大小超过 10MB，则会返回该字段。"
+          },
+          "data": {
+            "type": "array",
+            "description": "爬取数据。",
+            "items": {
+              "type": "object",
+              "properties": {
+                "markdown": {
+                  "type": "string"
+                },
+                "html": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "当 `includeHtml` 为 true 时，页面内容的 HTML 格式版本"
+                },
+                "rawHtml": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "如果 `includeRawHtml` 为 true，则返回页面的原始 HTML 内容"
+                },
+                "links": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "当 `includeLinks` 为 true 时，页面上的链接列表"
+                },
+                "screenshot": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "`includeScreenshot` 为 true 时的页面截图"
+                },
+                "metadata": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ],
+                      "description": "从页面中提取的标题，可以是一个字符串或字符串数组"
+                    },
+                    "description": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ],
+                      "description": "从页面提取的描述信息，可以是字符串或字符串数组"
+                    },
+                    "language": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ],
+                      "nullable": true,
+                      "description": "从页面中提取的语言，可以是字符串或字符串数组"
+                    },
+                    "sourceURL": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "keywords": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ],
+                      "description": "从页面提取的关键词，可以是字符串或字符串数组。"
+                    },
+                    "ogLocaleAlternate": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "页面的其他语言版本"
+                    },
+                    "<any other metadata> ": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ],
+                      "description": "从 HTML 中提取的其他元数据，可以为字符串或字符串数组"
+                    },
+                    "statusCode": {
+                      "type": "integer",
+                      "description": "页面状态码"
+                    },
+                    "error": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "页面错误信息"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "CrawlErrorsResponseObj": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "抓取任务错误及其详情",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "timestamp": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "失败时间的 ISO 时间戳"
+                },
+                "url": {
+                  "type": "string",
+                  "description": "已爬取 URL"
+                },
+                "error": {
+                  "type": "string",
+                  "description": "错误信息"
+                }
+              }
+            }
+          },
+          "robotsBlocked": {
+            "type": "array",
+            "description": "在抓取时尝试访问但被 robots.txt 阻止的 URL 列表",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "BatchScrapeStatusResponseObj": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "批量抓取的当前状态。状态可能为 `scraping`、`completed` 或 `failed`。"
+          },
+          "total": {
+            "type": "integer",
+            "description": "尝试抓取的页面总数。"
+          },
+          "completed": {
+            "type": "integer",
+            "description": "已成功抓取的页面数量。"
+          },
+          "creditsUsed": {
+            "type": "integer",
+            "description": "该批量抓取所使用的积分数量。"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "批量抓取任务的到期时间。"
+          },
+          "next": {
+            "type": "string",
+            "nullable": true,
+            "description": "用于获取后续 10MB 数据的 URL。如果批量抓取任务尚未完成，或响应数据大于 10MB，则会返回此 URL。"
+          },
+          "data": {
+            "type": "array",
+            "description": "批量爬取的数据。",
+            "items": {
+              "type": "object",
+              "properties": {
+                "markdown": {
+                  "type": "string"
+                },
+                "html": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "`includeHtml` 为 true 时，页面内容的 HTML 版本"
+                },
+                "rawHtml": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "如果 `includeRawHtml` 为 true，则为页面的原始 HTML 内容"
+                },
+                "links": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "如果 `includeLinks` 为 true，则包含页面上的链接列表"
+                },
+                "screenshot": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "当 `includeScreenshot` 为 true 时的页面截图"
+                },
+                "metadata": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ],
+                      "description": "从页面中提取的标题，可以是字符串或字符串数组"
+                    },
+                    "description": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ],
+                      "description": "从页面中提取的描述，可以是一个字符串或字符串数组"
+                    },
+                    "language": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ],
+                      "nullable": true,
+                      "description": "从页面提取的语言，可以是一个字符串或字符串数组"
+                    },
+                    "sourceURL": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "keywords": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ],
+                      "description": "从页面提取的关键词，可以为字符串或字符串数组"
+                    },
+                    "ogLocaleAlternate": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "此页面的其他语言版本"
+                    },
+                    "<any other metadata> ": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ],
+                      "description": "从 HTML 中提取的其他元数据，可以是字符串或字符串数组"
+                    },
+                    "statusCode": {
+                      "type": "integer",
+                      "description": "页面状态码"
+                    },
+                    "error": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "页面错误信息"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "CrawlResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      },
+      "BatchScrapeResponseObj": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "invalidURLs": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "type": "string"
+            },
+            "description": "如果 ignoreInvalidURLs 为 true，则该字段是一个数组，包含请求中指定的无效 URL。若没有无效 URL，则该数组为空。若 ignoreInvalidURLs 为 false，则该字段为 undefined。"
+          }
+        }
+      },
+      "MapResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ExtractResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "invalidURLs": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "type": "string"
+            },
+            "description": "如果 ignoreInvalidURLs 为 true，则此字段是一个数组，包含请求中指定的无效 URL。若没有无效 URL，则该数组为空。若 ignoreInvalidURLs 为 false，则此字段为 undefined。"
+          }
+        }
+      },
+      "ExtractStatusResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "data": {
+            "type": "object"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "processing",
+              "failed",
+              "cancelled"
+            ],
+            "description": "提取作业的当前状态"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ]
+}

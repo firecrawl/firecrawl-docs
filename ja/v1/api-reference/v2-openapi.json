@@ -1,0 +1,3261 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Firecrawl API",
+    "version": "v2",
+    "description": "Firecrawl のサービスと連携し、Webスクレイピングやクローリングを行うための API です。",
+    "contact": {
+      "name": "Firecrawl Support",
+      "url": "https://firecrawl.dev/support",
+      "email": "support@firecrawl.dev"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.firecrawl.dev/v2"
+    }
+  ],
+  "paths": {
+    "/scrape": {
+      "post": {
+        "summary": "1つのURLをスクレイピングし、必要に応じてLLMで情報を抽出する",
+        "operationId": "scrapeAndExtractFromUrl",
+        "tags": [
+          "Scraping"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "url": {
+                        "type": "string",
+                        "format": "uri",
+                        "description": "スクレイプするURL"
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ]
+                  },
+                  {
+                    "$ref": "#/components/schemas/ScrapeOptions"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "zeroDataRetention": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "true に設定した場合、このスクレイプに対してデータを一切保持しない（ゼロデータ保持）モードが有効になります。この機能を有効化するには、help@firecrawl.dev までご連絡ください。"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功時のレスポンス",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScrapeResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "お支払いが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "リクエスト数が多すぎます",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーエラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "code": {
+                      "type": "string",
+                      "example": "UNKNOWN_ERROR"
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/batch/scrape": {
+      "post": {
+        "summary": "複数のURLをスクレイピングし、必要に応じてLLMで情報を抽出する",
+        "operationId": "scrapeAndExtractFromUrls",
+        "tags": [
+          "Scraping"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "urls": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "format": "uri",
+                          "description": "スクレイピング対象のURL"
+                        }
+                      },
+                      "webhook": {
+                        "type": "object",
+                        "description": "Webhook の仕様を表すオブジェクト。",
+                        "properties": {
+                          "url": {
+                            "type": "string",
+                            "description": "Webhook の送信先となる URL。バッチスクレイプの開始時（batch_scrape.started）、各ページのスクレイプ時（batch_scrape.page）、およびバッチスクレイプの完了時（batch_scrape.completed または batch_scrape.failed）にトリガーされます。レスポンスは `/scrape` エンドポイントと同じです。"
+                          },
+                          "headers": {
+                            "type": "object",
+                            "description": "Webhook URL に送信する HTTP ヘッダー。",
+                            "additionalProperties": {
+                              "type": "string"
+                            }
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "description": "このクロールに対するすべてのウェブフックペイロードに含められるカスタムメタデータ",
+                            "additionalProperties": true
+                          },
+                          "events": {
+                            "type": "array",
+                            "description": "Webhook URL に送信するイベントの種類。（既定値: all）",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "completed",
+                                "page",
+                                "failed",
+                                "started"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "url"
+                        ]
+                      },
+                      "maxConcurrency": {
+                        "type": "integer",
+                        "description": "同時スクレイプ数の上限。このパラメータで、このバッチスクレイプにおける同時実行数の上限を設定できます。指定しない場合、バッチスクレイプはチームに設定されている同時実行数の上限に従います。"
+                      },
+                      "ignoreInvalidURLs": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "urls 配列内に無効な URL が指定されていた場合、それらは無視されます。リクエスト全体が失敗するのではなく、残りの有効な URL を使ってバッチスクレイピングが作成され、無効な URL はレスポンスの invalidURLs フィールドで返されます。"
+                      }
+                    },
+                    "required": [
+                      "urls"
+                    ]
+                  },
+                  {
+                    "$ref": "#/components/schemas/ScrapeOptions"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "zeroDataRetention": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "true の場合、このバッチスクレイプではデータを一切保持しない設定が有効になります。この機能を有効にするには、help@firecrawl.dev までご連絡ください。"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功時のレスポンス",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchScrapeResponseObj"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "お支払いが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "リクエストが多すぎます。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーエラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/batch/scrape/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "description": "バッチスクレイピングジョブのID",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "summary": "バッチスクレイピングジョブのステータスを取得",
+        "operationId": "getBatchScrapeStatus",
+        "tags": [
+          "Scraping"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功時のレスポンス",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchScrapeStatusResponseObj"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "お支払いが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "リクエストが多すぎます",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーエラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "バッチスクレイピングジョブをキャンセルする",
+        "operationId": "cancelBatchScrape",
+        "tags": [
+          "Scraping"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "キャンセルに成功しました",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Batch scrape job successfully cancelled."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "バッチスクレイピングジョブが見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Batch scrape job not found."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーエラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/batch/scrape/{id}/errors": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "description": "バッチスクレイピングジョブのID",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "summary": "バッチスクレイピングジョブのエラーを取得",
+        "operationId": "getBatchScrapeErrors",
+        "tags": [
+          "Scraping"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功時のレスポンス",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrawlErrorsResponseObj"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "お支払いが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "リクエストが多すぎます。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーエラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/crawl/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "description": "クロールジョブのID",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "summary": "クロールジョブの状態を取得する",
+        "operationId": "getCrawlStatus",
+        "tags": [
+          "Crawling"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功時のレスポンス",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrawlStatusResponseObj"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "お支払いが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "リクエスト数が多すぎます",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーエラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "クロールジョブをキャンセルする",
+        "operationId": "cancelCrawl",
+        "tags": [
+          "Crawling"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "キャンセルが完了しました",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "cancelled"
+                      ],
+                      "example": "cancelled"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "クロールジョブが見つかりませんでした",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Crawl job not found."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーエラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/crawl/{id}/errors": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "description": "クロールジョブのID",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "summary": "クロールジョブのエラーを取得",
+        "operationId": "getCrawlErrors",
+        "tags": [
+          "Crawling"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功時のレスポンス",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrawlErrorsResponseObj"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "お支払いが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "リクエスト数が多すぎます",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーエラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/crawl": {
+      "post": {
+        "summary": "オプションに応じて複数のURLをクロールする",
+        "operationId": "crawlUrls",
+        "tags": [
+          "Crawling"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "クロールを開始するためのベースURL"
+                  },
+                  "prompt": {
+                    "type": "string",
+                    "description": "自然言語からクローラーオプション（以下のすべてのパラメータ）を生成するために使用するプロンプトです。明示的に設定されたパラメータは、生成された値よりも優先されます。"
+                  },
+                  "excludePaths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "クロールから除外するURLパス名の正規表現パターンです。たとえば、ベースURLが firecrawl.dev の場合に \"excludePaths\": [\"blog/.*\"] を設定すると、https://www.firecrawl.dev/blog/firecrawl-launch-week-1-recap のようにそのパターンに一致するURLは、すべてクロール対象から除外されます。"
+                  },
+                  "includePaths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "クロールに含めるURLを指定するためのURLパス名の正規表現パターンです。指定したパターンにマッチするパスのみがレスポンスに含まれます。たとえば、ベースURLが firecrawl.dev の場合に \"includePaths\": [\"blog/.*\"] を設定すると、そのパターンにマッチする結果のみがレスポンスに含まれます（例: https://www.firecrawl.dev/blog/firecrawl-launch-week-1-recap）。"
+                  },
+                  "maxDiscoveryDepth": {
+                    "type": "integer",
+                    "description": "発見順序に基づいてクロールする最大深度です。ルートサイトおよびサイトマップで指定されたページの発見深度は 0 です。たとえば、この値を 1 に設定し、かつ ignoreSitemap を有効にした場合、入力した URL と、そのページからリンクされているすべての URL だけをクロールします。"
+                  },
+                  "sitemap": {
+                    "type": "string",
+                    "enum": [
+                      "skip",
+                      "include"
+                    ],
+                    "description": "クロール時のサイトマップモードです。「skip」に設定すると、クローラーはウェブサイトのサイトマップを参照せず、指定したURLを起点として、そこから辿って発見したページのみをクロールします。",
+                    "default": "include"
+                  },
+                  "ignoreQueryParameters": {
+                    "type": "boolean",
+                    "description": "同じパスを、クエリパラメータを変えて（または付けずに）再度スクレイピングしないでください",
+                    "default": false
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "description": "クロールするページ数の上限です。デフォルトの上限値は 10,000 です。",
+                    "default": 10000
+                  },
+                  "crawlEntireDomain": {
+                    "type": "boolean",
+                    "description": "クローラーが、子パスだけでなく、同階層や親の URL などの内部リンクもたどれるようにします。\n\nfalse: より深い（子）URL のみをクロールします。\n→ 例: /features/feature-1 → /features/feature-1/tips ✅\n→ /pricing や / には進みません ❌\n\ntrue: 同階層や親を含む、あらゆる内部リンクをクロールします。\n→ 例: /features/feature-1 → /pricing、/ など ✅\n\nネストされたパス以外もクロール対象に含めて、内部リンクの範囲を広げたい場合は true を使用します。",
+                    "default": false
+                  },
+                  "allowExternalLinks": {
+                    "type": "boolean",
+                    "description": "クローラーが外部サイトへのリンクをたどることを許可します。",
+                    "default": false
+                  },
+                  "allowSubdomains": {
+                    "type": "boolean",
+                    "description": "クローラーがメインドメイン配下のサブドメインへのリンクもたどれるようにします。",
+                    "default": false
+                  },
+                  "delay": {
+                    "type": "number",
+                    "description": "スクレイピングの実行間隔（秒）。ウェブサイトのレート制限を順守するのに役立ちます。"
+                  },
+                  "maxConcurrency": {
+                    "type": "integer",
+                    "description": "スクレイプの同時実行数の上限。このパラメータで、このクロールにおける同時実行数の制限を設定できます。指定しない場合、クロールはチームの同時実行数の上限に従います。"
+                  },
+                  "webhook": {
+                    "type": "object",
+                    "description": "Webhook 仕様オブジェクト。",
+                    "properties": {
+                      "url": {
+                        "type": "string",
+                        "description": "Webhook の送信先となる URL です。クロールの開始時（crawl.started）、各ページのクロール時（crawl.page）、およびクロールが完了したとき（crawl.completed または crawl.failed）に送信されます。レスポンスは `/scrape` エンドポイントと同一です。"
+                      },
+                      "headers": {
+                        "type": "object",
+                        "description": "Webhook URL に送信する HTTP ヘッダー。",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "metadata": {
+                        "type": "object",
+                        "description": "このクロールのすべてのWebhookペイロードに含まれるカスタムメタデータ",
+                        "additionalProperties": true
+                      },
+                      "events": {
+                        "type": "array",
+                        "description": "Webhook URL に送信するイベントの種類。（デフォルト: all）",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "completed",
+                            "page",
+                            "failed",
+                            "started"
+                          ]
+                        }
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ]
+                  },
+                  "scrapeOptions": {
+                    "$ref": "#/components/schemas/ScrapeOptions"
+                  },
+                  "zeroDataRetention": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "true の場合、このクロールではデータが一切保持されなくなります。この機能を有効にするには、help@firecrawl.dev までご連絡ください。"
+                  }
+                },
+                "required": [
+                  "url"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功時のレスポンス",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrawlResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "お支払いが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "リクエストが多すぎます",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーエラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/map": {
+      "post": {
+        "summary": "オプションに応じて複数のURLをマッピングする",
+        "operationId": "mapUrls",
+        "tags": [
+          "Mapping"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "クロール開始時の起点となるベースURL"
+                  },
+                  "search": {
+                    "type": "string",
+                    "description": "マッピングに使用する検索クエリです。Alpha フェーズ中は、検索機能の「スマート」な部分による検索結果は最大500件に制限されます。ただし、map によってそれ以上の結果が見つかった場合でも、そちらには上限は適用されません。"
+                  },
+                  "sitemap": {
+                    "type": "string",
+                    "enum": [
+                      "skip",
+                      "include",
+                      "only"
+                    ],
+                    "description": "マッピング時に使用するサイトマップモードです。`skip` に設定すると、URL の取得にサイトマップは使用されません。`only` に設定すると、サイトマップに含まれる URL のみが返されます。デフォルトの `include` では、サイトマップとその他の手法を組み合わせて URL を取得します。",
+                    "default": "include"
+                  },
+                  "includeSubdomains": {
+                    "type": "boolean",
+                    "description": "サイトのサブドメインを含める",
+                    "default": true
+                  },
+                  "ignoreQueryParameters": {
+                    "type": "boolean",
+                    "description": "クエリパラメーター付きのURLは返さないでください",
+                    "default": true
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "description": "返却するリンク数の上限",
+                    "default": 5000,
+                    "maximum": 30000
+                  },
+                  "timeout": {
+                    "type": "integer",
+                    "description": "タイムアウト時間（ミリ秒単位）。デフォルトではタイムアウトはありません。"
+                  }
+                },
+                "required": [
+                  "url"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功時のレスポンス",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "お支払いが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "リクエスト数が多すぎます",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーエラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/extract": {
+      "post": {
+        "summary": "LLM を使ってページから構造化データを抽出",
+        "operationId": "extractData",
+        "tags": [
+          "Extraction"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "urls": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uri",
+                      "description": "データ抽出対象のURLです。URLはグロブ形式で指定してください。"
+                    }
+                  },
+                  "prompt": {
+                    "type": "string",
+                    "description": "抽出プロセスを指示するプロンプト"
+                  },
+                  "schema": {
+                    "type": "object",
+                    "description": "抽出されたデータの構造を定義するスキーマ。[JSON Schema](https://json-schema.org/) に準拠する必要があります。"
+                  },
+                  "enableWebSearch": {
+                    "type": "boolean",
+                    "description": "true の場合、抽出はウェブ検索を利用して追加データを取得します",
+                    "default": false
+                  },
+                  "ignoreSitemap": {
+                    "type": "boolean",
+                    "description": "true の場合、ウェブサイトのスキャン時に sitemap.xml ファイルを無視します",
+                    "default": false
+                  },
+                  "includeSubdomains": {
+                    "type": "boolean",
+                    "description": "true の場合、指定した URL のサブドメインもスキャン対象になります",
+                    "default": true
+                  },
+                  "showSources": {
+                    "type": "boolean",
+                    "description": "true の場合、データ抽出に使用されたソースが、レスポンス内の `sources` キーに含まれます",
+                    "default": false
+                  },
+                  "scrapeOptions": {
+                    "$ref": "#/components/schemas/ScrapeOptions"
+                  },
+                  "ignoreInvalidURLs": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "urls 配列内に無効な URL が指定されている場合、それらは無視されます。リクエスト全体を失敗させるのではなく、残りの有効な URL のみを使って抽出処理が実行され、無効な URL はレスポンスの invalidURLs フィールドに含めて返されます。"
+                  }
+                },
+                "required": [
+                  "urls"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "抽出に成功しました",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtractResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "無効なリクエスト",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Invalid input data."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーエラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/extract/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "description": "抽出ジョブのID",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "summary": "抽出ジョブのステータスを取得する",
+        "operationId": "getExtractStatus",
+        "tags": [
+          "Extraction"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功時のレスポンス",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtractStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/crawl/active": {
+      "get": {
+        "summary": "認証済みチームのすべての実行中のクロールを取得する",
+        "operationId": "getActiveCrawls",
+        "tags": [
+          "Crawling"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功時のレスポンス",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "crawls": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "description": "クロールの一意の識別子"
+                          },
+                          "teamId": {
+                            "type": "string",
+                            "description": "このクロールを所有するチームのID"
+                          },
+                          "url": {
+                            "type": "string",
+                            "format": "uri",
+                            "description": "クロールの起点となるURL"
+                          },
+                          "options": {
+                            "type": "object",
+                            "description": "このクロールで使用したクローラーのオプション",
+                            "properties": {
+                              "scrapeOptions": {
+                                "$ref": "#/components/schemas/ScrapeOptions"
+                              }
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "teamId",
+                          "url",
+                          "status",
+                          "options"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "お支払いが必要です",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "リクエストが多すぎます",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーエラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/team/credit-usage": {
+      "get": {
+        "summary": "認証済みチームの残りのクレジット数を取得する",
+        "operationId": "getCreditUsage",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功時のレスポンス",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "remainingCredits": {
+                          "type": "number",
+                          "description": "チームの残りクレジット数",
+                          "example": 1000
+                        },
+                        "planCredits": {
+                          "type": "number",
+                          "description": "プランに含まれるクレジット数です。クーポンによるクレジット、クレジットパック、または自動チャージによるクレジットは含まれません。",
+                          "example": 500000
+                        },
+                        "billingPeriodStart": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "請求期間の開始日。無料プランを利用している場合は null です",
+                          "example": "2025-01-01T00:00:00Z",
+                          "nullable": true
+                        },
+                        "billingPeriodEnd": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "請求期間の終了日。無料プラン利用時は null になります",
+                          "example": "2025-01-31T23:59:59Z",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "クレジット利用情報が見つかりません",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Could not find credit usage information"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーエラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Internal server error while fetching credit usage"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/team/credit-usage/historical": {
+      "get": {
+        "summary": "認証中のチームのクレジット利用履歴を取得する",
+        "operationId": "getHistoricalCreditUsage",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "byApiKey",
+            "in": "query",
+            "description": "APIキーごとのクレジット利用履歴を取得する",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功レスポンス",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "periods": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "startDate": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "請求期間の開始日",
+                            "example": "2025-01-01T00:00:00Z"
+                          },
+                          "endDate": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "請求期間の終了日",
+                            "example": "2025-01-31T23:59:59Z"
+                          },
+                          "apiKey": {
+                            "type": "string",
+                            "description": "課金期間中に使用された API キーの名前。byApiKey が false（デフォルト）の場合は null になります",
+                            "nullable": true
+                          },
+                          "totalCredits": {
+                            "type": "integer",
+                            "description": "請求期間中に使用されたクレジットの合計",
+                            "example": 1000
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーエラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Internal server error while fetching historical credit usage"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/team/token-usage": {
+      "get": {
+        "summary": "認証済みチームの残りトークン数を取得（Extract 専用）",
+        "operationId": "getTokenUsage",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功時のレスポンス",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "remainingTokens": {
+                          "type": "number",
+                          "description": "チームで利用可能な残りトークン数",
+                          "example": 1000
+                        },
+                        "planTokens": {
+                          "type": "number",
+                          "description": "プランに含まれるトークン数。クーポンによるトークンは含まれません。",
+                          "example": 500000
+                        },
+                        "billingPeriodStart": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "請求期間の開始日。無料プラン利用時は null になります",
+                          "example": "2025-01-01T00:00:00Z",
+                          "nullable": true
+                        },
+                        "billingPeriodEnd": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "請求期間の終了日。無料プランを利用している場合は null になります",
+                          "example": "2025-01-31T23:59:59Z",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "トークン使用状況の情報が見つかりませんでした",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Could not find token usage information"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーエラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Internal server error while fetching token usage"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/team/token-usage/historical": {
+      "get": {
+        "summary": "認証済みチームのトークン使用履歴を取得します（Extract のみ）",
+        "operationId": "getHistoricalTokenUsage",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "byApiKey",
+            "in": "query",
+            "description": "APIキーごとのトークン使用履歴を取得する",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功時のレスポンス",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "periods": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "startDate": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "請求期間の開始日",
+                            "example": "2025-01-01T00:00:00Z"
+                          },
+                          "endDate": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "請求期間の終了日",
+                            "example": "2025-01-31T23:59:59Z"
+                          },
+                          "apiKey": {
+                            "type": "string",
+                            "description": "請求期間に使用する API キーの名前。byApiKey が false（デフォルト）の場合は null です",
+                            "nullable": true
+                          },
+                          "totalTokens": {
+                            "type": "integer",
+                            "description": "請求期間内に使用されたトークンの総数",
+                            "example": 1000
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーエラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Internal server error while fetching historical token usage"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/search": {
+      "post": {
+        "summary": "検索を行い、オプションで検索結果をスクレイピングする",
+        "operationId": "searchAndScrape",
+        "tags": [
+          "Search"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "検索クエリ"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "description": "返す結果の最大件数",
+                    "default": 5,
+                    "maximum": 100,
+                    "minimum": 1
+                  },
+                  "sources": {
+                    "type": "array",
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "title": "Web",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "web"
+                              ]
+                            },
+                            "tbs": {
+                              "type": "string",
+                              "description": "時間ベースの検索パラメータ。あらかじめ定義された期間指定（`qdr:h`、`qdr:d`、`qdr:w`、`qdr:m`、`qdr:y`）と、任意の日付範囲指定（`cdr:1,cd_min:MM/DD/YYYY,cd_max:MM/DD/YYYY`）をサポートします。"
+                            },
+                            "location": {
+                              "type": "string",
+                              "description": "検索結果用の location パラメータ"
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "title": "Images",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "images"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "title": "News",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "news"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ]
+                        }
+                      ]
+                    },
+                    "description": "検索対象とするソースです。レスポンスに含まれる配列を決定します。",
+                    "default": [
+                      "web"
+                    ]
+                  },
+                  "tbs": {
+                    "type": "string",
+                    "description": "時間ベースの検索パラメータ。事前定義された時間範囲（`qdr:h`, `qdr:d`, `qdr:w`, `qdr:m`, `qdr:y`）と、カスタムの日付範囲（`cdr:1,cd_min:MM/DD/YYYY,cd_max:MM/DD/YYYY`）をサポートします"
+                  },
+                  "location": {
+                    "type": "string",
+                    "description": "検索結果の location パラメーター"
+                  },
+                  "timeout": {
+                    "type": "integer",
+                    "description": "タイムアウト（ミリ秒単位）",
+                    "default": 60000
+                  },
+                  "ignoreInvalidURLs": {
+                    "type": "boolean",
+                    "description": "他の Firecrawl エンドポイントで無効となる URL を検索結果から除外します。検索結果のデータをそのまま他の Firecrawl API エンドポイントに渡す場合のエラー削減に役立ちます。",
+                    "default": false
+                  },
+                  "scrapeOptions": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/ScrapeOptions"
+                      }
+                    ],
+                    "description": "検索結果スクレイピングのオプション",
+                    "default": {}
+                  }
+                },
+                "required": [
+                  "query"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功時のレスポンス",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "web": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "title": {
+                                "type": "string",
+                                "description": "検索結果のタイトル"
+                              },
+                              "description": {
+                                "type": "string",
+                                "description": "検索結果の説明"
+                              },
+                              "url": {
+                                "type": "string",
+                                "description": "検索結果のURL"
+                              },
+                              "markdown": {
+                                "type": "string",
+                                "nullable": true,
+                                "description": "スクレイピングをリクエストした場合のMarkdownコンテンツ"
+                              },
+                              "html": {
+                                "type": "string",
+                                "nullable": true,
+                                "description": "フォーマットでリクエストされた場合の HTML コンテンツ"
+                              },
+                              "rawHtml": {
+                                "type": "string",
+                                "nullable": true,
+                                "description": "フォーマットで指定された場合の生のHTMLコンテンツ"
+                              },
+                              "links": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "description": "links フォーマットを指定した場合に返されるリンク"
+                              },
+                              "screenshot": {
+                                "type": "string",
+                                "nullable": true,
+                                "description": "フォーマットでスクリーンショットが要求された場合のスクリーンショットURL"
+                              },
+                              "metadata": {
+                                "type": "object",
+                                "properties": {
+                                  "title": {
+                                    "type": "string"
+                                  },
+                                  "description": {
+                                    "type": "string"
+                                  },
+                                  "sourceURL": {
+                                    "type": "string"
+                                  },
+                                  "statusCode": {
+                                    "type": "integer"
+                                  },
+                                  "error": {
+                                    "type": "string",
+                                    "nullable": true
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "images": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "title": {
+                                "type": "string",
+                                "description": "検索結果のタイトル"
+                              },
+                              "imageUrl": {
+                                "type": "string",
+                                "description": "画像のURL"
+                              },
+                              "imageWidth": {
+                                "type": "integer",
+                                "description": "画像の幅"
+                              },
+                              "imageHeight": {
+                                "type": "integer",
+                                "description": "画像の高さ"
+                              },
+                              "url": {
+                                "type": "string",
+                                "description": "検索結果のURL"
+                              },
+                              "position": {
+                                "type": "integer",
+                                "description": "検索結果の位置"
+                              }
+                            }
+                          }
+                        },
+                        "news": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "title": {
+                                "type": "string",
+                                "description": "記事のタイトル"
+                              },
+                              "snippet": {
+                                "type": "string",
+                                "description": "記事の抜粋"
+                              },
+                              "url": {
+                                "type": "string",
+                                "description": "記事のURL"
+                              },
+                              "date": {
+                                "type": "string",
+                                "description": "記事の公開日"
+                              },
+                              "imageUrl": {
+                                "type": "string",
+                                "description": "記事の画像URL"
+                              },
+                              "position": {
+                                "type": "integer",
+                                "description": "記事の掲載位置"
+                              },
+                              "markdown": {
+                                "type": "string",
+                                "nullable": true,
+                                "description": "スクレイピングがリクエストされた場合のMarkdownコンテンツ"
+                              },
+                              "html": {
+                                "type": "string",
+                                "nullable": true,
+                                "description": "フォーマットで指定された場合のHTMLコンテンツ"
+                              },
+                              "rawHtml": {
+                                "type": "string",
+                                "nullable": true,
+                                "description": "フォーマットで指定された場合の生のHTMLコンテンツ"
+                              },
+                              "links": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "description": "フォーマットでリクエストされた場合に取得されるリンク"
+                              },
+                              "screenshot": {
+                                "type": "string",
+                                "nullable": true,
+                                "description": "フォーマットでスクリーンショットが要求されている場合のURL"
+                              },
+                              "metadata": {
+                                "type": "object",
+                                "properties": {
+                                  "title": {
+                                    "type": "string"
+                                  },
+                                  "description": {
+                                    "type": "string"
+                                  },
+                                  "sourceURL": {
+                                    "type": "string"
+                                  },
+                                  "statusCode": {
+                                    "type": "integer"
+                                  },
+                                  "error": {
+                                    "type": "string",
+                                    "nullable": true
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "description": "検索結果です。利用可能な配列は、リクエストで指定したソースによって異なります。デフォルトでは `web` 配列が返されます。"
+                    },
+                    "warning": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "何らかの問題が発生した場合に表示される警告メッセージ"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "リクエストがタイムアウトしました",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Request timed out"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "サーバーエラー",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "code": {
+                      "type": "string",
+                      "example": "UNKNOWN_ERROR"
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "Formats": {
+        "type": "array",
+        "items": {
+          "oneOf": [
+            {
+              "type": "object",
+              "title": "Markdown",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "markdown"
+                  ]
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "type": "object",
+              "title": "Summary",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "summary"
+                  ]
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "type": "object",
+              "title": "HTML",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "html"
+                  ]
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "type": "object",
+              "title": "Raw HTML",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "rawHtml"
+                  ]
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "type": "object",
+              "title": "Links",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "links"
+                  ]
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "type": "object",
+              "title": "Summary",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "summary"
+                  ]
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "type": "object",
+              "title": "Screenshot",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "screenshot"
+                  ]
+                },
+                "fullPage": {
+                  "type": "boolean",
+                  "description": "ページ全体のスクリーンショットを取得するか、現在のビューポートのみを取得するかを指定します。",
+                  "default": false
+                },
+                "quality": {
+                  "type": "integer",
+                  "description": "スクリーンショットの画質を1〜100で指定します。100が最高画質です。"
+                },
+                "viewport": {
+                  "type": "object",
+                  "properties": {
+                    "width": {
+                      "type": "integer",
+                      "description": "ビューポートの幅（ピクセル数）"
+                    },
+                    "height": {
+                      "type": "integer",
+                      "description": "ビューポートの高さ（ピクセル単位）"
+                    }
+                  },
+                  "required": [
+                    "width",
+                    "height"
+                  ]
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "type": "object",
+              "title": "JSON",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "json"
+                  ]
+                },
+                "schema": {
+                  "type": "object",
+                  "description": "JSON出力用のスキーマ。[JSON Schema](https://json-schema.org/) に準拠している必要があります。"
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "JSON出力用のプロンプト"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "type": "object",
+              "title": "Change Tracking",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "changeTracking"
+                  ]
+                },
+                "modes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "git-diff",
+                      "json"
+                    ]
+                  },
+                  "description": "変更追跡に使用するモードです。`git-diff` は詳細な差分を提供し、`json` は抽出された JSON データを比較します。"
+                },
+                "schema": {
+                  "type": "object",
+                  "description": "「json」モードで JSON 抽出を行う際に使用するスキーマです。抽出および比較するデータの構造を定義します。[JSON Schema](https://json-schema.org/) に準拠する必要があります。"
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "「json」モードで変更追跡を行う際に使用するプロンプト。指定しない場合はデフォルトのプロンプトが使用されます。"
+                },
+                "tag": {
+                  "type": "string",
+                  "nullable": true,
+                  "default": null,
+                  "description": "変更トラッキングに使用するタグです。タグによって変更トラッキング履歴を別々の「ブランチ」に分割でき、特定のタグの変更トラッキングでは同じタグで実行されたスクレイプのみが比較対象になります。指定しない場合は、デフォルトのタグ（null）が使用されます。"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            }
+          ]
+        },
+        "description": "レスポンスに含める出力フォーマットを指定します。1つ以上のフォーマットを、文字列（例：`'markdown'`）または追加オプションを持つオブジェクト（例：`{ type: 'json', schema: {...} }`）として指定できます。一部のフォーマットでは、特定のオプションを設定する必要があります。例：`['markdown', { type: 'json', schema: {...} }]`。",
+        "default": [
+          "markdown"
+        ]
+      },
+      "ScrapeOptions": {
+        "type": "object",
+        "properties": {
+          "formats": {
+            "$ref": "#/components/schemas/Formats"
+          },
+          "onlyMainContent": {
+            "type": "boolean",
+            "description": "ヘッダーやナビゲーション、フッターなどを除き、ページのメインコンテンツのみを返します。",
+            "default": true
+          },
+          "includeTags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "出力に含めるタグ"
+          },
+          "excludeTags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "出力に含めないタグ。"
+          },
+          "maxAge": {
+            "type": "integer",
+            "description": "ページのキャッシュがこの値（ミリ秒）以内のものであれば、そのキャッシュ済みバージョンを返します。ページのキャッシュがこの値より古い場合は、新たにスクレイピングを行います。極めて新鮮なデータが不要な場合は、これを有効にすることでスクレイピングを最大5倍高速化できます。デフォルトは2日です。",
+            "default": 172800000
+          },
+          "headers": {
+            "type": "object",
+            "description": "リクエストに付与するヘッダー。Cookie や User-Agent などを送信するために使用できます。"
+          },
+          "waitFor": {
+            "type": "integer",
+            "description": "コンテンツを取得する前に待機する時間をミリ秒単位で指定します。これにより、ページが十分に読み込まれるための時間を確保できます。",
+            "default": 0
+          },
+          "mobile": {
+            "type": "boolean",
+            "description": "モバイル端末でのスクレイピングをエミュレートしたい場合は true に設定します。レスポンシブページのテストやモバイル向けスクリーンショットの取得に便利です。",
+            "default": false
+          },
+          "skipTlsVerification": {
+            "type": "boolean",
+            "description": "リクエスト時に TLS 証明書検証をスキップする",
+            "default": true
+          },
+          "timeout": {
+            "type": "integer",
+            "description": "リクエストのタイムアウトまでの時間（ミリ秒単位）。"
+          },
+          "parsers": {
+            "type": "array",
+            "description": "スクレイピング時のファイルの処理方法を制御します。\"pdf\" が含まれている場合（デフォルト）、PDF の内容が抽出されて Markdown 形式に変換され、ページ数に応じて課金されます（1 ページあたり 1 クレジット）。空の配列が渡された場合、PDF ファイルは base64 でエンコードされた状態で返され、合計 1 クレジットの一律料金となります。",
+            "items": {
+              "type": "string",
+              "enum": [
+                "pdf"
+              ]
+            },
+            "default": [
+              "pdf"
+            ]
+          },
+          "actions": {
+            "type": "array",
+            "description": "コンテンツを取得する前にページで実行するアクション",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "title": "Wait",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "wait"
+                      ],
+                      "description": "指定したミリ秒数だけ待機します"
+                    },
+                    "milliseconds": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "待機時間（ミリ秒）"
+                    },
+                    "selector": {
+                      "type": "string",
+                      "description": "要素を検索するためのクエリセレクタ",
+                      "example": "#my-element"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "title": "Screenshot",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "screenshot"
+                      ],
+                      "description": "スクリーンショットを撮影します。リンクはレスポンスの `actions.screenshots` 配列に格納されます。"
+                    },
+                    "fullPage": {
+                      "type": "boolean",
+                      "description": "ページ全体のスクリーンショットを取得するか、現在の表示領域に限定するかを指定します。",
+                      "default": false
+                    },
+                    "quality": {
+                      "type": "integer",
+                      "description": "スクリーンショットの画質を1〜100で指定します。100が最高画質です。"
+                    },
+                    "viewport": {
+                      "type": "object",
+                      "properties": {
+                        "width": {
+                          "type": "integer",
+                          "description": "ビューポートの幅（ピクセル単位）"
+                        },
+                        "height": {
+                          "type": "integer",
+                          "description": "ビューポートの高さ（ピクセル単位）"
+                        }
+                      },
+                      "required": [
+                        "width",
+                        "height"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "title": "Click",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "click"
+                      ],
+                      "description": "要素をクリック"
+                    },
+                    "selector": {
+                      "type": "string",
+                      "description": "要素を検索するためのクエリセレクター",
+                      "example": "#load-more-button"
+                    },
+                    "all": {
+                      "type": "boolean",
+                      "description": "セレクターに一致した要素を最初の1つだけでなくすべてクリックします。セレクターに一致する要素が存在しない場合でも、エラーはスローされません。",
+                      "default": false
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "selector"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "title": "Write text",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "write"
+                      ],
+                      "description": "入力フィールド、テキストエリア、または contenteditable 属性を持つ要素にテキストを入力します。注意: テキストを入力する前に、必ず「click」アクションでその要素へフォーカスを移してください。テキストはキーボード入力をシミュレートするため、1文字ずつ入力されます。"
+                    },
+                    "text": {
+                      "type": "string",
+                      "description": "入力テキスト",
+                      "example": "Hello, world!"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "text"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "title": "Press a key",
+                  "description": "ページ上でキーを押してください。キーコードについては https://asawicki.info/nosense/doc/devices/keyboard/key_codes.html を参照してください。",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "press"
+                      ],
+                      "description": "ページ上で任意のキーを押してください"
+                    },
+                    "key": {
+                      "type": "string",
+                      "description": "押下キー",
+                      "example": "Enter"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "key"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "title": "Scroll",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "scroll"
+                      ],
+                      "description": "ページ全体または特定の要素をスクロールする"
+                    },
+                    "direction": {
+                      "type": "string",
+                      "enum": [
+                        "up",
+                        "down"
+                      ],
+                      "description": "スクロール方向",
+                      "default": "down"
+                    },
+                    "selector": {
+                      "type": "string",
+                      "description": "スクロールさせる要素のクエリセレクター",
+                      "example": "#my-element"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "title": "Scrape",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "scrape"
+                      ],
+                      "description": "現在のページのコンテンツをスクレイピングし、URL と HTML を返します。"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "title": "Execute JavaScript",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "executeJavascript"
+                      ],
+                      "description": "ページ上で JavaScript コードを実行する"
+                    },
+                    "script": {
+                      "type": "string",
+                      "description": "実行する JavaScript コード",
+                      "example": "document.querySelector('.button').click();"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "script"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "title": "Generate PDF",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "pdf"
+                      ],
+                      "description": "現在のページのPDFを生成します。生成されたPDFは、レスポンスの `actions.pdfs` 配列として返されます。"
+                    },
+                    "format": {
+                      "type": "string",
+                      "enum": [
+                        "A0",
+                        "A1",
+                        "A2",
+                        "A3",
+                        "A4",
+                        "A5",
+                        "A6",
+                        "Letter",
+                        "Legal",
+                        "Tabloid",
+                        "Ledger"
+                      ],
+                      "description": "生成される PDF のページサイズ",
+                      "default": "Letter"
+                    },
+                    "landscape": {
+                      "type": "boolean",
+                      "description": "PDFを横向きで生成するかどうか",
+                      "default": false
+                    },
+                    "scale": {
+                      "type": "number",
+                      "description": "生成されるPDFの拡大縮小倍率",
+                      "default": 1
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                }
+              ]
+            }
+          },
+          "location": {
+            "type": "object",
+            "description": "リクエストのロケーション設定。指定された場合、利用可能であれば適切なプロキシを使用し、対応する言語およびタイムゾーン設定をエミュレートします。未指定の場合はデフォルトで「US」が使用されます。",
+            "properties": {
+              "country": {
+                "type": "string",
+                "description": "ISO 3166-1 alpha-2 形式の国コード（例: 「US」「AU」「DE」「JP」）",
+                "pattern": "^[A-Z]{2}$",
+                "default": "US"
+              },
+              "languages": {
+                "type": "array",
+                "description": "リクエストに対して優先度順に指定する言語およびロケール。指定しない場合は、指定された location の言語がデフォルトになります。https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Accept-Language を参照してください。",
+                "items": {
+                  "type": "string",
+                  "example": "en-US"
+                }
+              }
+            }
+          },
+          "removeBase64Images": {
+            "type": "boolean",
+            "description": "出力からすべての base64 画像を削除します。base64 画像は出力を極端に長くしてしまう可能性があります。画像の alt テキストは出力内に残りますが、URL はプレースホルダーに置き換えられます。",
+            "default": true
+          },
+          "blockAds": {
+            "type": "boolean",
+            "description": "広告ブロックとクッキー同意ポップアップのブロックを有効にします。",
+            "default": true
+          },
+          "proxy": {
+            "type": "string",
+            "enum": [
+              "basic",
+              "stealth",
+              "auto"
+            ],
+            "description": "使用するプロキシの種類を指定します。\n\n - **basic**: ボット対策がない、またはごく基本的なボット対策のみを行っているサイト向けのプロキシです。高速で、通常は問題なく動作します。\n - **stealth**: 高度なボット対策を行っているサイト向けのステルスプロキシです。速度は遅くなりますが、特定のサイトではより信頼性があります。1リクエストあたり最大 5 クレジット消費されます。\n - **auto**: basic プロキシが失敗した場合、Firecrawl が自動的にステルスプロキシでスクレイピングをリトライします。ステルスでのリトライが成功した場合、そのスクレイピングには 5 クレジットが請求されます。最初の basic での試行が成功した場合は、通常のコストのみが請求されます。\n\nプロキシを指定しない場合、Firecrawl のデフォルトは auto になります。",
+            "default": "auto"
+          },
+          "storeInCache": {
+            "type": "boolean",
+            "description": "true にすると、そのページは Firecrawl のインデックスおよびキャッシュに保存されます。スクレイピング処理においてデータ保護上の懸念がある場合は、これを false に設定しておくと有用です。機密性の高いスクレイピングに関連する一部のパラメーター（アクション、ヘッダー）を使用すると、このパラメーターは自動的に false に設定されます。",
+            "default": true
+          }
+        }
+      },
+      "ScrapeResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "markdown": {
+                "type": "string"
+              },
+              "summary": {
+                "type": "string",
+                "nullable": true,
+                "description": "`formats` に `summary` が含まれている場合のページ要約"
+              },
+              "html": {
+                "type": "string",
+                "nullable": true,
+                "description": "`formats` に `html` が含まれている場合の、そのページのコンテンツの HTML バージョン"
+              },
+              "rawHtml": {
+                "type": "string",
+                "nullable": true,
+                "description": "`formats` に `rawHtml` が含まれている場合の、そのページの生の HTML コンテンツ"
+              },
+              "screenshot": {
+                "type": "string",
+                "nullable": true,
+                "description": "`formats` に `screenshot` が含まれている場合のページのスクリーンショット画像"
+              },
+              "links": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "`formats` に `links` が含まれている場合、そのページ内のリンクの一覧"
+              },
+              "actions": {
+                "type": "object",
+                "nullable": true,
+                "description": "`actions` パラメーターで指定されたアクションの結果です。リクエストで `actions` パラメーターが指定されている場合にのみ返されます",
+                "properties": {
+                  "screenshots": {
+                    "type": "array",
+                    "description": "提供されたスクリーンショットアクションと同じ順序で並んだスクリーンショットURL。",
+                    "items": {
+                      "type": "string",
+                      "format": "url"
+                    }
+                  },
+                  "scrapes": {
+                    "type": "array",
+                    "description": "指定されたアクションの順序どおりにコンテンツをスクレイピングします。",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string"
+                        },
+                        "html": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "javascriptReturns": {
+                    "type": "array",
+                    "description": "指定した executeJavascript アクションと同じ順序の JavaScript の戻り値です。",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "value": {}
+                      }
+                    }
+                  },
+                  "pdfs": {
+                    "type": "array",
+                    "description": "指定した pdf アクションと同じ順序で生成される PDF。",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "metadata": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "language": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "sourceURL": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "<any other metadata> ": {
+                    "type": "string"
+                  },
+                  "statusCode": {
+                    "type": "integer",
+                    "description": "ページのステータスコード"
+                  },
+                  "error": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "ページのエラー メッセージ"
+                  }
+                }
+              },
+              "warning": {
+                "type": "string",
+                "nullable": true,
+                "description": "LLM Extraction を使用しているときに表示されることがあります。警告メッセージによって、抽出に関する問題が通知されます。"
+              },
+              "changeTracking": {
+                "type": "object",
+                "nullable": true,
+                "description": "`formats` に `changeTracking` が含まれている場合の変更追跡情報です。`changeTracking` フォーマットがリクエストされた場合にのみ含まれます。",
+                "properties": {
+                  "previousScrapeAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true,
+                    "description": "現在のページと比較対象となる前回スクレイプのタイムスタンプ。前回のスクレイプが存在しない場合は null。"
+                  },
+                  "changeStatus": {
+                    "type": "string",
+                    "enum": [
+                      "new",
+                      "same",
+                      "changed",
+                      "removed"
+                    ],
+                    "description": "2 つのページバージョン間の比較結果です。'new' はこのページが以前は存在していなかったこと、'same' はコンテンツが変更されていないこと、'changed' はコンテンツが変更されたこと、'removed' はページが削除されたことを意味します。"
+                  },
+                  "visibility": {
+                    "type": "string",
+                    "enum": [
+                      "visible",
+                      "hidden"
+                    ],
+                    "description": "現在のページ／URL の可視性を示します。'visible' は、その URL がリンクやサイトマップなどのオーガニックな経路で検出されたことを意味し、'hidden' は、その URL が過去のクロールからのメモリ（記録）に基づいて検出されたことを意味します。"
+                  },
+                  "diff": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "'git-diff' モード使用時の、変更内容の Git スタイルの差分。モードが 'git-diff' に設定されている場合にのみ出力されます。"
+                  },
+                  "json": {
+                    "type": "object",
+                    "nullable": true,
+                    "description": "「json」モード使用時のJSON比較結果。モードが「json」に設定されている場合にのみ出力されます。`schema` 内で定義された型に基づき、`previous` と `current` のスクレイピング結果から抽出したすべてのキーとその値の一覧を出力します。例は [こちら](/features/change-tracking) を参照してください。"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "CrawlStatusResponseObj": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "現在のクロールのステータスです。`scraping`、`completed`、`failed` のいずれかになります。"
+          },
+          "total": {
+            "type": "integer",
+            "description": "クロールを試みたページの総数。"
+          },
+          "completed": {
+            "type": "integer",
+            "description": "正常にクロールできたページ数。"
+          },
+          "creditsUsed": {
+            "type": "integer",
+            "description": "クロールに使用されたクレジット数。"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "クロールが期限切れになる日時。"
+          },
+          "next": {
+            "type": "string",
+            "nullable": true,
+            "description": "次の 10MB のデータを取得するための URL。クロールが完了していない場合、またはレスポンスが 10MB を超える場合に返されます。"
+          },
+          "data": {
+            "type": "array",
+            "description": "クロールデータ。",
+            "items": {
+              "type": "object",
+              "properties": {
+                "markdown": {
+                  "type": "string"
+                },
+                "html": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "`includeHtml` が true の場合に含まれる、そのページのコンテンツの HTML バージョン"
+                },
+                "rawHtml": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "`includeRawHtml` が true の場合に含まれるページの生 HTML コンテンツ"
+                },
+                "links": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "`includeLinks` が true の場合のページ内リンク一覧"
+                },
+                "screenshot": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "`includeScreenshot` が true の場合に取得されるページのスクリーンショット"
+                },
+                "metadata": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "language": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "sourceURL": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "<any other metadata> ": {
+                      "type": "string"
+                    },
+                    "statusCode": {
+                      "type": "integer",
+                      "description": "ページのステータスコード"
+                    },
+                    "error": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "ページのエラーメッセージ"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "CrawlErrorsResponseObj": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "エラーが発生したスクレイプジョブとエラー詳細",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "timestamp": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "失敗発生時のISOタイムスタンプ"
+                },
+                "url": {
+                  "type": "string",
+                  "description": "スクレイピングしたURL"
+                },
+                "error": {
+                  "type": "string",
+                  "description": "エラーメッセージ"
+                }
+              }
+            }
+          },
+          "robotsBlocked": {
+            "type": "array",
+            "description": "スクレイピング試行時に robots.txt によってブロックされた URL の一覧",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "BatchScrapeStatusResponseObj": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "バッチスクレイプの現在の状態です。値は `scraping`、`completed`、`failed` のいずれかです。"
+          },
+          "total": {
+            "type": "integer",
+            "description": "スクレイピングを試みたページの総数。"
+          },
+          "completed": {
+            "type": "integer",
+            "description": "正常にスクレイピングされたページ数。"
+          },
+          "creditsUsed": {
+            "type": "integer",
+            "description": "バッチスクレイピングで使用されたクレジット数。"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "バッチスクレイプの有効期限が切れる日時。"
+          },
+          "next": {
+            "type": "string",
+            "nullable": true,
+            "description": "次の10MB分のデータを取得するためのURL。バッチスクレイプが完了していない場合、またはレスポンスが10MBを超える場合に返されます。"
+          },
+          "data": {
+            "type": "array",
+            "description": "バッチスクレイピングのデータ。",
+            "items": {
+              "type": "object",
+              "properties": {
+                "markdown": {
+                  "type": "string"
+                },
+                "html": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "`includeHtml` が true の場合の、そのページコンテンツの HTML 版"
+                },
+                "rawHtml": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "`includeRawHtml` が true の場合のページの生 HTML コンテンツ"
+                },
+                "links": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "`includeLinks` が true の場合の、ページ上のリンク一覧"
+                },
+                "screenshot": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "`includeScreenshot` が true の場合に取得されるページのスクリーンショット"
+                },
+                "metadata": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "language": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "sourceURL": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "<any other metadata> ": {
+                      "type": "string"
+                    },
+                    "statusCode": {
+                      "type": "integer",
+                      "description": "ページのステータスコード"
+                    },
+                    "error": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "ページのエラーメッセージ"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "CrawlResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      },
+      "BatchScrapeResponseObj": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "invalidURLs": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "type": "string"
+            },
+            "description": "ignoreInvalidURLs が true の場合、このフィールドには、リクエスト内で指定された無効な URL を含む配列が入ります。無効な URL がなかった場合は、空の配列になります。ignoreInvalidURLs が false の場合、このフィールドは undefined になります。"
+          }
+        }
+      },
+      "MapResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ExtractResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "invalidURLs": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "type": "string"
+            },
+            "description": "ignoreInvalidURLs が true のとき、ここにはリクエストで指定された無効な URL を含む配列が入ります。無効な URL が存在しない場合、この配列は空になります。ignoreInvalidURLs が false のとき、このフィールドは undefined になります。"
+          }
+        }
+      },
+      "ExtractStatusResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "data": {
+            "type": "object"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "processing",
+              "failed",
+              "cancelled"
+            ],
+            "description": "抽出ジョブの現在の状態"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tokensUsed": {
+            "type": "integer",
+            "description": "抽出ジョブで使用されたトークン数。ジョブが完了している場合にのみ利用可能です。"
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ]
+}

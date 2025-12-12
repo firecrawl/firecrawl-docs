@@ -1,0 +1,3656 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Firecrawl API",
+    "version": "v1",
+    "description": "API permettant d’interagir avec les services Firecrawl pour réaliser des tâches de scraping et de crawling web.",
+    "contact": {
+      "name": "Firecrawl Support",
+      "url": "https://firecrawl.dev/support",
+      "email": "support@firecrawl.dev"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.firecrawl.dev/v1"
+    }
+  ],
+  "paths": {
+    "/scrape": {
+      "post": {
+        "summary": "Récupérez le contenu d’une seule URL et, éventuellement, extrayez des informations à l’aide d’un LLM",
+        "operationId": "scrapeAndExtractFromUrl",
+        "tags": [
+          "Scraping"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "url": {
+                        "type": "string",
+                        "format": "uri",
+                        "description": "L’URL à explorer"
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ]
+                  },
+                  {
+                    "$ref": "#/components/schemas/ScrapeOptions"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "zeroDataRetention": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Si cette valeur est définie sur true, cela activera l’absence de conservation des données pour cette opération de scraping. Pour activer cette fonctionnalité, veuillez contacter help@firecrawl.dev"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Réponse réussie",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScrapeResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Paiement requis",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Trop de requêtes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erreur du serveur",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/batch/scrape": {
+      "post": {
+        "summary": "Scraper plusieurs URL et éventuellement en extraire des informations à l’aide d’un LLM",
+        "operationId": "scrapeAndExtractFromUrls",
+        "tags": [
+          "Scraping"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "urls": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "format": "uri",
+                          "description": "L’URL à explorer"
+                        }
+                      },
+                      "webhook": {
+                        "type": "object",
+                        "description": "Un objet représentant la spécification d’un webhook.",
+                        "properties": {
+                          "url": {
+                            "type": "string",
+                            "description": "L’URL vers laquelle envoyer le webhook. Celui-ci sera déclenché au démarrage du scraping par lots (batch_scrape.started), pour chaque page extraite (batch_scrape.page) et lorsque le scraping par lots est terminé (batch_scrape.completed ou batch_scrape.failed). La réponse sera la même que celle de l’endpoint `/scrape`."
+                          },
+                          "headers": {
+                            "type": "object",
+                            "description": "En-têtes à envoyer à l’URL du webhook.",
+                            "additionalProperties": {
+                              "type": "string"
+                            }
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "description": "Métadonnées personnalisées qui seront incluses dans toutes les données envoyées via webhook pour ce crawl",
+                            "additionalProperties": true
+                          },
+                          "events": {
+                            "type": "array",
+                            "description": "Type d’événements à envoyer à l’URL du webhook (par défaut : tous).",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "completed",
+                                "page",
+                                "failed",
+                                "started"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "url"
+                        ]
+                      },
+                      "maxConcurrency": {
+                        "type": "integer",
+                        "description": "Nombre maximal de scrapes simultanés. Ce paramètre vous permet de définir une limite de scrapes parallèles pour ce lot. S’il n’est pas spécifié, le lot respecte la limite de scrapes parallèles de votre équipe."
+                      },
+                      "ignoreInvalidURLs": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Si des URL non valides sont spécifiées dans le tableau `urls`, elles seront ignorées. Au lieu de faire échouer l’intégralité de la requête, une opération de scraping par lot sera créée en utilisant les URL valides restantes, et les URL non valides seront renvoyées dans le champ `invalidURLs` de la réponse."
+                      }
+                    },
+                    "required": [
+                      "urls"
+                    ]
+                  },
+                  {
+                    "$ref": "#/components/schemas/ScrapeOptions"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "zeroDataRetention": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Si cette option est définie sur true, cela activera l’absence totale de conservation des données pour ce lot de scraping. Pour activer cette fonctionnalité, veuillez contacter help@firecrawl.dev"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Réponse en cas de succès",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchScrapeResponseObj"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Paiement requis",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Trop de requêtes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erreur du serveur",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/batch/scrape/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "description": "L’ID de la tâche de scraping en lot",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "summary": "Obtenir l’état d’une tâche de scraping par lots",
+        "operationId": "getBatchScrapeStatus",
+        "tags": [
+          "Scraping"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Réponse en cas de succès",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchScrapeStatusResponseObj"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Paiement requis",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Trop de requêtes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erreur serveur",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Annuler une tâche de scraping par lots",
+        "operationId": "cancelBatchScrape",
+        "tags": [
+          "Scraping"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Annulation réussie",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Batch scrape job successfully cancelled."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Tâche de scraping par lots introuvable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Batch scrape job not found."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erreur du serveur",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/batch/scrape/{id}/errors": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "description": "L’ID de la tâche de scraping par lot",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "summary": "Obtenir les erreurs d’un job de scraping par lot",
+        "operationId": "getBatchScrapeErrors",
+        "tags": [
+          "Scraping"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Réponse en cas de succès",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrawlErrorsResponseObj"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Paiement requis",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Trop de requêtes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erreur du serveur",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/crawl/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "description": "L’identifiant de la tâche de crawl",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "summary": "Récupérer l’état d’une tâche de crawl",
+        "operationId": "getCrawlStatus",
+        "tags": [
+          "Crawling"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Réponse en cas de succès",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrawlStatusResponseObj"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Paiement requis",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Trop de requêtes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erreur du serveur",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Annuler un job de crawl",
+        "operationId": "cancelCrawl",
+        "tags": [
+          "Crawling"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Annulation effectuée",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "cancelled"
+                      ],
+                      "example": "cancelled"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Tâche de crawl introuvable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Crawl job not found."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erreur du serveur",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/crawl/{id}/errors": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "description": "L’ID de la tâche de crawl",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "summary": "Récupérer les erreurs d’une tâche de crawl",
+        "operationId": "getCrawlErrors",
+        "tags": [
+          "Crawling"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Réponse en cas de succès",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrawlErrorsResponseObj"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Paiement requis",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Trop de requêtes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erreur du serveur",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/crawl": {
+      "post": {
+        "summary": "Explorer plusieurs URL en fonction des options",
+        "operationId": "crawlUrls",
+        "tags": [
+          "Crawling"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "L’URL de base à partir de laquelle démarrer le crawl"
+                  },
+                  "excludePaths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Motifs d’expressions régulières pour les chemins d’URL qui excluent de l’exploration les URL correspondantes. Par exemple, si vous définissez `\"excludePaths\": [\"blog/.*\"]` pour l’URL de base firecrawl.dev, tous les résultats correspondant à ce motif seront exclus, comme https://www.firecrawl.dev/blog/firecrawl-launch-week-1-recap."
+                  },
+                  "includePaths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Expressions régulières (regex) pour les chemins d’URL à inclure dans le crawl. Seuls les chemins qui correspondent aux motifs spécifiés seront inclus dans la réponse. Par exemple, si vous définissez `\"includePaths\": [\"blog/.*\"]` pour l’URL de base firecrawl.dev, seuls les résultats correspondant à ce motif seront inclus, comme `https://www.firecrawl.dev/blog/firecrawl-launch-week-1-recap`."
+                  },
+                  "maxDepth": {
+                    "type": "integer",
+                    "description": "Profondeur absolue maximale à explorer à partir de la base de l’URL saisie. En pratique, il s’agit du nombre maximal de barres obliques que peut contenir le chemin (pathname) d’une URL explorée.",
+                    "default": 10
+                  },
+                  "maxDiscoveryDepth": {
+                    "type": "integer",
+                    "description": "Profondeur maximale d’exploration basée sur l’ordre de découverte. Le site racine et les pages issues du sitemap ont une profondeur de découverte de 0. Par exemple, si vous la définissez à 1 et que vous activez ignoreSitemap, seules l’URL saisie et toutes les URL liées depuis cette page seront explorées."
+                  },
+                  "ignoreSitemap": {
+                    "type": "boolean",
+                    "description": "Ignorer le sitemap du site lors du crawl",
+                    "default": false
+                  },
+                  "ignoreQueryParameters": {
+                    "type": "boolean",
+                    "description": "Ne relancez pas le scraping du même chemin avec des paramètres de requête différents (ou sans aucun paramètre)",
+                    "default": false
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "description": "Nombre maximal de pages à explorer. La limite par défaut est de 10 000.",
+                    "default": 10000
+                  },
+                  "allowBackwardLinks": {
+                    "type": "boolean",
+                    "description": "⚠️ OBSOLÈTE : utilisez plutôt « crawlEntireDomain ». Permet au robot d'exploration de suivre les liens internes vers des URL au même niveau ou parentes, et pas seulement vers des chemins enfants.",
+                    "default": false,
+                    "deprecated": true
+                  },
+                  "crawlEntireDomain": {
+                    "type": "boolean",
+                    "description": "Permet au crawler de suivre les liens internes vers des URL au même niveau ou de niveau supérieur, et pas seulement des chemins enfants.\n\nfalse : Explore uniquement les URL plus profondes (enfants).\n→ ex. /features/feature-1 → /features/feature-1/tips ✅\n→ Ne suivra pas /pricing ou / ❌\n\ntrue : Explore tous les liens internes, y compris les URL au même niveau et de niveau supérieur.\n→ ex. /features/feature-1 → /pricing, /, etc. ✅\n\nUtilisez true pour une couverture interne plus large, au‑delà des chemins imbriqués.",
+                    "default": false
+                  },
+                  "allowExternalLinks": {
+                    "type": "boolean",
+                    "description": "Permet au crawler de suivre des liens pointant vers des sites web externes.",
+                    "default": false
+                  },
+                  "allowSubdomains": {
+                    "type": "boolean",
+                    "description": "Permet au crawler de suivre les liens vers les sous-domaines du domaine principal.",
+                    "default": false
+                  },
+                  "delay": {
+                    "type": "number",
+                    "description": "Intervalle en secondes entre deux opérations de scraping. Cela permet de respecter les limites de fréquence des sites web."
+                  },
+                  "maxConcurrency": {
+                    "type": "integer",
+                    "description": "Nombre maximal d’opérations de scraping simultanées. Ce paramètre vous permet de définir une limite de parallélisme pour ce crawl. S’il n’est pas spécifié, le crawl respecte la limite de parallélisme de votre équipe."
+                  },
+                  "webhook": {
+                    "type": "object",
+                    "description": "Objet de spécification de webhook.",
+                    "properties": {
+                      "url": {
+                        "type": "string",
+                        "description": "L’URL à laquelle envoyer le webhook. Il sera déclenché au démarrage du crawl (crawl.started), pour chaque page explorée (crawl.page) et lorsque le crawl est terminé (crawl.completed ou crawl.failed). La réponse sera identique à celle de l’endpoint `/scrape`."
+                      },
+                      "headers": {
+                        "type": "object",
+                        "description": "En-têtes à envoyer à l’URL du webhook.",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "metadata": {
+                        "type": "object",
+                        "description": "Métadonnées personnalisées qui seront incluses dans tous les payloads de webhook de ce crawl",
+                        "additionalProperties": true
+                      },
+                      "events": {
+                        "type": "array",
+                        "description": "Type d’événements à envoyer à l’URL du webhook. (par défaut : tous)",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "completed",
+                            "page",
+                            "failed",
+                            "started"
+                          ]
+                        }
+                      }
+                    },
+                    "required": [
+                      "url"
+                    ]
+                  },
+                  "scrapeOptions": {
+                    "$ref": "#/components/schemas/ScrapeOptions"
+                  },
+                  "zeroDataRetention": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Si cette valeur est définie sur true, aucune donnée ne sera conservée pour ce crawl. Pour activer cette fonctionnalité, veuillez contacter help@firecrawl.dev."
+                  }
+                },
+                "required": [
+                  "url"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Réponse en cas de succès",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrawlResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Paiement requis",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Trop de requêtes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erreur du serveur",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/map": {
+      "post": {
+        "summary": "Cartographier plusieurs URL selon les options",
+        "operationId": "mapUrls",
+        "tags": [
+          "Mapping"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "L’URL de base à partir de laquelle démarrer l’exploration"
+                  },
+                  "search": {
+                    "type": "string",
+                    "description": "Requête de recherche à utiliser pour la cartographie. Pendant la phase Alpha, la partie « intelligente » de la fonction de recherche est limitée à 500 résultats. En revanche, si « map » renvoie davantage de résultats, aucune limite n’est appliquée."
+                  },
+                  "ignoreSitemap": {
+                    "type": "boolean",
+                    "description": "Ignorer le sitemap du site lors de l’exploration.",
+                    "default": true
+                  },
+                  "sitemapOnly": {
+                    "type": "boolean",
+                    "description": "Ne renvoyer que les liens présents dans le sitemap du site web",
+                    "default": false
+                  },
+                  "includeSubdomains": {
+                    "type": "boolean",
+                    "description": "Inclure les sous-domaines du site",
+                    "default": true
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "description": "Nombre maximal de liens renvoyés",
+                    "default": 5000,
+                    "maximum": 30000
+                  },
+                  "timeout": {
+                    "type": "integer",
+                    "description": "Délai d’expiration en millisecondes. Aucun délai d’expiration n’est défini par défaut."
+                  },
+                  "location": {
+                    "type": "object",
+                    "description": "Paramètres de localisation pour la requête. Lorsqu’ils sont spécifiés, un proxy approprié sera utilisé si disponible et les paramètres de langue et de fuseau horaire correspondants seront émulés. La valeur par défaut est « US » si aucun paramètre n’est indiqué.",
+                    "properties": {
+                      "country": {
+                        "type": "string",
+                        "description": "Code de pays ISO 3166-1 alpha-2 (p. ex. « US », « AU », « DE », « JP »)",
+                        "pattern": "^[A-Z]{2}$",
+                        "default": "US"
+                      },
+                      "languages": {
+                        "type": "array",
+                        "description": "Langues et paramètres régionaux préférés pour la requête, par ordre de priorité. Par défaut, la langue de l’emplacement spécifié est utilisée. Voir https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Accept-Language",
+                        "items": {
+                          "type": "string",
+                          "example": "en-US"
+                        }
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "url"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Réponse en cas de succès",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Paiement requis",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Trop de requêtes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erreur du serveur",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/extract": {
+      "post": {
+        "summary": "Extraire des données structurées depuis des pages à l’aide de LLM",
+        "operationId": "extractData",
+        "tags": [
+          "Extraction"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "urls": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uri",
+                      "description": "Les URL à partir desquelles extraire les données. Les URL doivent utiliser le format glob."
+                    }
+                  },
+                  "prompt": {
+                    "type": "string",
+                    "description": "Prompt guidant le processus d’extraction"
+                  },
+                  "schema": {
+                    "type": "object",
+                    "description": "Schéma qui définit la structure des données extraites. Doit être conforme à la spécification [JSON Schema](https://json-schema.org/)."
+                  },
+                  "enableWebSearch": {
+                    "type": "boolean",
+                    "description": "Lorsque la valeur est définie sur true, l’extraction utilisera la recherche sur le Web pour trouver des données supplémentaires",
+                    "default": false
+                  },
+                  "ignoreSitemap": {
+                    "type": "boolean",
+                    "description": "Lorsque cette option est à true, les fichiers sitemap.xml sont ignorés lors de l’analyse du site web",
+                    "default": false
+                  },
+                  "includeSubdomains": {
+                    "type": "boolean",
+                    "description": "Si activé, les sous-domaines des URL fournies seront également explorés",
+                    "default": true
+                  },
+                  "showSources": {
+                    "type": "boolean",
+                    "description": "Lorsque cette option est définie sur `true`, les sources utilisées pour extraire les données seront incluses dans la réponse sous la clé `sources`.",
+                    "default": false
+                  },
+                  "scrapeOptions": {
+                    "$ref": "#/components/schemas/ScrapeOptions"
+                  },
+                  "ignoreInvalidURLs": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Si des URL non valides sont spécifiées dans le tableau urls, elles seront ignorées. Au lieu de faire échouer toute la requête, une extraction sera effectuée à partir des URL valides restantes, et les URL non valides seront renvoyées dans le champ invalidURLs de la réponse."
+                  }
+                },
+                "required": [
+                  "urls"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Extraction réussie",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtractResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Requête invalide",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Invalid input data."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erreur serveur",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/extract/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "description": "L’identifiant de la tâche d’extraction",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "summary": "Récupérer le statut d'une tâche d'extraction",
+        "operationId": "getExtractStatus",
+        "tags": [
+          "Extraction"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Réponse en cas de succès",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtractStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/crawl/active": {
+      "get": {
+        "summary": "Récupérer tous les crawls actifs de l’équipe actuelle",
+        "operationId": "getActiveCrawls",
+        "tags": [
+          "Crawling"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Réponse réussie",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "crawls": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "description": "L’identifiant unique du crawl"
+                          },
+                          "teamId": {
+                            "type": "string",
+                            "description": "L’ID de l’équipe qui possède le crawl"
+                          },
+                          "url": {
+                            "type": "string",
+                            "format": "uri",
+                            "description": "L’URL de départ du crawl"
+                          },
+                          "options": {
+                            "type": "object",
+                            "description": "Options du crawler utilisées pour ce crawl",
+                            "properties": {
+                              "scrapeOptions": {
+                                "$ref": "#/components/schemas/ScrapeOptions"
+                              }
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "teamId",
+                          "url",
+                          "status",
+                          "options"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Paiement requis",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Trop de requêtes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erreur du serveur",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/deep-research": {
+      "post": {
+        "summary": "Lancer une recherche approfondie pour une requête",
+        "operationId": "startDeepResearch",
+        "tags": [
+          "Research"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "La requête à étudier"
+                  },
+                  "maxDepth": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 12,
+                    "default": 7,
+                    "description": "Profondeur maximale des itérations de recherche"
+                  },
+                  "timeLimit": {
+                    "type": "integer",
+                    "minimum": 30,
+                    "maximum": 600,
+                    "default": 300,
+                    "description": "Limite de temps (en secondes)"
+                  },
+                  "maxUrls": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000,
+                    "default": 20,
+                    "description": "Nombre maximal d’URL à analyser"
+                  },
+                  "analysisPrompt": {
+                    "type": "string",
+                    "description": "Le prompt à utiliser pour l’analyse finale. Utile pour formater le markdown de l’analyse finale d’une manière spécifique."
+                  },
+                  "systemPrompt": {
+                    "type": "string",
+                    "description": "L’invite système à utiliser pour l’agent de recherche. Permet d’orienter l’agent de recherche dans une direction précise."
+                  },
+                  "formats": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "markdown",
+                        "json"
+                      ],
+                      "default": [
+                        "markdown"
+                      ]
+                    }
+                  },
+                  "jsonOptions": {
+                    "type": "object",
+                    "description": "Options de sortie au format JSON",
+                    "properties": {
+                      "schema": {
+                        "type": "object",
+                        "description": "Le schéma à utiliser pour la sortie JSON. Doit être conforme à JSON Schema (https://json-schema.org/)."
+                      },
+                      "systemPrompt": {
+                        "type": "string",
+                        "description": "Le prompt système à utiliser pour la sortie au format JSON"
+                      },
+                      "prompt": {
+                        "type": "string",
+                        "description": "Le prompt à utiliser pour la sortie au format JSON"
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "query"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "La tâche de recherche a bien démarré",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "description": "ID de la tâche de recherche"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Paramètres de la requête invalides",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Invalid parameters provided"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/deep-research/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "description": "L’identifiant de la tâche de recherche",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "summary": "Obtenir le statut et les résultats d'une opération de recherche approfondie",
+        "operationId": "getDeepResearchStatus",
+        "tags": [
+          "Research"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Réponse en cas de succès",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "finalAnalysis": {
+                          "type": "string"
+                        },
+                        "json": {
+                          "type": "object",
+                          "description": "Affiché lorsque le format JSON est utilisé",
+                          "nullable": true
+                        },
+                        "activities": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string"
+                              },
+                              "message": {
+                                "type": "string"
+                              },
+                              "timestamp": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "depth": {
+                                "type": "integer"
+                              }
+                            }
+                          }
+                        },
+                        "sources": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "url": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "oneOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                ],
+                                "description": "Titre extrait de la page, peut être une chaîne de caractères ou un tableau de chaînes"
+                              },
+                              "description": {
+                                "oneOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                ],
+                                "description": "Description extraite de la page, peut être une chaîne de caractères ou un tableau de chaînes de caractères"
+                              },
+                              "favicon": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "processing",
+                            "completed",
+                            "failed"
+                          ]
+                        },
+                        "error": {
+                          "type": "string"
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "currentDepth": {
+                          "type": "integer"
+                        },
+                        "maxDepth": {
+                          "type": "integer"
+                        },
+                        "totalUrls": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Tâche de recherche introuvable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Research job not found"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/team/credit-usage": {
+      "get": {
+        "summary": "Récupérer les crédits restants de l’équipe authentifiée",
+        "operationId": "getCreditUsage",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Réponse en cas de succès",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "remaining_credits": {
+                          "type": "number",
+                          "description": "Nombre de crédits restants pour l’équipe",
+                          "example": 1000
+                        },
+                        "plan_credits": {
+                          "type": "number",
+                          "description": "Nombre de crédits inclus dans la formule. N’inclut pas les crédits issus de coupons, les packs de crédits ni les crédits de rechargement automatique.",
+                          "example": 500000
+                        },
+                        "billing_period_start": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "Date de début de la période de facturation. null si vous utilisez le plan gratuit",
+                          "example": "2025-01-01T00:00:00Z",
+                          "nullable": true
+                        },
+                        "billing_period_end": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "Date de fin de la période de facturation. null si vous utilisez le forfait gratuit",
+                          "example": "2025-01-31T23:59:59Z",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Informations sur l’utilisation des crédits introuvables",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Could not find credit usage information"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erreur du serveur",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Internal server error while fetching credit usage"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/team/credit-usage/historical": {
+      "get": {
+        "summary": "Récupérer l’historique d’utilisation des crédits de l’équipe authentifiée",
+        "operationId": "getHistoricalCreditUsage",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "byApiKey",
+            "in": "query",
+            "description": "Récupérer l’historique d’utilisation des crédits par clé API",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Réponse en cas de succès",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "periods": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "startDate": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "Date de début de la période de facturation",
+                            "example": "2025-01-01T00:00:00Z"
+                          },
+                          "endDate": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "Date de fin de la période de facturation",
+                            "example": "2025-01-31T23:59:59Z"
+                          },
+                          "apiKey": {
+                            "type": "string",
+                            "description": "Nom de la clé API utilisée pour la période de facturation. null si byApiKey est à false (par défaut)",
+                            "nullable": true
+                          },
+                          "totalCredits": {
+                            "type": "integer",
+                            "description": "Nombre total de crédits utilisés au cours de la période de facturation",
+                            "example": 1000
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erreur du serveur",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Internal server error while fetching historical credit usage"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/team/token-usage": {
+      "get": {
+        "summary": "Récupérer le nombre de jetons restants pour l’équipe authentifiée (extraction uniquement)",
+        "operationId": "getTokenUsage",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Réponse en cas de succès",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "remaining_tokens": {
+                          "type": "number",
+                          "description": "Nombre de jetons restants pour l’équipe",
+                          "example": 1000
+                        },
+                        "plan_tokens": {
+                          "type": "number",
+                          "description": "Nombre de jetons inclus dans le forfait. Les jetons issus de coupons ne sont pas comptabilisés.",
+                          "example": 500000
+                        },
+                        "billing_period_start": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "Date de début de la période de facturation. null si vous utilisez l’offre gratuite",
+                          "example": "2025-01-01T00:00:00Z",
+                          "nullable": true
+                        },
+                        "billing_period_end": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "Date de fin de la période de facturation. null si vous utilisez le plan gratuit",
+                          "example": "2025-01-31T23:59:59Z",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Informations sur l’utilisation des jetons introuvables",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Could not find token usage information"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erreur du serveur",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Internal server error while fetching token usage"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/team/token-usage/historical": {
+      "get": {
+        "summary": "Récupérer l’historique d’utilisation des tokens de l’équipe authentifiée (Extract uniquement)",
+        "operationId": "getHistoricalTokenUsage",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "byApiKey",
+            "in": "query",
+            "description": "Récupérer l’historique d’utilisation des jetons par clé API",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Réponse en cas de succès",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "periods": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "startDate": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "Date de début de la période de facturation",
+                            "example": "2025-01-01T00:00:00Z"
+                          },
+                          "endDate": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "Date de fin de la période de facturation",
+                            "example": "2025-01-31T23:59:59Z"
+                          },
+                          "apiKey": {
+                            "type": "string",
+                            "description": "Nom de la clé API utilisée pour la période de facturation. null si byApiKey est false (valeur par défaut)",
+                            "nullable": true
+                          },
+                          "totalTokens": {
+                            "type": "integer",
+                            "description": "Nombre total de jetons utilisés au cours de la période de facturation",
+                            "example": 1000
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erreur du serveur",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Internal server error while fetching historical token usage"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/team/queue-status": {
+      "get": {
+        "summary": "Indicateurs sur la file d’attente de scraping de votre équipe",
+        "operationId": "getQueueStatus",
+        "tags": [
+          "Miscellaneous"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Réponse en cas de succès",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "jobsInQueue": {
+                      "type": "number",
+                      "description": "Nombre de tâches actuellement en file d'attente"
+                    },
+                    "activeJobsInQueue": {
+                      "type": "number",
+                      "description": "Nombre de tâches en cours"
+                    },
+                    "waitingJobsInQueue": {
+                      "type": "number",
+                      "description": "Nombre de tâches actuellement en attente"
+                    },
+                    "maxConcurrency": {
+                      "type": "number",
+                      "description": "Nombre maximal de tâches actives en parallèle en fonction de votre offre"
+                    },
+                    "mostRecentSuccess": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "Horodatage de la tâche la plus récente exécutée avec succès",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/search": {
+      "post": {
+        "summary": "Rechercher et éventuellement scraper les résultats de recherche",
+        "operationId": "searchAndScrape",
+        "tags": [
+          "Search"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "La requête de recherche"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "description": "Nombre maximal de résultats à retourner",
+                    "default": 5,
+                    "maximum": 100,
+                    "minimum": 1
+                  },
+                  "tbs": {
+                    "type": "string",
+                    "description": "Paramètre de recherche temporel. Prend en charge les intervalles de temps prédéfinis (`qdr:h`, `qdr:d`, `qdr:w`, `qdr:m`, `qdr:y`) et les plages de dates personnalisées (`cdr:1,cd_min:MM/DD/YYYY,cd_max:MM/DD/YYYY`)."
+                  },
+                  "location": {
+                    "type": "string",
+                    "description": "Paramètre de localisation des résultats de recherche"
+                  },
+                  "timeout": {
+                    "type": "integer",
+                    "description": "Délai d’expiration en millisecondes",
+                    "default": 60000
+                  },
+                  "ignoreInvalidURLs": {
+                    "type": "boolean",
+                    "description": "Exclut des résultats de recherche les URL qui ne sont pas valides pour d’autres endpoints de Firecrawl. Cela permet de réduire les erreurs si vous transférez les données issues de la recherche vers d’autres endpoints de l’API Firecrawl.",
+                    "default": false
+                  },
+                  "scrapeOptions": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/BaseScrapeOptions"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "formats": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "markdown",
+                                "html",
+                                "rawHtml",
+                                "links",
+                                "screenshot",
+                                "screenshot@fullPage",
+                                "json",
+                                "extract"
+                              ]
+                            },
+                            "default": []
+                          }
+                        }
+                      }
+                    ],
+                    "description": "Options de scraping des résultats de recherche",
+                    "default": {}
+                  }
+                },
+                "required": [
+                  "query"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Réponse en cas de succès",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "title": {
+                            "type": "string",
+                            "description": "Titre du résultat de la recherche"
+                          },
+                          "description": {
+                            "type": "string",
+                            "description": "Description du résultat de la recherche"
+                          },
+                          "url": {
+                            "type": "string",
+                            "description": "URL du résultat de la recherche"
+                          },
+                          "markdown": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "Contenu en Markdown si le scraping a été demandé"
+                          },
+                          "html": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "Contenu HTML si ce format est demandé dans formats"
+                          },
+                          "rawHtml": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "Contenu HTML brut lorsqu’il est demandé dans les formats"
+                          },
+                          "links": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "Liens trouvés si demandé dans les formats de sortie"
+                          },
+                          "screenshot": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "URL de la capture d’écran si elle est demandée dans les formats. Les captures d’écran expirent après 24 heures et ne peuvent plus être téléchargées."
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "properties": {
+                              "title": {
+                                "oneOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                ],
+                                "description": "Titre extrait de la page, peut être une chaîne de caractères ou un tableau de chaînes de caractères"
+                              },
+                              "description": {
+                                "oneOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                ],
+                                "description": "Description extraite de la page, peut être une chaîne de caractères ou un tableau de chaînes de caractères"
+                              },
+                              "sourceURL": {
+                                "type": "string"
+                              },
+                              "statusCode": {
+                                "type": "integer"
+                              },
+                              "error": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "warning": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "Message d’avertissement en cas de problèmes"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "Dépassement du délai d’attente de la requête",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Request timed out"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erreur du serveur",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/llmstxt": {
+      "post": {
+        "summary": "Générer le fichier LLMs.txt d’un site web",
+        "operationId": "generateLLMsTxt",
+        "tags": [
+          "LLMs.txt"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "L’URL utilisée pour générer LLMs.txt"
+                  },
+                  "maxUrls": {
+                    "type": "integer",
+                    "description": "Nombre maximal d’URL à analyser",
+                    "default": 2
+                  },
+                  "showFullText": {
+                    "type": "boolean",
+                    "description": "Inclure l’intégralité du contenu textuel dans la réponse",
+                    "default": false
+                  }
+                },
+                "required": [
+                  "url"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "La tâche de génération LLMs.txt a été lancée avec succès",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "description": "ID du job de génération du fichier LLMs.txt"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Paramètres de requête non valides",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Invalid parameters provided"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/llmstxt/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "description": "Identifiant de la tâche de génération de LLMs.txt",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "summary": "Obtenir le statut et les résultats d’une tâche de génération de fichier LLMs.txt",
+        "operationId": "getLLMsTxtStatus",
+        "tags": [
+          "LLMs.txt"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Réponse en cas de succès",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "processing",
+                        "completed",
+                        "failed"
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "llmstxt": {
+                          "type": "string",
+                          "description": "Le contenu généré du fichier LLMs.txt"
+                        },
+                        "llmsfulltxt": {
+                          "type": "string",
+                          "description": "Le contenu textuel complet lorsque showFullText vaut true"
+                        }
+                      }
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "Date d’expiration du contenu généré"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Tâche de génération du fichier LLMs.txt introuvable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "LLMs.txt generation job not found"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "BaseScrapeOptions": {
+        "type": "object",
+        "properties": {
+          "onlyMainContent": {
+            "type": "boolean",
+            "description": "Renvoyer uniquement le contenu principal de la page, en excluant les en-têtes, éléments de navigation, pieds de page, etc.",
+            "default": true
+          },
+          "includeTags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Balises à inclure dans la sortie."
+          },
+          "excludeTags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Balises à exclure du résultat."
+          },
+          "maxAge": {
+            "type": "integer",
+            "description": "Renvoie une version mise en cache de la page si elle a moins que cette ancienneté (en millisecondes). Si une version mise en cache de la page est plus ancienne que cette valeur, la page sera à nouveau scrapée. Si vous n’avez pas besoin de données extrêmement récentes, activer cette option peut accélérer vos opérations de scraping jusqu’à 500 %. La valeur par défaut est 0, ce qui désactive la mise en cache.",
+            "default": 0
+          },
+          "headers": {
+            "type": "object",
+            "description": "En-têtes à envoyer avec la requête. Peuvent servir à envoyer des cookies, l’en-tête User-Agent, etc."
+          },
+          "waitFor": {
+            "type": "integer",
+            "description": "Spécifiez un délai, en millisecondes, avant de récupérer le contenu, afin de laisser à la page suffisamment de temps pour se charger.",
+            "default": 0
+          },
+          "mobile": {
+            "type": "boolean",
+            "description": "Mettez cette option à true si vous souhaitez simuler le scraping depuis un appareil mobile. Utile pour tester les pages responsive et prendre des captures d’écran mobiles.",
+            "default": false
+          },
+          "skipTlsVerification": {
+            "type": "boolean",
+            "description": "Ignorer la vérification des certificats TLS lors de l’envoi de requêtes",
+            "default": false
+          },
+          "timeout": {
+            "type": "integer",
+            "description": "Délai d'attente de la requête en millisecondes",
+            "default": 30000
+          },
+          "parsePDF": {
+            "type": "boolean",
+            "description": "Contrôle la façon dont les fichiers PDF sont traités lors du scraping. Lorsque cette option est activée (true), le contenu du PDF est extrait et converti au format markdown, avec une facturation basée sur le nombre de pages (1 crédit par page). Lorsque cette option est désactivée (false), le fichier PDF est renvoyé sous forme de base64 avec un tarif forfaitaire de 1 crédit au total.",
+            "default": true
+          },
+          "jsonOptions": {
+            "type": "object",
+            "description": "Objet JSON d’options",
+            "properties": {
+              "schema": {
+                "type": "object",
+                "description": "Le schéma d’extraction à utiliser (facultatif). Doit être conforme à la spécification [JSON Schema](https://json-schema.org/)."
+              },
+              "systemPrompt": {
+                "type": "string",
+                "description": "Le prompt système à utiliser pour l'extraction (optionnel)"
+              },
+              "prompt": {
+                "type": "string",
+                "description": "Le prompt à utiliser pour l’extraction sans schéma (optionnel)"
+              }
+            }
+          },
+          "actions": {
+            "type": "array",
+            "description": "Actions à effectuer sur la page avant de récupérer le contenu",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "title": "Wait",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "wait"
+                      ],
+                      "description": "Attendre un nombre donné de millisecondes"
+                    },
+                    "milliseconds": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "Nombre de millisecondes d'attente"
+                    },
+                    "selector": {
+                      "type": "string",
+                      "description": "Sélecteur de requête permettant de trouver l’élément par",
+                      "example": "#my-element"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "title": "Screenshot",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "screenshot"
+                      ],
+                      "description": "Prenez une capture d’écran. Les liens seront disponibles dans le tableau `actions.screenshots` de la réponse."
+                    },
+                    "fullPage": {
+                      "type": "boolean",
+                      "description": "Indique s’il faut effectuer une capture d’écran de la page entière ou la limiter à la zone d’affichage actuelle (viewport).",
+                      "default": false
+                    },
+                    "quality": {
+                      "type": "integer",
+                      "description": "La qualité de la capture d’écran, allant de 1 à 100. 100 correspond à la qualité la plus élevée."
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "title": "Click",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "click"
+                      ],
+                      "description": "Cliquez sur un élément"
+                    },
+                    "selector": {
+                      "type": "string",
+                      "description": "Sélecteur CSS pour trouver l’élément par",
+                      "example": "#load-more-button"
+                    },
+                    "all": {
+                      "type": "boolean",
+                      "description": "Clique sur tous les éléments correspondant au sélecteur, et pas uniquement le premier. Ne génère pas d’erreur si aucun élément ne correspond au sélecteur.",
+                      "default": false
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "selector"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "title": "Write text",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "write"
+                      ],
+                      "description": "Saisir du texte dans un champ de saisie, une zone de texte ou un élément contenteditable. Remarque : vous devez d’abord placer le focus sur l’élément à l’aide d’une action de « clic » avant de saisir le texte. Le texte sera entré caractère par caractère pour simuler une saisie au clavier."
+                    },
+                    "text": {
+                      "type": "string",
+                      "description": "Texte à saisir",
+                      "example": "Hello, world!"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "text"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "title": "Press a key",
+                  "description": "Appuyez sur une touche sur cette page. Voir https://asawicki.info/nosense/doc/devices/keyboard/key_codes.html pour la liste des codes de touches.",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "press"
+                      ],
+                      "description": "Appuyez sur une touche du clavier"
+                    },
+                    "key": {
+                      "type": "string",
+                      "description": "Touche à presser",
+                      "example": "Enter"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "key"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "title": "Scroll",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "scroll"
+                      ],
+                      "description": "Faire défiler la page ou un élément spécifique"
+                    },
+                    "direction": {
+                      "type": "string",
+                      "enum": [
+                        "up",
+                        "down"
+                      ],
+                      "description": "Sens de défilement",
+                      "default": "down"
+                    },
+                    "selector": {
+                      "type": "string",
+                      "description": "Sélecteur CSS de l’élément à faire défiler",
+                      "example": "#my-element"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "title": "Scrape",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "scrape"
+                      ],
+                      "description": "Extrait le contenu de la page actuelle et renvoie l’URL et le HTML."
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "title": "Execute JavaScript",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "executeJavascript"
+                      ],
+                      "description": "Exécuter du code JavaScript sur la page"
+                    },
+                    "script": {
+                      "type": "string",
+                      "description": "Code JavaScript à exécuter",
+                      "example": "document.querySelector('.button').click();"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "script"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "title": "Generate PDF",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "pdf"
+                      ],
+                      "description": "Générer un PDF de la page actuelle. Le PDF sera renvoyé dans le tableau `actions.pdfs` de la réponse."
+                    },
+                    "format": {
+                      "type": "string",
+                      "enum": [
+                        "A0",
+                        "A1",
+                        "A2",
+                        "A3",
+                        "A4",
+                        "A5",
+                        "A6",
+                        "Letter",
+                        "Legal",
+                        "Tabloid",
+                        "Ledger"
+                      ],
+                      "description": "Le format de page du PDF généré",
+                      "default": "Letter"
+                    },
+                    "landscape": {
+                      "type": "boolean",
+                      "description": "Indique s’il faut générer le PDF au format paysage",
+                      "default": false
+                    },
+                    "scale": {
+                      "type": "number",
+                      "description": "Le facteur d’échelle du PDF généré",
+                      "default": 1
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                }
+              ]
+            }
+          },
+          "location": {
+            "type": "object",
+            "description": "Paramètre de localisation de la requête. Lorsqu’il est spécifié, un proxy approprié est utilisé si disponible et la langue ainsi que le fuseau horaire correspondants sont émulés. Par défaut, « US » est utilisé si aucun paramètre n’est spécifié.",
+            "properties": {
+              "country": {
+                "type": "string",
+                "description": "Code de pays ISO 3166-1 alpha-2 (par ex. « US », « AU », « DE », « JP »)",
+                "pattern": "^[A-Z]{2}$",
+                "default": "US"
+              },
+              "languages": {
+                "type": "array",
+                "description": "Langues et paramètres régionaux préférés pour la requête, par ordre de priorité. Par défaut, la langue de l’emplacement spécifié est utilisée. Voir https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Accept-Language",
+                "items": {
+                  "type": "string",
+                  "example": "en-US"
+                }
+              }
+            }
+          },
+          "removeBase64Images": {
+            "type": "boolean",
+            "description": "Supprime toutes les images encodées en base64 de la sortie, qui peuvent être extrêmement longues. Le texte alternatif de l’image est conservé dans la sortie, mais l’URL est remplacée par un placeholder.",
+            "default": true
+          },
+          "blockAds": {
+            "type": "boolean",
+            "description": "Active le blocage des publicités et des bannières de cookies.",
+            "default": true
+          },
+          "proxy": {
+            "type": "string",
+            "enum": [
+              "basic",
+              "stealth",
+              "auto"
+            ],
+            "description": "Spécifie le type de proxy à utiliser.\n\n - **basic** : Proxies pour le scraping de sites avec peu ou pas de solutions anti-bot. Rapides et généralement efficaces.\n - **stealth** : Proxies furtifs pour le scraping de sites avec des solutions anti-bot avancées. Plus lents, mais plus fiables sur certains sites. Coût pouvant atteindre 5 crédits par requête.\n - **auto** : Firecrawl réessaiera automatiquement le scraping avec des proxies furtifs si le proxy basic échoue. Si la nouvelle tentative avec stealth réussit, 5 crédits seront facturés pour l’opération de scraping. Si la première tentative avec basic réussit, seul le coût normal sera facturé.\n\nSi vous ne spécifiez pas de proxy, Firecrawl utilisera basic par défaut."
+          },
+          "storeInCache": {
+            "type": "boolean",
+            "description": "Si ce paramètre est défini sur true, la page sera stockée dans l’index et le cache de Firecrawl. Le définir sur false est utile si votre activité de scraping peut soulever des enjeux de protection des données. L’utilisation de certains paramètres associés à un scraping sensible (actions, en-têtes) forcera ce paramètre à false.",
+            "default": true
+          }
+        }
+      },
+      "ScrapeOptions": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/BaseScrapeOptions"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "formats": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "markdown",
+                    "html",
+                    "rawHtml",
+                    "links",
+                    "screenshot",
+                    "screenshot@fullPage",
+                    "json",
+                    "changeTracking"
+                  ]
+                },
+                "description": "Formats à inclure dans le résultat.",
+                "default": [
+                  "markdown"
+                ]
+              },
+              "changeTrackingOptions": {
+                "type": "object",
+                "description": "Options de suivi des modifications (bêta). Applicable uniquement lorsque « changeTracking » est inclus dans les formats. Le format « markdown » doit également être spécifié lors de l’utilisation du suivi des modifications.",
+                "properties": {
+                  "modes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "git-diff",
+                        "json"
+                      ]
+                    },
+                    "description": "Le mode à utiliser pour le suivi des modifications. « git-diff » fournit un diff détaillé, et « json » compare les données JSON extraites."
+                  },
+                  "schema": {
+                    "type": "object",
+                    "description": "Schéma pour l’extraction JSON lors de l’utilisation du mode « json ». Définit la structure des données à extraire et à comparer. Doit être conforme à [JSON Schema](https://json-schema.org/)."
+                  },
+                  "prompt": {
+                    "type": "string",
+                    "description": "Prompt à utiliser pour le suivi des modifications lors de l’utilisation du mode « json ». S’il n’est pas renseigné, le prompt par défaut sera utilisé."
+                  },
+                  "tag": {
+                    "type": "string",
+                    "nullable": true,
+                    "default": null,
+                    "description": "Tag à utiliser pour le suivi des modifications. Les tags peuvent séparer l’historique de suivi des modifications en « branches » distinctes, où le suivi des modifications avec un tag spécifique ne comparera qu’avec les scrapes effectués avec le même tag. Si aucun tag n’est fourni, le tag par défaut (null) sera utilisé."
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "ScrapeResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "markdown": {
+                "type": "string"
+              },
+              "html": {
+                "type": "string",
+                "nullable": true,
+                "description": "Version HTML du contenu de la page si `html` figure dans `formats`"
+              },
+              "rawHtml": {
+                "type": "string",
+                "nullable": true,
+                "description": "Contenu HTML brut de la page si `rawHtml` figure parmi les formats"
+              },
+              "screenshot": {
+                "type": "string",
+                "nullable": true,
+                "description": "Capture d’écran de la page si `screenshot` fait partie de `formats`. Les captures d’écran expirent après 24 heures et ne peuvent plus être téléchargées."
+              },
+              "links": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Liste des liens présents sur la page si `links` figure dans `formats`"
+              },
+              "actions": {
+                "type": "object",
+                "nullable": true,
+                "description": "Résultats des actions spécifiées dans le paramètre `actions`. Uniquement présent si le paramètre `actions` a été fourni dans la requête",
+                "properties": {
+                  "screenshots": {
+                    "type": "array",
+                    "description": "URLs des captures d’écran, dans le même ordre que les actions de capture d’écran fournies. Les captures d’écran expirent après 24 heures et ne sont alors plus téléchargeables.",
+                    "items": {
+                      "type": "string",
+                      "format": "url"
+                    }
+                  },
+                  "scrapes": {
+                    "type": "array",
+                    "description": "Extraire le contenu dans le même ordre que les actions de scraping fournies.",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string"
+                        },
+                        "html": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "javascriptReturns": {
+                    "type": "array",
+                    "description": "Valeurs de retour JavaScript, dans le même ordre que les actions executeJavascript spécifiées.",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "value": {}
+                      }
+                    }
+                  },
+                  "pdfs": {
+                    "type": "array",
+                    "description": "PDF générés, dans le même ordre que les actions PDF fournies.",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "metadata": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "language": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "sourceURL": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "keywords": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    ],
+                    "description": "Mots-clés extraits de la page, peuvent être représentés sous forme de chaîne ou de tableau de chaînes de caractères"
+                  },
+                  "ogLocaleAlternate": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Autres paramètres régionaux de la page"
+                  },
+                  "<any other metadata> ": {
+                    "type": "string"
+                  },
+                  "statusCode": {
+                    "type": "integer",
+                    "description": "Le code d’état HTTP de la page"
+                  },
+                  "error": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "Le message d’erreur de la page"
+                  }
+                }
+              },
+              "llm_extraction": {
+                "type": "object",
+                "description": "Affiché lors de l’utilisation de l’extraction LLM. Données extraites de la page selon le schéma défini.",
+                "nullable": true
+              },
+              "warning": {
+                "type": "string",
+                "nullable": true,
+                "description": "Peut s’afficher lors de l’utilisation de l’extraction LLM. Un message d’avertissement vous signalera tout problème lié à l’extraction."
+              },
+              "changeTracking": {
+                "type": "object",
+                "nullable": true,
+                "description": "Informations de suivi des modifications si `changeTracking` figure dans `formats`. Ces informations ne sont présentes que lorsque le format `changeTracking` est demandé.",
+                "properties": {
+                  "previousScrapeAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true,
+                    "description": "L’horodatage du scraping précédent auquel la page actuelle est comparée. Null s’il n’existe aucun scraping précédent."
+                  },
+                  "changeStatus": {
+                    "type": "string",
+                    "enum": [
+                      "new",
+                      "same",
+                      "changed",
+                      "removed"
+                    ],
+                    "description": "Le résultat de la comparaison entre les deux versions de la page. « new » signifie que cette page n’existait pas auparavant, « same » signifie que le contenu est inchangé, « changed » signifie que le contenu a changé, « removed » signifie que la page a été supprimée."
+                  },
+                  "visibility": {
+                    "type": "string",
+                    "enum": [
+                      "visible",
+                      "hidden"
+                    ],
+                    "description": "La visibilité de la page/URL actuelle. « visible » signifie que l’URL a été découverte de manière organique (liens ou sitemap), « hidden » signifie que l’URL a été découverte grâce à la mémoire de crawls précédents."
+                  },
+                  "diff": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "Diff au format Git des modifications lors de l’utilisation du mode « git-diff ». Présent uniquement lorsque le mode est défini sur « git-diff »."
+                  },
+                  "json": {
+                    "type": "object",
+                    "nullable": true,
+                    "description": "Résultats de comparaison JSON lors de l’utilisation du mode `json`. Uniquement disponible lorsque le mode est défini sur `json`. Retourne une liste de toutes les clés et de leurs valeurs issues des extractions `previous` et `current`, en fonction du type défini dans le `schema`. Exemple [ici](/features/change-tracking)"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "CrawlStatusResponseObj": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "L’état actuel du crawl. Peut avoir pour valeur `scraping`, `completed` ou `failed`."
+          },
+          "total": {
+            "type": "integer",
+            "description": "Nombre total de pages ayant fait l'objet d'une tentative de crawl."
+          },
+          "completed": {
+            "type": "integer",
+            "description": "Le nombre de pages explorées avec succès."
+          },
+          "creditsUsed": {
+            "type": "integer",
+            "description": "Le nombre de crédits utilisés pour l’opération de crawl."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "La date et l’heure d’expiration du crawl."
+          },
+          "next": {
+            "type": "string",
+            "nullable": true,
+            "description": "L’URL permettant de récupérer les 10 Mo de données suivants. Retournée si l’exploration n’est pas terminée ou si la réponse dépasse 10 Mo."
+          },
+          "data": {
+            "type": "array",
+            "description": "Les données du crawl.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "markdown": {
+                  "type": "string"
+                },
+                "html": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "Version HTML du contenu de la page si `includeHtml` vaut true"
+                },
+                "rawHtml": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "Contenu HTML brut de la page si `includeRawHtml` est à true"
+                },
+                "links": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Liste des liens présents sur la page si `includeLinks` est défini sur `true`"
+                },
+                "screenshot": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "Capture d’écran de la page si `includeScreenshot` est défini sur `true`"
+                },
+                "metadata": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ],
+                      "description": "Titre extrait de la page, peut être une chaîne de caractères ou un tableau de chaînes de caractères"
+                    },
+                    "description": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ],
+                      "description": "Description extraite de la page, peut être une chaîne de caractères ou un tableau de chaînes de caractères"
+                    },
+                    "language": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ],
+                      "nullable": true,
+                      "description": "Langue extraite de la page, peut être une chaîne ou un tableau de chaînes de caractères"
+                    },
+                    "sourceURL": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "keywords": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ],
+                      "description": "Mots-clés extraits de la page, pouvant être une chaîne de caractères ou un tableau de chaînes de caractères"
+                    },
+                    "ogLocaleAlternate": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Autres paramètres régionaux pour cette page"
+                    },
+                    "<any other metadata> ": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ],
+                      "description": "Autres métadonnées extraites du HTML, pouvant être une chaîne ou un tableau de chaînes"
+                    },
+                    "statusCode": {
+                      "type": "integer",
+                      "description": "Le code de statut de la page"
+                    },
+                    "error": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "Le message d’erreur de la page"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "CrawlErrorsResponseObj": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "description": "Tâches d’extraction en échec et détails des erreurs",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "timestamp": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "Horodatage ISO de l’échec"
+                },
+                "url": {
+                  "type": "string",
+                  "description": "URL explorée"
+                },
+                "error": {
+                  "type": "string",
+                  "description": "Message d’erreur"
+                }
+              }
+            }
+          },
+          "robotsBlocked": {
+            "type": "array",
+            "description": "Liste des URL pour lesquelles le scraping a été tenté mais bloqué par robots.txt",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "BatchScrapeStatusResponseObj": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Statut actuel de l’extraction par lots. Peut être `scraping`, `completed` ou `failed`."
+          },
+          "total": {
+            "type": "integer",
+            "description": "Nombre total de pages dont le scraping a été tenté."
+          },
+          "completed": {
+            "type": "integer",
+            "description": "Le nombre de pages récupérées avec succès."
+          },
+          "creditsUsed": {
+            "type": "integer",
+            "description": "Le nombre de crédits utilisés pour le scraping par lots."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Date et heure d’expiration du lot de scraping."
+          },
+          "next": {
+            "type": "string",
+            "nullable": true,
+            "description": "L’URL permettant de récupérer les 10 Mo de données suivants. Renvoyée si l’opération de scraping par lots n’est pas terminée ou si la réponse dépasse 10 Mo."
+          },
+          "data": {
+            "type": "array",
+            "description": "Les données du scraping par lots.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "markdown": {
+                  "type": "string"
+                },
+                "html": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "Version HTML du contenu de la page si `includeHtml` vaut true"
+                },
+                "rawHtml": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "Contenu HTML brut de la page si `includeRawHtml` vaut `true`"
+                },
+                "links": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Liste des liens de la page si `includeLinks` est défini sur `true`"
+                },
+                "screenshot": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "Capture d’écran de la page si `includeScreenshot` vaut true"
+                },
+                "metadata": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ],
+                      "description": "Titre extrait de la page, peut être une chaîne de caractères ou un tableau de chaînes de caractères"
+                    },
+                    "description": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ],
+                      "description": "Description extraite de la page, peut être une chaîne ou un tableau de chaînes de caractères"
+                    },
+                    "language": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ],
+                      "nullable": true,
+                      "description": "Langue extraite de la page ; peut être une chaîne de caractères ou un tableau de chaînes"
+                    },
+                    "sourceURL": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "keywords": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ],
+                      "description": "Mots‑clés extraits de la page, sous forme de chaîne ou de tableau de chaînes"
+                    },
+                    "ogLocaleAlternate": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Autres paramètres régionaux de la page"
+                    },
+                    "<any other metadata> ": {
+                      "oneOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ],
+                      "description": "Autres métadonnées extraites du HTML, pouvant être une chaîne ou un tableau de chaînes"
+                    },
+                    "statusCode": {
+                      "type": "integer",
+                      "description": "Le code de statut de la page"
+                    },
+                    "error": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "Le message d'erreur de la page"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "CrawlResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      },
+      "BatchScrapeResponseObj": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "invalidURLs": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "type": "string"
+            },
+            "description": "Si ignoreInvalidURLs est à true, ce champ est un tableau contenant les URL invalides qui ont été spécifiées dans la requête. S’il n’y a aucune URL invalide, ce sera un tableau vide. Si ignoreInvalidURLs est à false, ce champ sera undefined."
+          }
+        }
+      },
+      "MapResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ExtractResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "invalidURLs": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "type": "string"
+            },
+            "description": "Si ignoreInvalidURLs est défini sur true, il s’agit d’un tableau contenant les URL invalides spécifiées dans la requête. S’il n’y a aucune URL invalide, ce sera un tableau vide. Si ignoreInvalidURLs est défini sur false, ce champ sera undefined."
+          }
+        }
+      },
+      "ExtractStatusResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "data": {
+            "type": "object"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "processing",
+              "failed",
+              "cancelled"
+            ],
+            "description": "Le statut actuel du job d’extraction"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ]
+}
