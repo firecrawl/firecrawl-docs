@@ -1,59 +1,40 @@
 ---
 title: 'Security'
-description: 'Verify webhook authenticity and implement security best practices'
+description: 'Verify webhook authenticity'
 og:title: 'Webhook Security | Firecrawl'
-og:description: 'Verify webhook authenticity and implement security best practices'
+og:description: 'Verify webhook authenticity'
 icon: 'shield-check'
 ---
 
 import WebhookSignatureJS from '/snippets/v2/webhook-signature/js.mdx';
 import WebhookSignaturePython from '/snippets/v2/webhook-signature/python.mdx';
 
-Webhook security is critical to ensure that requests to your endpoint are actually coming from Firecrawl and haven't been tampered with. This page covers how to verify webhook authenticity and implement security best practices.
+Firecrawl signs every webhook request using HMAC-SHA256. Verifying signatures ensures requests are authentic and haven't been tampered with.
 
-## Why Webhook Security Matters
+## Secret Key
 
-Without proper verification, attackers could:
-
-- Send fake webhook requests to trigger unwanted actions
-- Modify payload data to manipulate your application
-- Overload your webhook endpoint with requests
-
-## How Firecrawl Signs Webhooks
-
-Firecrawl signs every webhook request using **HMAC-SHA256** encryption with your account's secret key. This creates a unique signature for each request that proves:
-
-1. The request came from Firecrawl
-2. The payload hasn't been modified
-
-## Finding Your Secret Key
-
-Your webhook secret is available under the [Advanced tab](https://www.firecrawl.dev/app/settings?tab=advanced) of your account settings. Each account has a unique secret that's used to sign all webhook requests.
+Your webhook secret is available in the [Advanced tab](https://www.firecrawl.dev/app/settings?tab=advanced) of your account settings. Each account has a unique secret used to sign all webhook requests.
 
 <Warning>
-  Keep your webhook secret secure and never expose it publicly. If you believe
-  your secret has been compromised, regenerate it immediately from your account
-  settings.
+  Keep your webhook secret secure and never expose it publicly. If you believe your secret has been compromised, regenerate it immediately from your account settings.
 </Warning>
 
 ## Signature Verification
 
-### How Signatures Work
-
-Each webhook request includes an `X-Firecrawl-Signature` header with this format:
+Each webhook request includes an `X-Firecrawl-Signature` header:
 
 ```
 X-Firecrawl-Signature: sha256=abc123def456...
 ```
 
-The signature is computed as follows:
+### How to Verify
 
-1. Take the raw request body (JSON string)
-2. Create HMAC-SHA256 hash using your secret key
-3. Convert to hexadecimal string
-4. Prefix with `sha256=`
+1. Extract the signature from the `X-Firecrawl-Signature` header
+2. Get the raw request body (before parsing)
+3. Compute HMAC-SHA256 using your secret key
+4. Compare signatures using a timing-safe function
 
-### Implementation Examples
+### Implementation
 
 <CodeGroup>
 
@@ -63,28 +44,13 @@ The signature is computed as follows:
 
 </CodeGroup>
 
-### Step-by-Step Verification
+## Best Practices
 
-1. **Extract the signature** from the `X-Firecrawl-Signature` header
-2. **Get the raw request body** as received (don't parse it first)
-3. **Compute HMAC-SHA256** using your secret key and the raw body
-4. **Compare signatures** using a timing-safe comparison function
-5. **Only process** the webhook if signatures match
+### Always Verify Signatures
 
-## Security Best Practices
-
-### Always Validate Signatures
-
-Never trust a webhook request without signature verification:
+Never process a webhook without verifying its signature first:
 
 ```javascript
-// ❌ BAD - No verification
-app.post('/webhook', (req, res) => {
-  processWebhook(req.body); // Dangerous!
-  res.status(200).send('OK');
-});
-
-// ✅ GOOD - Verified first
 app.post('/webhook', (req, res) => {
   if (!verifySignature(req)) {
     return res.status(401).send('Unauthorized');
@@ -96,24 +62,8 @@ app.post('/webhook', (req, res) => {
 
 ### Use Timing-Safe Comparisons
 
-Standard string comparison can leak timing information. Use dedicated functions:
+Standard string comparison can leak timing information. Use `crypto.timingSafeEqual()` in Node.js or `hmac.compare_digest()` in Python.
 
-- **Node.js**: `crypto.timingSafeEqual()`
-- **Python**: `hmac.compare_digest()`
-- **Other languages**: Look for "constant-time" or "timing-safe" comparison functions
+### Use HTTPS
 
-### Require HTTPS
-
-Always use HTTPS endpoints for webhooks:
-
-```json
-{
-  "url": "https://your-app.com/webhook" // ✅ Secure
-}
-```
-
-```json
-{
-  "url": "http://your-app.com/webhook" // ❌ Insecure
-}
-```
+Always use HTTPS for your webhook endpoint to ensure payloads are encrypted in transit.
