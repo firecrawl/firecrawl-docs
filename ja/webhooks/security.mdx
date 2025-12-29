@@ -1,37 +1,19 @@
 ---
 title: "セキュリティ"
-description: "Webhook の正当性を検証し、セキュリティのベストプラクティスを実装する"
+description: "Webhook の正当性を検証する"
 og:title: "Webhook セキュリティ | Firecrawl"
-og:description: "Webhook の正当性を検証し、セキュリティのベストプラクティスを実装する"
+og:description: "Webhook の正当性を検証する"
 icon: "shield-check"
 ---
 
 import WebhookSignatureJS from '/snippets/ja/v2/webhook-signature/js.mdx';
 import WebhookSignaturePython from '/snippets/ja/v2/webhook-signature/python.mdx';
 
-Webhook のセキュリティは、エンドポイントへのリクエストが実際に Firecrawl から送られ、改ざんされていないことを確実にするうえで極めて重要です。本ページでは、Webhook の真正性の検証方法と、セキュリティのベストプラクティスの実装について解説します。
+Firecrawl はすべての Webhook リクエストに HMAC-SHA256 で署名します。署名を検証することで、リクエストが正当なものであり、改ざんされていないことを確認できます。
 
-<div id="why-webhook-security-matters">
-  ## なぜWebhookのセキュリティが重要か
-</div>
 
-適切な検証がないと、攻撃者は次のことが可能になります：
-
-- 偽のWebhookリクエストを送って不要な処理を発生させる
-- ペイロードを改ざんしてアプリケーションを不正に操作する
-- 大量のリクエストでWebhookエンドポイントを過負荷にする
-
-<div id="how-firecrawl-signs-webhooks">
-  ## Firecrawl が Webhook に署名する方法
-</div>
-
-Firecrawl は、アカウントのシークレットキーを用いた **HMAC-SHA256** により、すべての webhook リクエストに署名します。これにより、各リクエストごとに一意の署名が生成され、次のことが保証されます:
-
-1. リクエストが Firecrawl から送信されたこと
-2. ペイロードが改ざんされていないこと
-
-<div id="finding-your-secret-key">
-  ## シークレットキーの確認方法
+<div id="secret-key">
+  ## シークレットキー
 </div>
 
 webhook シークレットは、アカウント設定の[Advanced タブ](https://www.firecrawl.dev/app/settings?tab=advanced)で確認できます。各アカウントには、すべての webhook リクエストに署名するために使用される固有のシークレットが割り当てられています。
@@ -41,28 +23,27 @@ webhook シークレットは、アカウント設定の[Advanced タブ](https:
 </Warning>
 
 <div id="signature-verification">
-  ## 署名検証
+  ## 署名の検証
 </div>
 
-<div id="how-signatures-work">
-  ### 署名の仕組み
-</div>
-
-各 webhook リクエストには、以下の形式の `X-Firecrawl-Signature` ヘッダーが含まれます：
+各 webhook リクエストには、`X-Firecrawl-Signature` ヘッダーが含まれます：
 
 ```
 X-Firecrawl-Signature: sha256=abc123def456...
 ```
 
-署名は次の手順で算出します:
 
-1. 生のリクエストボディ（JSON文字列）を取得
-2. シークレットキーを用いて HMAC-SHA256 ハッシュを生成
-3. 16進数の文字列に変換
-4. 先頭に `sha256=` を付与
+<div id="how-to-verify">
+  ### 検証方法
+</div>
 
-<div id="implementation-examples">
-  ### 実装例
+1. `X-Firecrawl-Signature` ヘッダーから署名を取り出す
+2. パース前の生のリクエストボディを取得する
+3. シークレットキーを使って HMAC-SHA256 を計算する
+4. タイミングセーフな比較関数を使って署名を比較する
+
+<div id="implementation">
+  ### 実装
 </div>
 
 <CodeGroup>
@@ -73,34 +54,17 @@ X-Firecrawl-Signature: sha256=abc123def456...
 
 </CodeGroup>
 
-<div id="step-by-step-verification">
-  ### ステップごとの検証
+<div id="best-practices">
+  ## ベストプラクティス
 </div>
 
-1. `X-Firecrawl-Signature` ヘッダーから**署名を取り出す**
-2. 受信した**生のリクエストボディをそのまま取得**する（先にパースしない）
-3. シークレットキーと生のボディを使って**HMAC-SHA256 を計算**する
-4. タイミングセーフな比較関数で**署名を比較**する
-5. **署名が一致した場合のみ** Webhook を処理する
-
-<div id="security-best-practices">
-  ## セキュリティに関するベストプラクティス
-</div>
-
-<div id="always-validate-signatures">
+<div id="always-verify-signatures">
   ### 署名は必ず検証する
 </div>
 
-署名検証を行っていない webhook リクエストは決して信用しないでください。
+署名を検証せずに webhook を処理してはいけません。
 
 ```javascript
-// ❌ 悪い例 - 検証なし
-app.post('/webhook', (req, res) => {
-  processWebhook(req.body); // 危険！
-  res.status(200).send('OK');
-});
-
-// ✅ 良い例 - 事前に検証
 app.post('/webhook', (req, res) => {
   if (!verifySignature(req)) {
     return res.status(401).send('認可されていません');
@@ -110,30 +74,15 @@ app.post('/webhook', (req, res) => {
 });
 ```
 
+
 <div id="use-timing-safe-comparisons">
   ### タイミングセーフな比較を使う
 </div>
 
-標準的な文字列比較はタイミング情報を漏えいするおそれがあります。専用の関数を使ってください:
+標準的な文字列比較はタイミング情報を漏えいするおそれがあります。Node.js では `crypto.timingSafeEqual()` を、Python では `hmac.compare_digest()` を使ってください。
 
-- **Node.js**: `crypto.timingSafeEqual()`
-- **Python**: `hmac.compare_digest()`
-- **その他の言語**: 「constant-time」または「timing-safe」の比較関数を探してください
-
-<div id="require-https">
-  ### HTTPS を必須にする
+<div id="use-https">
+  ### HTTPS を使用する
 </div>
 
-Webhook には必ず HTTPS のエンドポイントを使用してください：
-
-```json
-{
-  "url": "https://your-app.com/webhook" // ✅ セキュア
-}
-```
-
-```json
-{
-  "url": "http://your-app.com/webhook" // ❌ 非推奨（安全でない）
-}
-```
+ペイロードが通信中も暗号化されるよう、Webhook エンドポイントには必ず HTTPS を使用してください。
