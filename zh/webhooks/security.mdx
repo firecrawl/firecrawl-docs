@@ -1,37 +1,19 @@
 ---
-title: "安全"
-description: "验证 Webhook 的真实性并落实安全最佳实践"
-og:title: "Webhook 安全 | Firecrawl"
-og:description: "验证 Webhook 的真实性并落实安全最佳实践"
-icon: "shield-check"
+title: '安全'
+description: '验证 Webhook 的真实性'
+og:title: 'Webhook 安全 | Firecrawl'
+og:description: '验证 Webhook 的真实性'
+icon: 'shield-check'
 ---
 
 import WebhookSignatureJS from '/snippets/zh/v2/webhook-signature/js.mdx';
 import WebhookSignaturePython from '/snippets/zh/v2/webhook-signature/python.mdx';
 
-Webhook 安全对于确保发送到你端点的请求确实来自 Firecrawl，且未被篡改，至关重要。本页介绍如何验证 webhook 的真实性并落实安全最佳实践。
+Firecrawl 使用 HMAC-SHA256 对每个 Webhook 请求进行签名。验证签名可以确保请求是可信的，且未被篡改。
 
-<div id="why-webhook-security-matters">
-  ## 为什么 Webhook 安全至关重要
-</div>
 
-如果缺乏适当的验证，攻击者可能会：
-
-- 发送伪造的 webhook 请求以触发不必要的 actions
-- 篡改负载数据以操纵你的应用
-- 通过大量请求使你的 webhook 端点过载
-
-<div id="how-firecrawl-signs-webhooks">
-  ## Firecrawl 如何对 Webhook 进行签名
-</div>
-
-Firecrawl 使用你账户的密钥并通过 **HMAC-SHA256** 对每个 webhook 请求进行签名。这样会为每个请求生成唯一的签名，以证明：
-
-1. 请求来自 Firecrawl
-2. 有效负载未被篡改
-
-<div id="finding-your-secret-key">
-  ## 查找你的密钥
+<div id="secret-key">
+  ## 密钥
 </div>
 
 你的 webhook 密钥可在账户设置中的 [Advanced 选项卡](https://www.firecrawl.dev/app/settings?tab=advanced) 找到。每个账户都有一个唯一的密钥，用于为所有 webhook 请求签名。
@@ -42,28 +24,27 @@ Firecrawl 使用你账户的密钥并通过 **HMAC-SHA256** 对每个 webhook �
 </Warning>
 
 <div id="signature-verification">
-  ## 签名校验
+  ## 签名验证
 </div>
 
-<div id="how-signatures-work">
-  ### 签名的工作原理
-</div>
-
-每个 webhook 请求都会包含一个名为 `X-Firecrawl-Signature` 的请求头，格式如下：
+每个 webhook 请求都会包含一个名为 `X-Firecrawl-Signature` 的请求头：
 
 ```
 X-Firecrawl-Signature: sha256=abc123def456...
 ```
 
-签名的计算方式如下：
 
-1. 取原始请求体（JSON 字符串）
-2. 使用你的密钥生成 HMAC-SHA256 哈希
-3. 转为十六进制字符串
-4. 在前面加上 `sha256=`
+<div id="how-to-verify">
+  ### 如何验证
+</div>
 
-<div id="implementation-examples">
-  ### 实现示例
+1. 从 `X-Firecrawl-Signature` 头中提取签名
+2. 获取原始请求体（不要先解析）
+3. 使用你的密钥计算 HMAC-SHA256
+4. 使用时间安全的比较函数比较签名
+
+<div id="implementation">
+  ### 实现
 </div>
 
 <CodeGroup>
@@ -74,34 +55,17 @@ X-Firecrawl-Signature: sha256=abc123def456...
 
 </CodeGroup>
 
-<div id="step-by-step-verification">
-  ### 分步验证
+<div id="best-practices">
+  ## 最佳实践
 </div>
 
-1. 从 `X-Firecrawl-Signature` 头中**提取签名**
-2. **获取原始请求体**（按收到的原始字节，不要先解析）
-3. 使用你的密钥和原始请求体**计算 HMAC-SHA256**
-4. 使用**时间安全**的比较函数**比较签名**
-5. 仅当签名匹配时**才处理**该 webhook
-
-<div id="security-best-practices">
-  ## 安全最佳实践
-</div>
-
-<div id="always-validate-signatures">
+<div id="always-verify-signatures">
   ### 始终验证签名
 </div>
 
-切勿信任未经签名验证的 webhook 请求：
+切勿在未验证签名的情况下处理 webhook：
 
 ```javascript
-// ❌ 不佳 - 未验证
-app.post('/webhook', (req, res) => {
-  processWebhook(req.body); // 危险！
-  res.status(200).send('OK');
-});
-
-// ✅ 良好 - 先验证
 app.post('/webhook', (req, res) => {
   if (!verifySignature(req)) {
     return res.status(401).send('未授权');
@@ -111,30 +75,15 @@ app.post('/webhook', (req, res) => {
 });
 ```
 
+
 <div id="use-timing-safe-comparisons">
   ### 使用时间常数/计时安全的比较
 </div>
 
-标准字符串比较可能泄露时间信息。请使用专用函数：
+标准字符串比较可能泄露时间信息。在 Node.js 中使用 `crypto.timingSafeEqual()`，在 Python 中使用 `hmac.compare_digest()`。
 
-- **Node.js**：`crypto.timingSafeEqual()`
-- **Python**：`hmac.compare_digest()`
-- **其他语言**：查找“constant-time”或“timing-safe”的比较函数
-
-<div id="require-https">
-  ### 强制使用 HTTPS
+<div id="use-https">
+  ### 使用 HTTPS
 </div>
 
-对 webhook 始终使用 HTTPS 端点：
-
-```json
-{
-  "url": "https://your-app.com/webhook" // ✅ 安全
-}
-```
-
-```json
-{
-  "url": "http://your-app.com/webhook" // ❌ 不安全
-}
-```
+始终为 webhook 端点使用 HTTPS，确保传输过程中的载荷已被加密。
