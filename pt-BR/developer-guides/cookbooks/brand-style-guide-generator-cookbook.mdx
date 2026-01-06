@@ -1,0 +1,374 @@
+---
+title: "Criando um Gerador de Guia de Estilo de Marca com Firecrawl"
+description: "Gere guias de estilo de marca profissionais em PDF extraindo sistemas de design de qualquer site com o formato de branding do Firecrawl"
+---
+
+Crie um gerador de guia de estilo de marca que extrai automaticamente cores, tipografia, espaçamentos e identidade visual de qualquer site e compila tudo em um documento PDF profissional.
+
+![Gerador de PDF de guia de estilo de marca usando o formato de branding do Firecrawl para extrair o sistema de design](/images/guides/cookbooks/branding-format/brand-style-guide-pdf-generator-firecrawl.gif)
+
+<div id="what-youll-build">
+  ## O que você vai construir
+</div>
+
+Uma aplicação Node.js que recebe a URL de qualquer site, extrai toda a identidade de marca usando o formato de branding do Firecrawl e gera um PDF de guia de estilo de marca profissional com:
+
+- Paleta de cores com valores hex
+- Sistema de tipografia (fontes, tamanhos, pesos)
+- Especificações de espaçamento e layout
+- Logo e imagens de marca
+- Informações de tema (modo claro/escuro)
+
+![Exemplo de PDF de guia de estilo de marca gerado com cores, tipografia e espaçamento](/images/guides/cookbooks/branding-format/generated-brand-style-guide-pdf-example.png)
+
+<div id="prerequisites">
+  ## Pré-requisitos
+</div>
+
+- Node.js 18 ou superior instalado
+- Uma chave de API do Firecrawl obtida em [firecrawl.dev](https://firecrawl.dev)
+- Conhecimentos básicos de TypeScript e Node.js
+
+<Steps>
+  <Step title="Crie um novo projeto Node.js">
+    Primeiro, crie um novo diretório para o seu projeto e inicialize-o:
+
+    ```bash
+    mkdir brand-style-guide-generator && cd brand-style-guide-generator
+    npm init -y
+    ```
+
+    Atualize seu `package.json` para usar módulos ES:
+
+    ```json package.json
+    {
+      "name": "brand-style-guide-generator",
+      "version": "1.0.0",
+      "type": "module",
+      "scripts": {
+        "start": "npx tsx index.ts"
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Instale as dependências">
+    Instale os pacotes necessários para web scraping e geração de PDFs:
+
+    ```bash
+    npm i @mendable/firecrawl-js pdfkit
+    npm i -D typescript tsx @types/node @types/pdfkit
+    ```
+
+    Esses pacotes incluem:
+
+    * `@mendable/firecrawl-js`: SDK do Firecrawl para extrair a identidade de marca de sites
+    * `pdfkit`: biblioteca para geração de documentos PDF
+    * `tsx`: execução de TypeScript para Node.js
+  </Step>
+
+  <Step title="Criar o gerador do guia de estilo da marca">
+    Crie o arquivo principal da aplicação em `index.ts`. Esse script extrai a identidade da marca a partir de uma URL e gera um guia de estilo profissional em PDF.
+
+    ```typescript index.ts
+    import Firecrawl from "@mendable/firecrawl-js";
+    import PDFDocument from "pdfkit";
+    import fs from "fs";
+
+    const API_KEY = "fc-YOUR-API-KEY";
+    const URL = "https://firecrawl.dev";
+
+    async function main() {
+      const fc = new Firecrawl({ apiKey: API_KEY });
+      const { branding: b } = (await fc.scrape(URL, { formats: ["branding"] })) as any;
+
+      const doc = new PDFDocument({ size: "A4", margin: 50 });
+      doc.pipe(fs.createWriteStream("brand-style-guide.pdf"));
+
+      // Buscar logo (somente PNG/JPG)
+      let logoImg: Buffer | null = null;
+      try {
+        const logoUrl = b.images?.favicon || b.images?.ogImage;
+        if (logoUrl?.match(/\.(png|jpg|jpeg)$/i)) {
+          const res = await fetch(logoUrl);
+          logoImg = Buffer.from(await res.arrayBuffer());
+        }
+      } catch {}
+
+      // Cabeçalho com logo
+      doc.rect(0, 0, 595, 120).fill(b.colors?.primary || "#333");
+      const titleX = logoImg ? 130 : 50;
+      if (logoImg) doc.image(logoImg, 50, 30, { height: 60 });
+      doc.fontSize(36).fillColor("#fff").text("Guia de Estilo da Marca", titleX, 38);
+      doc.fontSize(14).text(URL, titleX, 80);
+
+      // Cores
+      doc.fontSize(18).fillColor("#333").text("Cores", 50, 160);
+      const colors = Object.entries(b.colors || {}).filter(([, v]) => typeof v === "string" && (v as string).startsWith("#"));
+      colors.forEach(([k, v], i) => {
+        const x = 50 + i * 100;
+        doc.rect(x, 195, 80, 80).fill(v as string);
+        doc.fontSize(10).fillColor("#333").text(k, x, 282, { width: 80, align: "center" });
+        doc.fontSize(9).fillColor("#888").text(v as string, x, 296, { width: 80, align: "center" });
+      });
+
+      // Tipografia
+      doc.fontSize(18).fillColor("#333").text("Tipografia", 50, 340);
+      doc.fontSize(13).fillColor("#444");
+      doc.text(`Fonte Primária: ${b.typography?.fontFamilies?.primary || "—"}`, 50, 370);
+      doc.text(`Fonte de Cabeçalho: ${b.typography?.fontFamilies?.heading || "—"}`, 50, 392);
+      doc.fontSize(12).fillColor("#666").text("Tamanhos de Fonte:", 50, 422);
+      Object.entries(b.typography?.fontSizes || {}).forEach(([k, v], i) => {
+        doc.text(`${k.toUpperCase()}: ${v}`, 70, 445 + i * 22);
+      });
+
+      // Espaçamento e Tema
+      doc.fontSize(18).fillColor("#333").text("Espaçamento e Tema", 320, 340);
+      doc.fontSize(13).fillColor("#444");
+      doc.text(`Unidade Base: ${b.spacing?.baseUnit}px`, 320, 370);
+      doc.text(`Raio de Borda: ${b.spacing?.borderRadius}`, 320, 392);
+      doc.text(`Esquema de Cores: ${b.colorScheme}`, 320, 414);
+
+      doc.end();
+      console.log("Gerado: brand-style-guide.pdf");
+    }
+
+    main();
+    ```
+
+    <Info>
+      Para este projeto simples, a chave de API fica diretamente no código. Se você pretende publicar isso no GitHub ou compartilhar com outras pessoas, mova a chave para um arquivo `.env` e use `process.env.FIRECRAWL_API_KEY` em vez disso.
+    </Info>
+
+    Substitua `fc-YOUR-API-KEY` pela sua chave de API do Firecrawl obtida em [firecrawl.dev](https://firecrawl.dev).
+
+    ### Entendendo o código
+
+    **Componentes principais:**
+
+    * **Firecrawl Branding Format**: O formato `branding` extrai uma identidade de marca completa, incluindo cores, tipografia, espaçamento e imagens
+    * **Documento PDFKit**: Cria um PDF A4 profissional com margens e seções adequadas
+    * **Amostras de cores**: Renderiza blocos visuais de cor com valores hexadecimais e nomes semânticos
+    * **Exibição de tipografia**: Mostra famílias e tamanhos de fontes em um layout organizado
+    * **Espaçamento &amp; tema**: Documenta as unidades de espaçamento e o esquema de cores do sistema de design
+  </Step>
+
+  <Step title="Executar o gerador">
+    Execute o script para gerar um guia de estilo de marca:
+
+    ```bash
+    npm start
+    ```
+
+    O script vai:
+
+    1. Extrair a identidade da marca da URL de destino usando o formato de branding do Firecrawl
+    2. Gerar um PDF chamado `brand-style-guide.pdf`
+    3. Salvá-lo no diretório do projeto
+
+    Para gerar um guia de estilo para um site diferente, basta alterar a constante `URL` em `index.ts`.
+  </Step>
+</Steps>
+
+<div id="how-it-works">
+  ## Como funciona
+</div>
+
+<div id="extraction-process">
+  ### Processo de Extração
+</div>
+
+1. **Entrada de URL**: O gerador recebe a URL do site de destino
+2. **Firecrawl Scrape**: Chama o endpoint `/scrape` com o formato `branding`
+3. **Análise de marca**: O Firecrawl analisa o CSS, as fontes e os elementos visuais da página
+4. **Retorno de dados**: Retorna um objeto `BrandingProfile` estruturado com todos os design tokens
+
+<div id="pdf-generation-process">
+  ### Processo de Geração de PDF
+</div>
+
+1. **Criação do Cabeçalho**: Gera um cabeçalho colorido usando a cor principal da marca
+2. **Obtensão do Logotipo**: Faz o download e incorpora o logotipo ou favicon, se disponível
+3. **Paleta de Cores**: Renderiza cada cor como uma amostra visual com metadados
+4. **Seção de Tipografia**: Documenta famílias de fontes, tamanhos e pesos
+5. **Informações de Espaçamento**: Inclui unidades base, raio de borda e modo do tema
+
+<div id="branding-profile-structure">
+  ### Estrutura do Perfil de Branding
+</div>
+
+O [formato de branding](https://docs.firecrawl.dev/features/scrape#%2Fscrape-with-branding-endpoint) retorna informações detalhadas sobre a marca:
+
+```typescript
+{
+  colorScheme: "dark" | "light",
+  logo: "https://example.com/logo.svg",
+  colors: {
+    primary: "#FF6B35",
+    secondary: "#004E89",
+    accent: "#F77F00",
+    background: "#1A1A1A",
+    textPrimary: "#FFFFFF",
+    textSecondary: "#B0B0B0"
+  },
+  typography: {
+    fontFamilies: { primary: "Inter", heading: "Inter", code: "Roboto Mono" },
+    fontSizes: { h1: "48px", h2: "36px", body: "16px" },
+    fontWeights: { regular: 400, medium: 500, bold: 700 }
+  },
+  spacing: {
+    baseUnit: 8,
+    borderRadius: "8px"
+  },
+  images: {
+    logo: "https://example.com/logo.svg",
+    favicon: "https://example.com/favicon.ico"
+  }
+}
+```
+
+
+<div id="key-features">
+  ## Principais funcionalidades
+</div>
+
+<div id="automatic-color-extraction">
+  ### Extração Automática de Cores
+</div>
+
+O gerador identifica e categoriza todas as cores da marca:
+
+- **Primárias e secundárias**: Cores principais da marca
+- **Destaque (accent)**: Cores de destaque e de chamada para ação (CTA)
+- **Fundo e texto**: Cores base da interface
+- **Cores semânticas**: Estados de sucesso, aviso e erro
+
+<div id="typography-documentation">
+  ### Documentação de Tipografia
+</div>
+
+Abrange todo o sistema tipográfico:
+
+- **Famílias tipográficas**: fontes primárias, de títulos e monoespaçadas
+- **Escala de tamanhos**: todos os tamanhos de texto de títulos e corpo
+- **Pesos tipográficos**: variações de peso disponíveis
+
+<div id="visual-output">
+  ### Resultado visual
+</div>
+
+O PDF inclui:
+
+- Cabeçalho colorido que corresponde à marca
+- Logotipo inserido quando disponível
+- Layout profissional com hierarquia clara
+- Rodapé com metadados e data de geração
+
+![Comparação lado a lado entre o site original e o PDF gerado do guia de estilo da marca](/images/guides/cookbooks/branding-format/website-to-brand-style-guide-comparison.png)
+
+<div id="customization-ideas">
+  ## Ideias de customização
+</div>
+
+<div id="add-component-documentation">
+  ### Adicionar documentação de componentes
+</div>
+
+Estenda o gerador para incluir estilos dos componentes de UI:
+
+```typescript
+// Adicionar após a seção Spacing & Theme
+if (b.components) {
+  doc.addPage();
+  doc.fontSize(20).fillColor("#333").text("UI Components", 50, 50);
+
+  // Documentar estilos de botão
+  if (b.components.buttonPrimary) {
+    const btn = b.components.buttonPrimary;
+    doc.fontSize(14).text("Primary Button", 50, 90);
+    doc.rect(50, 110, 120, 40).fill(btn.background);
+    doc.fontSize(12).fillColor(btn.textColor).text("Button", 50, 120, { width: 120, align: "center" });
+  }
+}
+```
+
+
+<div id="export-multiple-formats">
+  ### Exportar em vários formatos
+</div>
+
+Adicione exportação em JSON além do PDF:
+
+```typescript
+// Adicionar antes de doc.end()
+fs.writeFileSync("brand-data.json", JSON.stringify(b, null, 2));
+```
+
+
+<div id="batch-processing">
+  ### Processamento em lote
+</div>
+
+Crie guias para vários sites:
+
+```typescript
+const websites = [
+  "https://stripe.com",
+  "https://linear.app",
+  "https://vercel.com"
+];
+
+for (const site of websites) {
+  const { branding } = await fc.scrape(site, { formats: ["branding"] }) as any;
+  // Gere PDF para cada site...
+}
+```
+
+
+<div id="custom-pdf-themes">
+  ### Temas de PDF personalizados
+</div>
+
+Crie diferentes estilos de PDF a partir do tema extraído:
+
+```typescript
+const isDarkMode = b.colorScheme === "dark";
+const headerBg = isDarkMode ? b.colors?.background : b.colors?.primary;
+const textColor = isDarkMode ? "#fff" : "#333";
+```
+
+
+<div id="best-practices">
+  ## Boas práticas
+</div>
+
+1. **Trate dados ausentes**: Nem todos os sites expõem informações completas de branding. Sempre forneça valores padrão para propriedades ausentes.
+
+2. **Respeite os rate limits**: Ao processar vários sites em lote, adicione intervalos entre as requisições para respeitar os rate limits do Firecrawl.
+
+3. **Armazene em cache os resultados**: Guarde os dados de branding extraídos para evitar chamadas repetidas à API para o mesmo site.
+
+4. **Tratamento de formatos de imagem**: Alguns logos podem estar em formatos que o PDFKit não suporta (como SVG). Considere adicionar conversão de formato ou alternativas adequadas.
+
+5. **Tratamento de erros**: Envolva o processo de geração em blocos try-catch e forneça mensagens de erro claras e informativas.
+
+---
+
+<div id="related-resources">
+  ## Recursos relacionados
+</div>
+
+<CardGroup cols={2}>
+  <Card title="Documentação do formato de branding" href="https://docs.firecrawl.dev/features/scrape#extract-brand-identity">
+    Saiba mais sobre o formato de branding e todas as propriedades disponíveis para extração.
+  </Card>
+  <Card title="API de scrape do Firecrawl" href="https://docs.firecrawl.dev/api-reference/endpoint/scrape">
+    Referência completa da API para o endpoint de scrape com todas as opções de formato.
+  </Card>
+  <Card title="Documentação do PDFKit" href="http://pdfkit.org/">
+    Saiba mais sobre o PDFKit e suas opções avançadas de personalização de PDFs.
+  </Card>
+  <Card title="Guia de scraping em lote" href="https://docs.firecrawl.dev/features/batch-scrape">
+    Processe várias URLs com eficiência usando scraping em lote.
+  </Card>
+</CardGroup>
