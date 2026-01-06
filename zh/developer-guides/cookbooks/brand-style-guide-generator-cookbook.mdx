@@ -1,0 +1,374 @@
+---
+title: "使用 Firecrawl 构建品牌风格指南生成器"
+description: "使用 Firecrawl 的 branding 格式从任意网站提取设计系统，生成专业的 PDF 品牌风格指南"
+---
+
+构建一个品牌风格指南生成器，能够自动从任意网站中提取配色、字体排版、间距和品牌视觉形象，并将其整理成一份专业的 PDF 文档。
+
+![使用 Firecrawl branding 格式提取设计系统的品牌风格指南 PDF 生成器](/images/guides/cookbooks/branding-format/brand-style-guide-pdf-generator-firecrawl.gif)
+
+<div id="what-youll-build">
+  ## 你将构建的内容
+</div>
+
+一个 Node.js 应用，它接受任意网站 URL，使用 Firecrawl 的 Branding 格式提取其完整品牌识别信息，并生成一份精美的 PDF 品牌样式指南，内容包括：
+
+- 含十六进制值的配色方案
+- 字体系统（字体、字号、字重）
+- 间距与布局规范
+- Logo 与品牌图像
+- 主题信息（浅色/深色模式）
+
+![生成的品牌样式指南 PDF 示例，包含颜色、字体和间距](/images/guides/cookbooks/branding-format/generated-brand-style-guide-pdf-example.png)
+
+<div id="prerequisites">
+  ## 前提条件
+</div>
+
+- 已安装 Node.js 18 或更高版本
+- 拥有来自 [firecrawl.dev](https://firecrawl.dev) 的 Firecrawl API 密钥
+- 具备 TypeScript 和 Node.js 的基础知识
+
+<Steps>
+  <Step title="创建新的 Node.js 项目">
+    首先，为项目创建一个新目录并完成初始化：
+
+    ```bash
+    mkdir brand-style-guide-generator && cd brand-style-guide-generator
+    npm init -y
+    ```
+
+    将 `package.json` 更新为使用 ES 模块：
+
+    ```json package.json
+    {
+      "name": "brand-style-guide-generator",
+      "version": "1.0.0",
+      "type": "module",
+      "scripts": {
+        "start": "npx tsx index.ts"
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="安装依赖项">
+    安装用于网页抓取和 PDF 生成的所需软件包：
+
+    ```bash
+    npm i @mendable/firecrawl-js pdfkit
+    npm i -D typescript tsx @types/node @types/pdfkit
+    ```
+
+    这些包提供：
+
+    * `@mendable/firecrawl-js`: 用于从网站中提取品牌标识信息的 Firecrawl SDK
+    * `pdfkit`: PDF 文档生成库
+    * `tsx`: 用于在 Node.js 中运行 TypeScript 的工具
+  </Step>
+
+  <Step title="构建品牌风格指南生成器">
+    在 `index.ts` 中创建主应用程序文件。该脚本会从指定 URL 提取品牌风格，并生成一份专业的 PDF 风格指南。
+
+    ```typescript index.ts
+    import Firecrawl from "@mendable/firecrawl-js";
+    import PDFDocument from "pdfkit";
+    import fs from "fs";
+
+    const API_KEY = "fc-YOUR-API-KEY";
+    const URL = "https://firecrawl.dev";
+
+    async function main() {
+      const fc = new Firecrawl({ apiKey: API_KEY });
+      const { branding: b } = (await fc.scrape(URL, { formats: ["branding"] })) as any;
+
+      const doc = new PDFDocument({ size: "A4", margin: 50 });
+      doc.pipe(fs.createWriteStream("brand-style-guide.pdf"));
+
+      // 获取 logo(仅支持 PNG/JPG)
+      let logoImg: Buffer | null = null;
+      try {
+        const logoUrl = b.images?.favicon || b.images?.ogImage;
+        if (logoUrl?.match(/\.(png|jpg|jpeg)$/i)) {
+          const res = await fetch(logoUrl);
+          logoImg = Buffer.from(await res.arrayBuffer());
+        }
+      } catch {}
+
+      // 带 logo 的页眉
+      doc.rect(0, 0, 595, 120).fill(b.colors?.primary || "#333");
+      const titleX = logoImg ? 130 : 50;
+      if (logoImg) doc.image(logoImg, 50, 30, { height: 60 });
+      doc.fontSize(36).fillColor("#fff").text("Brand Style Guide", titleX, 38);
+      doc.fontSize(14).text(URL, titleX, 80);
+
+      // 颜色
+      doc.fontSize(18).fillColor("#333").text("Colors", 50, 160);
+      const colors = Object.entries(b.colors || {}).filter(([, v]) => typeof v === "string" && (v as string).startsWith("#"));
+      colors.forEach(([k, v], i) => {
+        const x = 50 + i * 100;
+        doc.rect(x, 195, 80, 80).fill(v as string);
+        doc.fontSize(10).fillColor("#333").text(k, x, 282, { width: 80, align: "center" });
+        doc.fontSize(9).fillColor("#888").text(v as string, x, 296, { width: 80, align: "center" });
+      });
+
+      // 字体排版
+      doc.fontSize(18).fillColor("#333").text("Typography", 50, 340);
+      doc.fontSize(13).fillColor("#444");
+      doc.text(`Primary Font: ${b.typography?.fontFamilies?.primary || "—"}`, 50, 370);
+      doc.text(`Heading Font: ${b.typography?.fontFamilies?.heading || "—"}`, 50, 392);
+      doc.fontSize(12).fillColor("#666").text("Font Sizes:", 50, 422);
+      Object.entries(b.typography?.fontSizes || {}).forEach(([k, v], i) => {
+        doc.text(`${k.toUpperCase()}: ${v}`, 70, 445 + i * 22);
+      });
+
+      // 间距与主题
+      doc.fontSize(18).fillColor("#333").text("Spacing & Theme", 320, 340);
+      doc.fontSize(13).fillColor("#444");
+      doc.text(`Base Unit: ${b.spacing?.baseUnit}px`, 320, 370);
+      doc.text(`Border Radius: ${b.spacing?.borderRadius}`, 320, 392);
+      doc.text(`Color Scheme: ${b.colorScheme}`, 320, 414);
+
+      doc.end();
+      console.log("Generated: brand-style-guide.pdf");
+    }
+
+    main();
+    ```
+
+    <Info>
+      在这个简单项目中，API 密钥是直接写在代码里的。如果你计划将其推送到 GitHub 或与他人分享，请将密钥移动到 `.env` 文件中，并改用 `process.env.FIRECRAWL_API_KEY`。
+    </Info>
+
+    将 `fc-YOUR-API-KEY` 替换为你在 [firecrawl.dev](https://firecrawl.dev) 获取的 Firecrawl API 密钥。
+
+    ### 代码解析
+
+    **关键组件：**
+
+    * **Firecrawl 品牌格式**：`branding` 格式会提取完整的品牌标识信息，包括颜色、排版、间距和图片
+    * **PDFKit 文档**：创建带有合适页边距和章节结构的专业 A4 PDF
+    * **颜色色板**：渲染带有十六进制值和语义名称的可视化色块
+    * **排版展示**：以结构化布局展示字体系列和字号
+    * **间距与主题**：记录设计系统的间距单位和配色方案
+  </Step>
+
+  <Step title="运行生成器">
+    运行脚本生成品牌风格指南：
+
+    ```bash
+    npm start
+    ```
+
+    该脚本将会：
+
+    1. 使用 Firecrawl 的品牌格式规范，从目标 URL 中提取品牌识别信息
+    2. 生成一个名为 `brand-style-guide.pdf` 的 PDF
+    3. 将其保存在你的项目目录中
+
+    若要为其他网站生成风格指南，只需更改 `index.ts` 中的 `URL` 常量。
+  </Step>
+</Steps>
+
+<div id="how-it-works">
+  ## 工作原理
+</div>
+
+<div id="extraction-process">
+  ### 提取流程
+</div>
+
+1. **URL 输入**：生成器接收目标网站的 URL
+2. **Firecrawl 抓取**：调用 `/scrape` 端点，并使用 `branding` 格式
+3. **品牌分析**：Firecrawl 分析页面的 CSS、字体和视觉元素
+4. **返回数据**：返回一个结构化的 `BrandingProfile` 对象，其中包含所有设计 tokens
+
+<div id="pdf-generation-process">
+  ### PDF 生成流程
+</div>
+
+1. **页眉生成**：使用主品牌色生成彩色页眉区域
+2. **Logo 获取**：下载并嵌入 logo 或网站图标（favicon，若有）
+3. **配色方案**：将每种颜色渲染为带元数据的色块
+4. **排版信息**：记录字体系列、字号和字重
+5. **间距信息**：包含基础间距单位、圆角半径和主题模式
+
+<div id="branding-profile-structure">
+  ### 品牌配置结构
+</div>
+
+[品牌配置格式](https://docs.firecrawl.dev/features/scrape#%2Fscrape-with-branding-endpoint) 会返回详细的品牌信息：
+
+```typescript
+{
+  colorScheme: "dark" | "light",
+  logo: "https://example.com/logo.svg",
+  colors: {
+    primary: "#FF6B35",
+    secondary: "#004E89",
+    accent: "#F77F00",
+    background: "#1A1A1A",
+    textPrimary: "#FFFFFF",
+    textSecondary: "#B0B0B0"
+  },
+  typography: {
+    fontFamilies: { primary: "Inter", heading: "Inter", code: "Roboto Mono" },
+    fontSizes: { h1: "48px", h2: "36px", body: "16px" },
+    fontWeights: { regular: 400, medium: 500, bold: 700 }
+  },
+  spacing: {
+    baseUnit: 8,
+    borderRadius: "8px"
+  },
+  images: {
+    logo: "https://example.com/logo.svg",
+    favicon: "https://example.com/favicon.ico"
+  }
+}
+```
+
+
+<div id="key-features">
+  ## 核心功能
+</div>
+
+<div id="automatic-color-extraction">
+  ### 自动颜色提取
+</div>
+
+生成器会识别并归类所有品牌色：
+
+- **Primary & Secondary**: 品牌主色与辅助色
+- **Accent**: 强调色和 CTA 颜色
+- **Background & Text**: 作为 UI 基础的背景色与文本色
+- **Semantic Colors**: 表示成功、警告和错误状态的语义色
+
+<div id="typography-documentation">
+  ### 排版规范文档
+</div>
+
+涵盖完整的文字排版系统：
+
+- **Font Families**：主字体、标题字体和等宽字体
+- **Size Scale**：所有标题和正文字号
+- **Font Weights**：所有可用字重
+
+<div id="visual-output">
+  ### 视觉输出
+</div>
+
+该 PDF 包含：
+
+- 与品牌配色相匹配的彩色页眉
+- 在可用时嵌入品牌 Logo
+- 具有清晰层级结构的专业版式
+- 带有生成日期元数据的页脚
+
+![原始网站与生成的品牌风格指南 PDF 的并排对比](/images/guides/cookbooks/branding-format/website-to-brand-style-guide-comparison.png)
+
+<div id="customization-ideas">
+  ## 自定义方案示例
+</div>
+
+<div id="add-component-documentation">
+  ### 添加组件文档
+</div>
+
+扩展生成器，使其包含 UI 组件样式：
+
+```typescript
+// 在间距与主题部分之后添加
+if (b.components) {
+  doc.addPage();
+  doc.fontSize(20).fillColor("#333").text("UI Components", 50, 50);
+
+  // 文档化按钮样式
+  if (b.components.buttonPrimary) {
+    const btn = b.components.buttonPrimary;
+    doc.fontSize(14).text("Primary Button", 50, 90);
+    doc.rect(50, 110, 120, 40).fill(btn.background);
+    doc.fontSize(12).fillColor(btn.textColor).text("Button", 50, 120, { width: 120, align: "center" });
+  }
+}
+```
+
+
+<div id="export-multiple-formats">
+  ### 导出多种 formats
+</div>
+
+在现有 PDF 导出的基础上增加 JSON 导出：
+
+```typescript
+// 在 doc.end() 前添加
+fs.writeFileSync("brand-data.json", JSON.stringify(b, null, 2));
+```
+
+
+<div id="batch-processing">
+  ### 批量处理
+</div>
+
+为多个网站批量生成指南：
+
+```typescript
+const websites = [
+  "https://stripe.com",
+  "https://linear.app",
+  "https://vercel.com"
+];
+
+for (const site of websites) {
+  const { branding } = await fc.scrape(site, { formats: ["branding"] }) as any;
+  // 为每个网站生成 PDF...
+}
+```
+
+
+<div id="custom-pdf-themes">
+  ### 自定义 PDF 主题
+</div>
+
+根据提取的主题创建不同的 PDF 样式：
+
+```typescript
+const isDarkMode = b.colorScheme === "dark";
+const headerBg = isDarkMode ? b.colors?.background : b.colors?.primary;
+const textColor = isDarkMode ? "#fff" : "#333";
+```
+
+
+<div id="best-practices">
+  ## 最佳实践
+</div>
+
+1. **处理缺失数据**：并非所有网站都会暴露完整的品牌信息。务必为缺失的属性提供后备值（默认值）。
+
+2. **遵守速率限制**：在批量处理多个站点时，在请求之间添加延迟，以遵守 Firecrawl 的速率限制。
+
+3. **缓存结果**：将提取到的品牌数据进行缓存，避免针对同一站点重复调用 API。
+
+4. **处理图片格式**：某些 Logo 可能采用 PDFKit 不支持的格式（例如 SVG）。考虑添加格式转换或设计优雅的降级方案。
+
+5. **错误处理**：将生成流程包裹在 try-catch 块中，并提供有意义的错误信息。
+
+---
+
+<div id="related-resources">
+  ## 相关资源
+</div>
+
+<CardGroup cols={2}>
+  <Card title="品牌格式文档" href="https://docs.firecrawl.dev/features/scrape#extract-brand-identity">
+    进一步了解品牌格式规范以及所有可提取的属性。
+  </Card>
+  <Card title="Firecrawl Scrape API" href="https://docs.firecrawl.dev/api-reference/endpoint/scrape">
+    提供 scrape 端点的完整 API 参考文档及所有格式选项。
+  </Card>
+  <Card title="PDFKit 文档" href="http://pdfkit.org/">
+    了解更多关于 PDFKit 的高级 PDF 定制选项。
+  </Card>
+  <Card title="批量抓取指南" href="https://docs.firecrawl.dev/features/batch-scrape">
+    使用批量抓取高效处理多个 URL。
+  </Card>
+</CardGroup>
