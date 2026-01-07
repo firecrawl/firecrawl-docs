@@ -31,7 +31,7 @@ To get started with the Firecrawl documentation, follow the steps below:
 2. Clone this repository and navigate to the directory:
 
    ```bash
-   git clone https://github.com/mendableai/firecrawl-docs.git
+   git clone https://github.com/firecrawl/firecrawl-docs.git
    cd firecrawl-docs
    ```
 
