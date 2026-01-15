@@ -1,0 +1,362 @@
+---
+title: "Error Handling and Retries"
+description: "Learn how to handle API errors and implement retry strategies with exponential backoff"
+---
+
+When using the Firecrawl API, you may encounter errors due to rate limiting, temporary service issues, or other conditions. This guide explains how to properly handle these errors and implement robust retry logic.
+
+## Understanding HTTP Status Codes
+
+The Firecrawl API returns standard HTTP status codes to indicate the outcome of requests:
+
+### Success
+- **200**: Request was successful
+
+### Client Errors
+- **400**: Invalid parameters - verify your request
+- **401**: Missing or invalid API key
+- **402**: Payment required - check your account balance or plan limits
+- **404**: Resource not found
+- **429**: Rate limit exceeded - see [Rate Limiting](#rate-limiting) below
+
+### Server Errors
+- **5xx**: Server-side errors - these are temporary and should be retried
+
+## Rate Limiting (429 Errors)
+
+When you exceed your plan's rate limits, the API returns a **429 (Too Many Requests)** response. Each plan has specific rate limits for different endpoints:
+
+- Check your plan's limits in the [Rate Limits](/rate-limits) documentation
+- When you hit a 429 error, your request is rejected and you should retry after a delay
+- The `Retry-After` header (if present) indicates how long to wait in seconds
+
+### Recommended Approach
+
+Rather than manually implementing retries, use exponential backoff to:
+1. Automatically retry failed requests
+2. Gradually increase the delay between retries
+3. Avoid overwhelming the API during recovery
+
+## Exponential Backoff Explained
+
+Exponential backoff is a retry strategy where:
+- First retry waits 1 second
+- Second retry waits 2 seconds
+- Third retry waits 4 seconds
+- And so on, up to a maximum delay
+
+This prevents all clients from hammering the API simultaneously during outages.
+
+**Formula**: `delay = min(initialDelay * (backoffFactor ^ attemptNumber), maxDelay)`
+
+## Implementation Examples
+
+### Node.js with Exponential Backoff
+
+```javascript
+import Firecrawl from '@mendable/firecrawl-js';
+
+const firecrawl = new Firecrawl({
+  apiKey: process.env.FIRECRAWL_API_KEY
+});
+
+// Configuration for retries
+const retryConfig = {
+  maxRetries: 3,
+  initialDelay: 1000, // milliseconds
+  maxDelay: 10000,
+  backoffFactor: 2
+};
+
+async function scrapeWithRetry(url, options = {}) {
+  let lastError;
+
+  for (let attempt = 1; attempt <= retryConfig.maxRetries + 1; attempt++) {
+    try {
+      const result = await firecrawl.scrape(url, options);
+      return result;
+    } catch (error) {
+      lastError = error;
+
+      // Check if error is retryable (429, 5xx)
+      const status = error.statusCode || error.status;
+      const isRetryable = status === 429 || (status && status >= 500);
+
+      if (!isRetryable || attempt > retryConfig.maxRetries) {
+        throw error;
+      }
+
+      // Calculate exponential backoff delay
+      const delay = Math.min(
+        retryConfig.initialDelay * Math.pow(retryConfig.backoffFactor, attempt - 1),
+        retryConfig.maxDelay
+      );
+
+      console.log(`Attempt ${attempt} failed (${status}), retrying in ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+
+  throw lastError;
+}
+
+// Usage
+try {
+  const result = await scrapeWithRetry('https://example.com', {
+    formats: ['markdown', 'html']
+  });
+  console.log('Success:', result.markdown.substring(0, 200));
+} catch (error) {
+  console.error('Failed after retries:', error.message);
+}
+```
+
+### Python with Exponential Backoff
+
+```python
+import time
+from firecrawl import Firecrawl
+
+firecrawl = Firecrawl(api_key="your-api-key")
+
+# Configuration for retries
+retry_config = {
+    'max_retries': 3,
+    'initial_delay': 1,  # seconds
+    'max_delay': 10,
+    'backoff_factor': 2
+}
+
+def scrape_with_retry(url, **options):
+    last_error = None
+
+    for attempt in range(retry_config['max_retries'] + 1):
+        try:
+            result = firecrawl.scrape(url, **options)
+            return result
+        except Exception as error:
+            last_error = error
+
+            # Check if error is retryable (429, 5xx)
+            status = getattr(error, 'status_code', None)
+            is_retryable = status == 429 or (status and status >= 500)
+
+            if not is_retryable or attempt >= retry_config['max_retries']:
+                raise
+
+            # Calculate exponential backoff delay
+            delay = min(
+                retry_config['initial_delay'] * (retry_config['backoff_factor'] ** attempt),
+                retry_config['max_delay']
+            )
+
+            print(f"Attempt {attempt + 1} failed ({status}), retrying in {delay}s...")
+            time.sleep(delay)
+
+    raise last_error
+
+# Usage
+try:
+    result = scrape_with_retry(
+        'https://example.com',
+        formats=['markdown', 'html']
+    )
+    print(f"Success: {result['markdown'][:200]}")
+except Exception as error:
+    print(f"Failed after retries: {str(error)}")
+```
+
+## Handling Specific Error Cases
+
+### 429 Rate Limit Error
+
+```javascript
+try {
+  const result = await firecrawl.scrape(url);
+} catch (error) {
+  if (error.status === 429) {
+    // Extract retry delay from header if available
+    const retryAfter = error.headers?.['retry-after'];
+    const delay = retryAfter ? parseInt(retryAfter) * 1000 : 5000;
+
+    console.log(`Rate limited. Retrying after ${delay}ms`);
+    await new Promise(resolve => setTimeout(resolve, delay));
+
+    // Retry the request
+    const result = await firecrawl.scrape(url);
+  }
+}
+```
+
+### 401/403 Authentication Errors
+
+These are not retryable and indicate your API key is invalid or missing:
+
+```javascript
+try {
+  const result = await firecrawl.scrape(url);
+} catch (error) {
+  if (error.status === 401) {
+    console.error('Invalid API key. Check FIRECRAWL_API_KEY environment variable.');
+    process.exit(1);
+  }
+}
+```
+
+### 402 Payment Required
+
+This means your plan doesn't have enough credits. Upgrade your plan or wait for monthly credits to reset:
+
+```javascript
+try {
+  const result = await firecrawl.scrape(url);
+} catch (error) {
+  if (error.status === 402) {
+    console.error('Insufficient credits. Please upgrade your plan.');
+  }
+}
+```
+
+### 5xx Server Errors
+
+Server errors are temporary and should be retried with exponential backoff:
+
+```javascript
+const isServerError = (status) => status >= 500;
+
+try {
+  const result = await firecrawl.scrape(url);
+} catch (error) {
+  if (isServerError(error.status)) {
+    console.log('Temporary server error, will retry...');
+    // Use exponential backoff retry strategy
+  }
+}
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use Exponential Backoff" icon="chart-line">
+    Don't retry immediately on failure. Use increasing delays to allow the API to recover and prevent overwhelming the service.
+  </Card>
+
+  <Card title="Set Maximum Retries" icon="timer">
+    Limit retry attempts (typically 3-5) to avoid retrying forever. Eventually fail fast if the API is down.
+  </Card>
+
+  <Card title="Respect Rate Limits" icon="gauge">
+    Monitor your request rate and stay within your plan's limits. Use the rate limit information to adjust your request frequency.
+  </Card>
+
+  <Card title="Log Failures" icon="scroll">
+    Log retry attempts and final failures for debugging. Include status codes, error messages, and retry attempts.
+  </Card>
+
+  <Card title="Only Retry Transient Errors" icon="repeat">
+    Don't retry on 400, 401, 402, or 404 errors. These indicate permanent issues that retrying won't fix.
+  </Card>
+
+  <Card title="Use Async/Await" icon="code">
+    Use async/await syntax for cleaner error handling compared to callbacks or promises.
+  </Card>
+</CardGroup>
+
+## Queue-Based Approach for Bulk Operations
+
+For large-scale operations, use a queue to manage requests and respect rate limits:
+
+```javascript
+import pQueue from 'p-queue';
+
+const queue = new pQueue({
+  concurrency: 1, // Process one request at a time
+  interval: 60000, // Per minute
+  intervalCap: 10  // Max 10 requests per minute (adjust to your plan)
+});
+
+async function processUrls(urls) {
+  const results = [];
+
+  for (const url of urls) {
+    queue.add(async () => {
+      try {
+        return await scrapeWithRetry(url);
+      } catch (error) {
+        console.error(`Failed to scrape ${url}:`, error.message);
+        return null;
+      }
+    });
+  }
+
+  results.push(await queue.onIdle());
+}
+```
+
+## Monitoring and Debugging
+
+### Check Your Usage
+
+Monitor your API usage to understand your rate limit consumption:
+1. Visit [firecrawl.dev/app/dashboard](https://firecrawl.dev/app/dashboard)
+2. Check your plan's rate limits in [Rate Limits](/rate-limits)
+3. Monitor successful vs failed requests
+
+### Enable Debug Logging
+
+```javascript
+// Enable verbose logging to see what's happening
+const firecrawl = new Firecrawl({
+  apiKey: process.env.FIRECRAWL_API_KEY,
+  debug: true // Not all SDKs support this - check documentation
+});
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Getting frequent 429 errors" icon="ban">
+    **Causes:**
+    - Your request rate exceeds your plan's limit
+    - All concurrent browser slots are in use
+
+    **Solutions:**
+    - Reduce request frequency
+    - Upgrade to a plan with higher limits
+    - Increase delays between requests
+    - Use queue-based rate limiting
+  </Accordion>
+
+  <Accordion title="Retries aren't working" icon="warning">
+    **Check:**
+    - Are you retrying non-retryable errors (400, 401, 402)?
+    - Is your maximum delay long enough for the API to recover?
+    - Are you catching all error types (network, timeout, HTTP)?
+  </Accordion>
+
+  <Accordion title="API keeps returning 5xx errors" icon="server">
+    **What to do:**
+    - Check [Firecrawl Status](https://status.firecrawl.dev)
+    - Wait a few minutes before retrying
+    - Contact support at help@firecrawl.com if errors persist
+  </Accordion>
+
+  <Accordion title="Rate limiting in production" icon="alert">
+    **Best practices:**
+    - Use a queue to manage throughput
+    - Monitor API usage dashboard
+    - Set up alerts for approaching rate limits
+    - Test retry logic with load testing
+  </Accordion>
+</AccordionGroup>
+
+## SDK Support
+
+All Firecrawl SDKs support error handling via try/catch blocks. However, automatic retry logic may vary:
+
+- **Node.js SDK**: Manual retry implementation recommended (see examples above)
+- **Python SDK**: Manual retry implementation recommended (see examples above)
+- **Go SDK**: Implement retry logic in your application
+- **Raw HTTP/cURL**: Implement retry logic in your client
+
+Check your SDK's documentation for any built-in retry mechanisms.
