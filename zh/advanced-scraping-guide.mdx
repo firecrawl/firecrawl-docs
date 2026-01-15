@@ -128,22 +128,23 @@ Firecrawl 支持 PDF。需要确保解析 PDF 时，请使用 `parsers` 选项�
 - **描述**: 用于控制解析行为。要解析 PDF，请设置 `parsers: ["pdf"]`。
 
 <div id="actions-actions">
-  ### Actions (`actions`)
+  ### actions（`actions`）
 </div>
 
-使用 /scrape 端点时，Firecrawl 允许你在抓取页面内容之前对网页执行各类 actions。这对于与动态内容交互、在页面间导航，或访问需要用户交互才能显示的内容特别有用。
+使用 /scrape 端点时，Firecrawl 允许你在抓取页面内容之前，在网页上执行一系列 actions。这在需要与动态内容交互、在页面之间导航，或访问依赖用户操作才能显示的内容时尤其有用。
 
 - **Type**: `array`
-- **Description**: 抓取前执行的一系列浏览器步骤。
+- **Description**: 抓取前要运行的一系列浏览器步骤。
 - **Supported actions**:
-    - `wait` `{ milliseconds }`
-    - `click` `{ selector }`
-    - `write` `{ selector, text }`
-    - `press` `{ key }`
-    - `scroll` `{ direction: "up" | "down" }`
-    - `scrape` `{ selector }`（抓取子元素）
-    - `executeJavascript` `{ script }`
-    - `pdf`（在部分流程中触发 PDF 渲染）
+    - `wait` - 等待页面加载：`{ type: "wait", milliseconds: number }` 或 `{ type: "wait", selector: string }`
+    - `click` - 点击元素：`{ type: "click", selector: string, all?: boolean }`
+    - `write` - 向输入字段中键入文本：`{ type: "write", text: string }`（元素必须先通过 click 获得焦点）
+    - `press` - 模拟键盘按键：`{ type: "press", key: string }`
+    - `scroll` - 滚动页面：`{ type: "scroll", direction: "up" | "down", selector?: string }`
+    - `screenshot` - 捕获页面截图：`{ type: "screenshot", fullPage?: boolean, quality?: number, viewport?: { width: number, height: number } }`
+    - `scrape` - 抓取子元素内容：`{ type: "scrape" }`
+    - `executeJavascript` - 执行 JS 代码：`{ type: "executeJavascript", script: string }`
+    - `pdf` - 生成 PDF 文件：`{ type: "pdf", format?: string, landscape?: boolean, scale?: number }`
 
 <CodeGroup>
 
@@ -153,14 +154,16 @@ from firecrawl import Firecrawl
 firecrawl = Firecrawl(api_key='fc-YOUR-API-KEY')
 
 doc = firecrawl.scrape('https://example.com', {
-  actions: [
-    { type: 'wait', milliseconds: 1000 },
-    { type: 'click', selector: '#accept' },
-    { type: 'scroll', direction: 'down' },
-    { type: 'write', selector: '#q', text: 'firecrawl' },
-    { type: 'press', key: 'Enter' }
+  'actions': [
+    { 'type': 'wait', 'milliseconds': 1000 },
+    { 'type': 'click', 'selector': '#accept' },
+    { 'type': 'scroll', 'direction': 'down' },
+    { 'type': 'click', 'selector': '#q' },
+    { 'type': 'write', 'text': 'firecrawl' },
+    { 'type': 'press', 'key': 'Enter' },
+    { 'type': 'wait', 'milliseconds': 2000 }
   ],
-  formats: ['markdown']
+  'formats': ['markdown']
 })
 
 print(doc.markdown)
@@ -176,8 +179,10 @@ const doc = await firecrawl.scrape('https://example.com', {
     { type: 'wait', milliseconds: 1000 },
     { type: 'click', selector: '#accept' },
     { type: 'scroll', direction: 'down' },
-    { type: 'write', selector: '#q', text: 'firecrawl' },
-    { type: 'press', key: 'Enter' }
+    { type: 'click', selector: '#q' },
+    { type: 'write', text: 'firecrawl' },
+    { type: 'press', key: 'Enter' },
+    { type: 'wait', milliseconds: 2000 }
   ],
   formats: ['markdown']
 });
@@ -195,14 +200,76 @@ curl -X POST https://api.firecrawl.dev/v2/scrape \
       { "type": "wait", "milliseconds": 1000 },
       { "type": "click", "selector": "#accept" },
       { "type": "scroll", "direction": "down" },
-      { "type": "write", "selector": "#q", "text": "firecrawl" },
-      { "type": "press", "key": "Enter" }
+      { "type": "click", "selector": "#q" },
+      { "type": "write", "text": "firecrawl" },
+      { "type": "press", "key": "Enter" },
+      { "type": "wait", "milliseconds": 2000 }
     ],
     "formats": ["markdown"]
   }'
 ```
 
 </CodeGroup>
+
+<div id="action-execution-notes">
+  ### actions 执行注意事项
+</div>
+
+- **Write action**：在使用 `write` 之前，必须先通过一个 `click` action 使目标元素获得焦点。文本会逐字输入，以模拟键盘输入。
+- **Scroll selector**：如果你只想滚动某个特定元素而不是整个页面，请在 `scroll` 中提供 `selector` 参数。
+- **Wait with selector**：你可以在 `wait` 中使用 `selector` 参数来等待特定元素变为可见，或者使用 `milliseconds` 来等待固定时长。
+- **actions 按顺序执行**：actions 会按顺序执行，Firecrawl 会在当前页面交互完成后再继续执行下一个 action。
+
+<div id="advanced-action-examples">
+  ### 高级操作示例
+</div>
+
+**执行截图操作：**
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/scrape \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer fc-YOUR-API-KEY' \
+  -d '{
+    "url": "https://example.com",
+    "actions": [
+      { "type": "click", "selector": "#load-more" },
+      { "type": "wait", "milliseconds": 1000 },
+      { "type": "screenshot", "fullPage": true, "quality": 80 }
+    ]
+  }'
+```
+
+**点击多个元素：**
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/scrape \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer fc-YOUR-API-KEY' \
+  -d '{
+    "url": "https://example.com",
+    "actions": [
+      { "type": "click", "selector": ".expand-button", "all": true },
+      { "type": "wait", "milliseconds": 500 }
+    ],
+    "formats": ["markdown"]
+  }'
+```
+
+**生成 PDF 文件：**
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/scrape \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer fc-YOUR-API-KEY' \
+  -d '{
+    "url": "https://example.com",
+    "actions": [
+      { "type": "pdf", "format": "A4", "landscape": false }
+    ]
+  }'
+```
+
 
 <div id="example-usage">
   ### 示例用法
@@ -243,10 +310,10 @@ curl -X POST https://api.firecrawl.dev/v2/scrape \
 API 参考： [Scrape Endpoint Documentation](https://docs.firecrawl.dev/api-reference/endpoint/scrape)
 
 <div id="json-extraction-via-formats">
-  ## 通过格式进行 JSON 提取
+  ## 通过 formats 进行 JSON 提取
 </div>
 
-在 `formats` 中使用 JSON 格式对象，一次完成结构化数据的提取：
+在 `formats` 中使用 JSON 格式对象，一次性提取结构化数据：
 
 ```bash
 curl -X POST https://api.firecrawl.dev/v2/scrape \
@@ -256,17 +323,18 @@ curl -X POST https://api.firecrawl.dev/v2/scrape \
     "url": "https://firecrawl.dev",
     "formats": [{
       "type": "json",
-      "prompt": "提取该产品的功能",
+      "prompt": "Extract the features of the product",
       "schema": {"type": "object", "properties": {"features": {"type": "object"}}, "required": ["features"]}
     }]
   }'
 ```
 
+
 <div id="extract-endpoint">
-  ## /extract 端点
+  ## Extract 接口
 </div>
 
-当你需要通过状态轮询进行异步抽取时，请使用专用的抽取作业 API。
+当你需要通过轮询状态来进行异步提取时，请使用专门的 Extract 任务 API。
 
 <CodeGroup>
 
@@ -275,14 +343,14 @@ import Firecrawl from '@mendable/firecrawl-js';
 
 const firecrawl = new Firecrawl({ apiKey: 'fc-YOUR-API-KEY' });
 
-// 启动抽取作业
+// Start extract job
 const started = await firecrawl.startExtract({
   urls: ['https://docs.firecrawl.dev'],
   prompt: 'Extract title',
   schema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] }
 });
 
-// 轮询状态
+// Poll status
 const status = await firecrawl.getExtractStatus(started.id);
 console.log(status.status, status.data);
 ```
@@ -335,22 +403,23 @@ curl -X POST https://api.firecrawl.dev/v2/crawl \
 ```
 
 <div id="check-crawl-job">
-  ### 检查爬取任务
+  ### 检查抓取任务
 </div>
 
-用于查看爬取任务的状态并获取其结果。
+用于查看抓取任务的状态并获取其结果。
 
 ```bash cURL
 curl -X GET https://api.firecrawl.dev/v2/crawl/1234-5678-9101 \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer fc-你的API密钥'
+  -H 'Authorization: Bearer fc-YOUR-API-KEY'
 ```
+
 
 <div id="paginationnext-url">
   #### 分页/下一页 URL
 </div>
 
-如果内容超过 10MB，或爬取任务仍在运行，响应可能包含一个 `next` 参数，即指向下一页结果的 URL。
+如果内容大小超过 10MB，或者爬取任务仍在运行，响应中可能会包含一个 `next` 参数，即指向下一页结果的 URL。
 
 <div id="crawl-prompt-and-params-preview">
   ### 爬取提示与参数预览
@@ -372,7 +441,7 @@ curl -X POST https://api.firecrawl.dev/v2/crawl/params-preview \
   ### 爬虫选项
 </div>
 
-使用 `/v2/crawl` 端点时，可以通过以下方式自定义爬取行为：
+当使用 `/v2/crawl` 端点时，你可以使用以下选项来自定义爬取行为：
 
 <div id="includepaths">
   #### includePaths
@@ -464,10 +533,10 @@ curl -X POST https://api.firecrawl.dev/v2/crawl \
 ```
 
 <div id="mapping-website-links">
-  ## 映射网站链接
+  ## 网站链接映射
 </div>
 
-`/v2/map` 端点用于识别与指定网站相关的 URL。
+`/v2/map` 端点用于查找与指定网站相关的 URL。
 
 <div id="usage">
   ### 使用方法
@@ -483,7 +552,7 @@ curl -X POST https://api.firecrawl.dev/v2/map \
 ```
 
 <div id="map-options">
-  ### Map 选项
+  ### 映射选项
 </div>
 
 <div id="search">
