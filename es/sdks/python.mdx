@@ -115,7 +115,36 @@ Para rastrear un sitio web con WebSockets, inicia el trabajo con `start_crawl` y
   ### Paginación
 </div>
 
-Los puntos de conexión de Firecrawl para crawl y batch devuelven una URL `next` cuando hay más datos disponibles. El SDK de Python paginá automáticamente por defecto y agrega todos los documentos; en ese caso `next` será `None`. Puedes desactivar la paginación automática o establecer límites. La URL `next` es opaca; pásala de nuevo al SDK para obtener la siguiente página.
+Los puntos de conexión de Firecrawl para crawl y batch scrape devuelven una URL `next` cuando hay más datos disponibles. El SDK de Python paginá automáticamente por defecto y agrega todos los documentos; en ese caso `next` será `None`. Puedes desactivar la paginación automática o establecer límites para controlar el comportamiento de la paginación.
+
+<div id="paginationconfig">
+  #### PaginationConfig
+</div>
+
+Utiliza `PaginationConfig` para controlar el comportamiento de la paginación al llamar a `get_crawl_status` o `get_batch_scrape_status`:
+
+```python Python
+from firecrawl.v2.types import PaginationConfig
+```
+
+| Opción          | Tipo   | Valor predeterminado | Descripción                                                                                                                                   |
+| --------------- | ------ | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auto_paginate` | `bool` | `True`               | Cuando es `True`, obtiene automáticamente todas las páginas y agrupa los resultados. Establécelo en `False` para obtener una página a la vez. |
+| `max_pages`     | `int`  | `None`               | Se detiene después de obtener esta cantidad de páginas (solo se aplica cuando `auto_paginate=True`).                                          |
+| `max_results`   | `int`  | `None`               | Se detiene después de recopilar esta cantidad de documentos (solo se aplica cuando `auto_paginate=True`).                                     |
+| `max_wait_time` | `int`  | `None`               | Se detiene después de esta cantidad de segundos (solo se aplica cuando `auto_paginate=True`).                                                 |
+
+
+<div id="manual-pagination-helpers">
+  #### Utilidades para paginación manual
+</div>
+
+Cuando `auto_paginate=False`, la respuesta incluye una URL `next` si hay más datos disponibles. Utiliza estos métodos auxiliares para obtener las páginas siguientes:
+
+- **`get_crawl_status_page(next_url)`** - Obtiene la siguiente página de resultados de `crawl` usando la URL opaca `next` de una respuesta anterior.
+- **`get_batch_scrape_status_page(next_url)`** - Obtiene la siguiente página de resultados de `batch scrape` usando la URL opaca `next` de una respuesta anterior.
+
+Estos métodos devuelven el mismo tipo de respuesta que la llamada de estado original, incluida una nueva URL `next` si quedan más páginas.
 
 <div id="crawl">
   #### Rastreo
@@ -129,20 +158,26 @@ Usa el método auxiliar `crawl` para la forma más sencilla, o inicia un job y p
 
 * Consulta el flujo por defecto en [Rastrear un sitio web](#crawl-a-website).
 
-<div id="manual-crawl-with-pagination-control-single-page">
-  ##### Rastreo manual con control de paginación (una sola página)
+<div id="manual-crawl-with-pagination-control">
+  ##### Rastreo manual con control de paginación
 </div>
 
-* Inicia un job y luego obtén una página a la vez con `auto_paginate=False` y `get_crawl_status_page`.
+Inicia un job y luego recupera una página a la vez con `auto_paginate=False`. Usa `get_crawl_status_page` para recuperar las páginas posteriores:
 
 ```python Python
 crawl_job = client.start_crawl("https://example.com", limit=100)
 
-status = client.get_crawl_status(crawl_job.id, pagination_config=PaginationConfig(auto_paginate=False))
-print("rastrear una sola página:", status.status, "docs:", len(status.data), "siguiente:", status.next)
-if status.next:
-    next_page = client.get_crawl_status_page(status.next)
-    print("crawl next page docs:", len(next_page.data), "next:", next_page.next)
+# Fetch first page
+status = client.get_crawl_status(
+    crawl_job.id,
+    pagination_config=PaginationConfig(auto_paginate=False)
+)
+print("First page:", len(status.data), "docs")
+
+# Obtener páginas siguientes usando get_crawl_status_page
+while status.next:
+    status = client.get_crawl_status_page(status.next)
+    print("Next page:", len(status.data), "docs")
 ```
 
 
@@ -150,7 +185,7 @@ if status.next:
   ##### Rastreo manual con límites (paginación automática + detención anticipada)
 </div>
 
-* Mantén la paginación automática activada, pero detén antes con `max_pages`, `max_results` o `max_wait_time`.
+Mantén la paginación automática activada, pero deténla antes con `max_pages`, `max_results` o `max_wait_time`:
 
 ```python Python
 status = client.get_crawl_status(
@@ -159,6 +194,7 @@ status = client.get_crawl_status(
 )
 print("rastreo limitado:", status.status, "docs:", len(status.data), "siguiente:", status.next)
 ```
+
 
 <div id="batch-scrape">
   #### Extracción por lotes
@@ -172,19 +208,26 @@ Usa el método de espera `batch_scrape` o inicia un job y pagina manualmente.
 
 * Consulta el flujo por defecto en [Batch Scrape](/es/features/batch-scrape).
 
-<div id="manual-batch-scrape-with-pagination-control-single-page">
-  ##### Raspado manual por lotes con control de paginación (una sola página)
+<div id="manual-batch-scrape-with-pagination-control">
+  ##### Extracción por lotes manual con control de paginación
 </div>
 
-* Inicia un trabajo y luego obtén una página a la vez con `auto_paginate=False` y `get_batch_scrape_status_page`.
+Inicia un trabajo y luego obtén una página a la vez con `auto_paginate=False`. Usa `get_batch_scrape_status_page` para obtener las páginas siguientes:
 
 ```python Python
 batch_job = client.start_batch_scrape(urls)
-status = client.get_batch_scrape_status(batch_job.id, pagination_config=PaginationConfig(auto_paginate=False))
-print("lote: una sola página:", status.status, "docs:", len(status.data), "siguiente:", status.next)
-if status.next:
-    next_page = client.get_batch_scrape_status_page(status.next)
-    print("batch next page docs:", len(next_page.data), "next:", next_page.next)
+
+# Obtener la primera página
+status = client.get_batch_scrape_status(
+    batch_job.id,
+    pagination_config=PaginationConfig(auto_paginate=False)
+)
+print("Primera página:", len(status.data), "docs")
+
+# Obtener las páginas siguientes usando get_batch_scrape_status_page
+while status.next:
+    status = client.get_batch_scrape_status_page(status.next)
+    print("Siguiente página:", len(status.data), "docs")
 ```
 
 
@@ -192,7 +235,7 @@ if status.next:
   ##### Raspado manual por lotes con límites (paginación automática + detención anticipada)
 </div>
 
-* Mantén la paginación automática activada, pero detén antes con `max_pages`, `max_results` o `max_wait_time`.
+Mantén la paginación automática activada, pero detén antes con `max_pages`, `max_results` o `max_wait_time`:
 
 ```python Python
 status = client.get_batch_scrape_status(
@@ -201,6 +244,7 @@ status = client.get_batch_scrape_status(
 )
 print("lote limitado:", status.status, "docs:", len(status.data), "siguiente:", status.next)
 ```
+
 
 <div id="error-handling">
   ## Manejo de errores
