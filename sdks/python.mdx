@@ -94,7 +94,31 @@ To crawl a website with WebSockets, start the job with `start_crawl` and subscri
 
 ### Pagination
 
-Firecrawl endpoints for crawl and batch return a `next` URL when more data is available. The Python SDK auto-paginates by default and aggregates all documents; in that case `next` will be `None`. You can disable auto-pagination or set limits. The `next` URL is opaque; pass it back to the SDK to fetch the next page.
+Firecrawl endpoints for crawl and batch scrape return a `next` URL when more data is available. The Python SDK auto-paginates by default and aggregates all documents; in that case `next` will be `None`. You can disable auto-pagination or set limits to control pagination behavior.
+
+#### PaginationConfig
+
+Use `PaginationConfig` to control pagination behavior when calling `get_crawl_status` or `get_batch_scrape_status`:
+
+```python Python
+from firecrawl.v2.types import PaginationConfig
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `auto_paginate` | `bool` | `True` | When `True`, automatically fetches all pages and aggregates results. Set to `False` to fetch one page at a time. |
+| `max_pages` | `int` | `None` | Stop after fetching this many pages (only applies when `auto_paginate=True`). |
+| `max_results` | `int` | `None` | Stop after collecting this many documents (only applies when `auto_paginate=True`). |
+| `max_wait_time` | `int` | `None` | Stop after this many seconds (only applies when `auto_paginate=True`). |
+
+#### Manual Pagination Helpers
+
+When `auto_paginate=False`, the response includes a `next` URL if more data is available. Use these helper methods to fetch subsequent pages:
+
+- **`get_crawl_status_page(next_url)`** - Fetch the next page of crawl results using the opaque `next` URL from a previous response.
+- **`get_batch_scrape_status_page(next_url)`** - Fetch the next page of batch scrape results using the opaque `next` URL from a previous response.
+
+These methods return the same response type as the original status call, including a new `next` URL if more pages remain.
 
 #### Crawl
 
@@ -104,23 +128,29 @@ Use the waiter method `crawl` for the simplest experience, or start a job and pa
 
 - See the default flow in [Crawl a Website](#crawl-a-website).
 
-##### Manual crawl with pagination control (single page)
+##### Manual crawl with pagination control
 
-- Start a job, then fetch one page at a time with `auto_paginate=False` and `get_crawl_status_page`.
+Start a job, then fetch one page at a time with `auto_paginate=False`. Use `get_crawl_status_page` to fetch subsequent pages:
 
 ```python Python
 crawl_job = client.start_crawl("https://example.com", limit=100)
 
-status = client.get_crawl_status(crawl_job.id, pagination_config=PaginationConfig(auto_paginate=False))
-print("crawl single page:", status.status, "docs:", len(status.data), "next:", status.next)
-if status.next:
-    next_page = client.get_crawl_status_page(status.next)
-    print("crawl next page docs:", len(next_page.data), "next:", next_page.next)
+# Fetch first page
+status = client.get_crawl_status(
+    crawl_job.id,
+    pagination_config=PaginationConfig(auto_paginate=False)
+)
+print("First page:", len(status.data), "docs")
+
+# Fetch subsequent pages using get_crawl_status_page
+while status.next:
+    status = client.get_crawl_status_page(status.next)
+    print("Next page:", len(status.data), "docs")
 ```
 
 ##### Manual crawl with limits (auto-pagination + early stop)
 
-- Keep auto-pagination on but stop early with `max_pages`, `max_results`, or `max_wait_time`.
+Keep auto-pagination on but stop early with `max_pages`, `max_results`, or `max_wait_time`:
 
 ```python Python
 status = client.get_crawl_status(
@@ -138,22 +168,29 @@ Use the waiter method `batch_scrape`, or start a job and page manually.
 
 - See the default flow in [Batch Scrape](/features/batch-scrape).
 
-##### Manual batch scrape with pagination control (single page)
+##### Manual batch scrape with pagination control
 
-- Start a job, then fetch one page at a time with `auto_paginate=False` and `get_batch_scrape_status_page`.
+Start a job, then fetch one page at a time with `auto_paginate=False`. Use `get_batch_scrape_status_page` to fetch subsequent pages:
 
 ```python Python
 batch_job = client.start_batch_scrape(urls)
-status = client.get_batch_scrape_status(batch_job.id, pagination_config=PaginationConfig(auto_paginate=False))
-print("batch single page:", status.status, "docs:", len(status.data), "next:", status.next)
-if status.next:
-    next_page = client.get_batch_scrape_status_page(status.next)
-    print("batch next page docs:", len(next_page.data), "next:", next_page.next)
+
+# Fetch first page
+status = client.get_batch_scrape_status(
+    batch_job.id,
+    pagination_config=PaginationConfig(auto_paginate=False)
+)
+print("First page:", len(status.data), "docs")
+
+# Fetch subsequent pages using get_batch_scrape_status_page
+while status.next:
+    status = client.get_batch_scrape_status_page(status.next)
+    print("Next page:", len(status.data), "docs")
 ```
 
 ##### Manual batch scrape with limits (auto-pagination + early stop)
 
-- Keep auto-pagination on but stop early with `max_pages`, `max_results`, or `max_wait_time`.
+Keep auto-pagination on but stop early with `max_pages`, `max_results`, or `max_wait_time`:
 
 ```python Python
 status = client.get_batch_scrape_status(
