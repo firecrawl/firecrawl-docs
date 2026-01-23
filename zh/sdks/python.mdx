@@ -115,7 +115,36 @@ import AIOPython from '/snippets/zh/v2/async/base/python.mdx'
   ### 分页
 </div>
 
-当有更多数据可用时，Firecrawl 的 crawl 和 batch 端点会返回一个 `next` URL。Python SDK 默认会自动分页并汇总所有文档；此时 `next` 为 `None`。你可以禁用自动分页或设置上限。`next` URL 是不透明的；将其传回 SDK 以获取下一页。
+当有更多数据可用时，Firecrawl 的 crawl 和 batch scrape 端点会返回一个 `next` URL。Python SDK 默认会自动分页并汇总所有文档；此时 `next` 为 `None`。你可以禁用自动分页或设置限制来控制分页行为。
+
+<div id="paginationconfig">
+  #### PaginationConfig
+</div>
+
+在调用 `get_crawl_status` 或 `get_batch_scrape_status` 时，使用 `PaginationConfig` 来控制分页行为：
+
+```python Python
+from firecrawl.v2.types import PaginationConfig
+```
+
+| Option          | Type   | Default | Description                                       |
+| --------------- | ------ | ------- | ------------------------------------------------- |
+| `auto_paginate` | `bool` | `True`  | 当为 `True` 时，会自动获取所有页面并聚合结果。将其设为 `False` 以每次仅获取一页。 |
+| `max_pages`     | `int`  | `None`  | 在获取到指定页数后停止（仅在 `auto_paginate=True` 时生效）。         |
+| `max_results`   | `int`  | `None`  | 在收集到指定数量的文档后停止（仅在 `auto_paginate=True` 时生效）。      |
+| `max_wait_time` | `int`  | `None`  | 在经过指定秒数后停止（仅在 `auto_paginate=True` 时生效）。          |
+
+
+<div id="manual-pagination-helpers">
+  #### 手动分页辅助方法
+</div>
+
+当 `auto_paginate=False` 时，如果还有更多数据可用，响应中会包含一个 `next` URL。使用以下辅助方法来获取后续页面：
+
+- **`get_crawl_status_page(next_url)`** - 使用前一次响应中的不透明 `next` URL 获取爬取结果的下一页。
+- **`get_batch_scrape_status_page(next_url)`** - 使用前一次响应中的不透明 `next` URL 获取批量抓取结果的下一页。
+
+这些方法返回的响应类型与最初的状态查询调用相同，如果还有更多页面，将包含新的 `next` URL。
 
 <div id="crawl">
   #### 爬取
@@ -129,20 +158,26 @@ import AIOPython from '/snippets/zh/v2/async/base/python.mdx'
 
 * 参见[抓取网站](#crawl-a-website)中的默认流程。
 
-<div id="manual-crawl-with-pagination-control-single-page">
-  ##### 手动爬取并控制分页（单页）
+<div id="manual-crawl-with-pagination-control">
+  ##### 手动抓取并控制分页
 </div>
 
-* 先启动任务，然后将 `auto_paginate=False`，并使用 `get_crawl_status_page` 按页逐次获取。
+先启动一个任务，然后将 `auto_paginate` 设为 `False`，一次获取一页。使用 `get_crawl_status_page` 获取后续页面：
 
 ```python Python
 crawl_job = client.start_crawl("https://example.com", limit=100)
 
-status = client.get_crawl_status(crawl_job.id, pagination_config=PaginationConfig(auto_paginate=False))
-print("抓取单页：", status.status, "文档数：", len(status.data), "下一页：", status.next)
-if status.next:
-    next_page = client.get_crawl_status_page(status.next)
-    print("crawl next page docs:", len(next_page.data), "next:", next_page.next)
+# 获取第一页
+status = client.get_crawl_status(
+    crawl_job.id,
+    pagination_config=PaginationConfig(auto_paginate=False)
+)
+print("First page:", len(status.data), "docs")
+
+# 使用 get_crawl_status_page 获取后续页面
+while status.next:
+    status = client.get_crawl_status_page(status.next)
+    print("Next page:", len(status.data), "docs")
 ```
 
 
@@ -150,7 +185,7 @@ if status.next:
   ##### 手动抓取并设定限制（自动分页 + 提前停止）
 </div>
 
-* 保持自动分页开启，但可通过 `max_pages`、`max_results` 或 `max_wait_time` 提前停止。
+保持自动分页开启，但可通过 `max_pages`、`max_results` 或 `max_wait_time` 提前停止：
 
 ```python Python
 status = client.get_crawl_status(
@@ -159,6 +194,7 @@ status = client.get_crawl_status(
 )
 print("爬取受限：", status.status, "文档数：", len(status.data), "下一页：", status.next)
 ```
+
 
 <div id="batch-scrape">
   #### 批量抓取
@@ -172,19 +208,26 @@ print("爬取受限：", status.status, "文档数：", len(status.data), "下�
 
 * 参见默认流程：[Batch Scrape](/zh/features/batch-scrape)。
 
-<div id="manual-batch-scrape-with-pagination-control-single-page">
-  ##### 手动批量抓取并控制分页（单页）
+<div id="manual-batch-scrape-with-pagination-control">
+  ##### 手动批量抓取并控制分页
 </div>
 
-* 先启动作业，然后将 `auto_paginate=False`，并使用 `get_batch_scrape_status_page` 一次获取一页。
+先启动一个任务，然后将 `auto_paginate=False`，每次只获取一页。使用 `get_batch_scrape_status_page` 获取后续页面：
 
 ```python Python
 batch_job = client.start_batch_scrape(urls)
-status = client.get_batch_scrape_status(batch_job.id, pagination_config=PaginationConfig(auto_paginate=False))
-print("批处理单页：", status.status, "文档数：", len(status.data), "下一页：", status.next)
-if status.next:
-    next_page = client.get_batch_scrape_status_page(status.next)
-    print("batch next page docs:", len(next_page.data), "next:", next_page.next)
+
+# 获取第一页
+status = client.get_batch_scrape_status(
+    batch_job.id,
+    pagination_config=PaginationConfig(auto_paginate=False)
+)
+print("第一页:", len(status.data), "文档")
+
+# 使用 get_batch_scrape_status_page 获取后续页面
+while status.next:
+    status = client.get_batch_scrape_status_page(status.next)
+    print("下一页:", len(status.data), "文档")
 ```
 
 
@@ -192,7 +235,7 @@ if status.next:
   ##### 受限的手动批量抓取（自动分页 + 提前停止）
 </div>
 
-* 保持自动分页开启，但可通过 `max_pages`、`max_results` 或 `max_wait_time` 提前停止。
+保持自动分页开启，但可通过 `max_pages`、`max_results` 或 `max_wait_time` 提前停止：
 
 ```python Python
 status = client.get_batch_scrape_status(
@@ -201,6 +244,7 @@ status = client.get_batch_scrape_status(
 )
 print("批处理受限：", status.status, "文档数：", len(status.data), "下一页：", status.next)
 ```
+
 
 <div id="error-handling">
   ## 错误处理

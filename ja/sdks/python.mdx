@@ -115,7 +115,36 @@ WebSockets でウェブサイトをクロールするには、`start_crawl` で�
   ### ページネーション
 </div>
 
-Firecrawl の /crawl および batch の各エンドポイントは、追加のデータがある場合に `next` URL を返します。Python SDK はデフォルトで自動ページネーションを行い、すべてのドキュメントを集約します。この場合、`next` は `None` になります。自動ページネーションを無効化したり、上限を設定することも可能です。`next` URL は不透明な値なので、そのまま SDK に渡して次のページを取得します。
+Firecrawl の /crawl および batch scrape の各エンドポイントは、追加のデータがある場合に `next` URL を返します。Python SDK はデフォルトで自動ページネーションを行い、すべてのドキュメントを集約します。この場合、`next` は `None` になります。自動ページネーションを無効化したり、ページネーションの動作を制御するための上限を設定することも可能です。
+
+<div id="paginationconfig">
+  #### PaginationConfig
+</div>
+
+`get_crawl_status` または `get_batch_scrape_status` を呼び出す際のページネーション動作を制御するには、`PaginationConfig` を使用します。
+
+```python Python
+from firecrawl.v2.types import PaginationConfig
+```
+
+| オプション           | 型      | デフォルト  | 説明                                                                |
+| --------------- | ------ | ------ | ----------------------------------------------------------------- |
+| `auto_paginate` | `bool` | `True` | `True` の場合、すべてのページを自動的に取得して結果を集約します。1 ページずつ取得するには `False` に設定します。 |
+| `max_pages`     | `int`  | `None` | 指定したページ数を取得したら終了します（`auto_paginate=True` の場合にのみ適用されます）。           |
+| `max_results`   | `int`  | `None` | 指定したドキュメント数を収集したら終了します（`auto_paginate=True` の場合にのみ適用されます）。        |
+| `max_wait_time` | `int`  | `None` | 指定した秒数が経過したら終了します（`auto_paginate=True` の場合にのみ適用されます）。             |
+
+
+<div id="manual-pagination-helpers">
+  #### 手動ページネーションヘルパー
+</div>
+
+`auto_paginate=False` の場合、追加のデータがあると、レスポンスに `next` URL が含まれます。次のページを取得するには、これらのヘルパーメソッドを使用します:
+
+- **`get_crawl_status_page(next_url)`** - 前のレスポンスに含まれる不透明な `next` URL を使用して、クロール結果の次のページを取得します。
+- **`get_batch_scrape_status_page(next_url)`** - 前のレスポンスに含まれる不透明な `next` URL を使用して、バッチスクレイプ結果の次のページを取得します。
+
+これらのメソッドは、元のステータス呼び出しと同じ型のレスポンスを返し、さらにページが残っている場合は新しい `next` URL を含みます。
 
 <div id="crawl">
   #### クロール
@@ -129,28 +158,34 @@ Firecrawl の /crawl および batch の各エンドポイントは、追加の�
 
 * 既定のフローについては[ウェブサイトをクロールする](#crawl-a-website)を参照してください。
 
-<div id="manual-crawl-with-pagination-control-single-page">
-  ##### ページネーションを手動制御するクロール（単一ページ）
+<div id="manual-crawl-with-pagination-control">
+  ##### ページネーションを制御した手動クロール
 </div>
 
-* ジョブを開始し、`auto_paginate=False` を指定し、`get_crawl_status_page` を使用して1ページずつ取得します。
+ジョブを開始し、`auto_paginate=False` を指定して 1 ページずつ取得します。後続のページを取得するには `get_crawl_status_page` を使用します。
 
 ```python Python
 crawl_job = client.start_crawl("https://example.com", limit=100)
 
-status = client.get_crawl_status(crawl_job.id, pagination_config=PaginationConfig(auto_paginate=False))
-print("単一ページのクロール:", status.status, "ドキュメント数:", len(status.data), "次:", status.next)
-if status.next:
-    next_page = client.get_crawl_status_page(status.next)
-    print("次ページのドキュメント数:", len(next_page.data), "次:", next_page.next)
+# 最初のページを取得
+status = client.get_crawl_status(
+    crawl_job.id,
+    pagination_config=PaginationConfig(auto_paginate=False)
+)
+print("First page:", len(status.data), "docs")
+
+# get_crawl_status_pageを使用して後続のページを取得
+while status.next:
+    status = client.get_crawl_status_page(status.next)
+    print("Next page:", len(status.data), "docs")
 ```
 
 
 <div id="manual-crawl-with-limits-auto-pagination-early-stop">
-  ##### 制限付きの手動クロール（自動ページネーション + 早期停止）
+  ##### Manual crawl with limits (auto-pagination + early stop)
 </div>
 
-* 自動ページネーションは有効のまま、`max_pages`、`max_results`、または `max_wait_time` で早期停止します。
+自動ページネーションは有効のまま、`max_pages`、`max_results`、または `max_wait_time` で早期停止します。
 
 ```python Python
 status = client.get_crawl_status(
@@ -159,6 +194,7 @@ status = client.get_crawl_status(
 )
 print("クロール制限:", status.status, "ドキュメント数:", len(status.data), "次のページ:", status.next)
 ```
+
 
 <div id="batch-scrape">
   #### バッチスクレイプ
@@ -172,19 +208,26 @@ waiter メソッド `batch_scrape` を使うか、ジョブを開始して手動
 
 * 既定のフローは [Batch Scrape](/ja/features/batch-scrape) を参照してください。
 
-<div id="manual-batch-scrape-with-pagination-control-single-page">
-  ##### ページネーション制御付きの手動バッチスクレイプ（単一ページ）
+<div id="manual-batch-scrape-with-pagination-control">
+  ##### ページネーション制御付きの手動バッチスクレイピング
 </div>
 
-* ジョブを開始し、`auto_paginate=False` を指定し、`get_batch_scrape_status_page` を使って1ページずつ取得します。
+`auto_paginate=False` を指定してジョブを開始し、1ページずつ取得します。後続のページを取得するには `get_batch_scrape_status_page` を使用します。
 
 ```python Python
 batch_job = client.start_batch_scrape(urls)
-status = client.get_batch_scrape_status(batch_job.id, pagination_config=PaginationConfig(auto_paginate=False))
-print("バッチの単一ページ:", status.status, "ドキュメント数:", len(status.data), "次:", status.next)
-if status.next:
-    next_page = client.get_batch_scrape_status_page(status.next)
-    print("batch next page docs:", len(next_page.data), "next:", next_page.next)
+
+# 最初のページを取得
+status = client.get_batch_scrape_status(
+    batch_job.id,
+    pagination_config=PaginationConfig(auto_paginate=False)
+)
+print("First page:", len(status.data), "docs")
+
+# get_batch_scrape_status_pageを使用して後続のページを取得
+while status.next:
+    status = client.get_batch_scrape_status_page(status.next)
+    print("Next page:", len(status.data), "docs")
 ```
 
 
@@ -192,7 +235,7 @@ if status.next:
   ##### 制限付きの手動バッチスクレイプ（自動ページネーション + 早期停止）
 </div>
 
-* 自動ページネーションは有効にしたまま、`max_pages`、`max_results`、または `max_wait_time` で早期に停止します。
+自動ページネーションは有効にしたまま、`max_pages`、`max_results`、または `max_wait_time` で早期に停止します：
 
 ```python Python
 status = client.get_batch_scrape_status(
@@ -201,6 +244,7 @@ status = client.get_batch_scrape_status(
 )
 print("バッチ制限:", status.status, "ドキュメント数:", len(status.data), "次:", status.next)
 ```
+
 
 <div id="error-handling">
   ## エラーハンドリング
