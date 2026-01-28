@@ -1,0 +1,111 @@
+---
+title: "PostgreSQL FDW"
+description: "Query Firecrawl activity logs and job outputs directly from Postgres."
+---
+
+Firecrawl ships a PostgreSQL foreign data wrapper (FDW) that exposes activity logs and job result payloads as foreign tables. Use it to query your Firecrawl history with SQL.
+
+## Requirements
+
+- PostgreSQL with `pgrx` support (v15+ recommended)
+- Firecrawl API key
+- Network access from Postgres to `https://api.firecrawl.dev`
+
+## Install the extension
+
+Build the FDW from the `random-playground/firecrawl_fdw` directory:
+
+```bash
+cargo pgrx install --pg-config /path/to/pg_config --features pg16
+```
+
+Then enable it in your database:
+
+```sql
+create extension if not exists firecrawl_fdw;
+```
+
+## Configure the FDW
+
+Create a server and user mapping, then define the foreign tables:
+
+```sql
+create server firecrawl_server
+  foreign data wrapper firecrawl_fdw
+  options (
+    base_url 'https://api.firecrawl.dev'
+  );
+
+create user mapping for current_user
+  server firecrawl_server
+  options (
+    api_key 'YOUR_API_KEY'
+  );
+
+create foreign table firecrawl_activity_logs (
+  job_id uuid,
+  mode text,
+  created_at timestamptz,
+  origin text,
+  url_or_query text,
+  success boolean,
+  credits_billed double precision,
+  num_docs bigint,
+  time_taken double precision,
+  message text,
+  error_count bigint,
+  agent_model text,
+  scrape_options jsonb,
+  scrape_pdf_num_pages bigint,
+  api_key_id bigint
+)
+  server firecrawl_server
+  options (table 'activity_logs');
+
+create foreign table firecrawl_job_results (
+  job_id uuid,
+  mode text,
+  result_json jsonb,
+  found boolean,
+  error text
+)
+  server firecrawl_server
+  options (table 'job_results');
+```
+
+## Query examples
+
+Fetch recent jobs:
+
+```sql
+select job_id, mode, created_at, url_or_query
+from firecrawl_activity_logs
+where created_at >= now() - interval '7 days'
+order by created_at desc
+limit 50;
+```
+
+Filter by mode and URL substring:
+
+```sql
+select job_id, success, credits_billed
+from firecrawl_activity_logs
+where created_at >= now() - interval '30 days'
+  and created_at <= now()
+  and mode = 'crawl'
+  and url_or_query ilike '%docs.firecrawl.dev%';
+```
+
+Fetch job results by ID:
+
+```sql
+select result_json
+from firecrawl_job_results
+where job_id = '11111111-1111-1111-1111-111111111111';
+```
+
+## Notes
+
+- `firecrawl_activity_logs` requires a date range filter; the FDW defaults to the last 30 days if none is provided.
+- `firecrawl_job_results` requires `job_id` filters and batches lookups to avoid large scans.
+- The FDW is read-only (SELECT only).
