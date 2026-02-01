@@ -106,6 +106,98 @@ You can now choose what formats you want your output in. You can specify multipl
 
 Output keys will match the format you choose.
 
+## Scrape Options
+
+Customize scraping behavior with these options:
+
+### Content Filtering
+
+#### `onlyMainContent`
+- **Type**: `boolean`
+- **Default**: `true`
+- **Description**: By default, Firecrawl returns only the main content of the page. Set to `false` to return the full page content including headers, footers, and sidebars.
+
+#### `includeTags`
+- **Type**: `array`
+- **Description**: Specify HTML tags, classes, or IDs to include in the output. Only matching elements will be scraped.
+- **Example**: `["h1", "p", "a", ".main-content", "#article"]`
+
+#### `excludeTags`
+- **Type**: `array`
+- **Description**: Specify HTML tags, classes, or IDs to exclude from the output.
+- **Example**: `["#ad", "#footer", ".sidebar", "nav"]`
+
+### Timing
+
+#### `waitFor`
+- **Type**: `integer` (milliseconds)
+- **Default**: `0`
+- **Description**: Extra wait time before scraping, in addition to Firecrawl's smart wait feature. Use sparingly for pages with delayed content loading.
+
+#### `timeout`
+- **Type**: `integer` (milliseconds)
+- **Default**: `30000` (30 seconds)
+- **Description**: Maximum duration before the scrape request is aborted.
+
+### PDF Handling
+
+#### `parsers`
+- **Type**: `array`
+- **Description**: Control PDF parsing behavior.
+- **Options**:
+  - `["pdf"]` - Parse PDF content (1 credit per page)
+  - `[]` - Skip PDF parsing, return as base64 (1 credit flat)
+  - `[{"type": "pdf", "maxPages": 10}]` - Limit parsing to first N pages
+
+<CodeGroup>
+
+```python Python
+from firecrawl import Firecrawl
+
+firecrawl = Firecrawl(api_key='fc-YOUR_API_KEY')
+
+doc = firecrawl.scrape('https://example.com', {
+    'formats': ['markdown'],
+    'onlyMainContent': False,
+    'includeTags': ['article', '.content'],
+    'excludeTags': ['#cookie-banner', 'footer'],
+    'waitFor': 2000,
+    'timeout': 60000
+})
+```
+
+```js Node
+import Firecrawl from '@mendable/firecrawl-js';
+
+const firecrawl = new Firecrawl({ apiKey: 'fc-YOUR_API_KEY' });
+
+const doc = await firecrawl.scrape('https://example.com', {
+    formats: ['markdown'],
+    onlyMainContent: false,
+    includeTags: ['article', '.content'],
+    excludeTags: ['#cookie-banner', 'footer'],
+    waitFor: 2000,
+    timeout: 60000
+});
+```
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/scrape \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer fc-YOUR_API_KEY' \
+  -d '{
+    "url": "https://example.com",
+    "formats": ["markdown"],
+    "onlyMainContent": false,
+    "includeTags": ["article", ".content"],
+    "excludeTags": ["#cookie-banner", "footer"],
+    "waitFor": 2000,
+    "timeout": 60000
+  }'
+```
+
+</CodeGroup>
+
 ## Extract structured data
 
 ### /scrape (with json) endpoint
@@ -213,27 +305,98 @@ You can combine the branding format with other formats to get comprehensive page
 
 Firecrawl allows you to perform various actions on a web page before scraping its content. This is particularly useful for interacting with dynamic content, navigating through pages, or accessing content that requires user interaction.
 
-Here is an example of how to use actions to navigate to google.com, search for Firecrawl, click on the first result, and take a screenshot.
+### Supported Actions
 
-It is important to almost always use the `wait` action before/after executing other actions to give enough time for the page to load.
+| Action | Description | Parameters |
+|--------|-------------|------------|
+| `wait` | Wait for page to load | `milliseconds` or `selector` |
+| `click` | Click an element | `selector`, `all?` (click all matches) |
+| `write` | Type text into a field | `text` (element must be focused first) |
+| `press` | Press a keyboard key | `key` |
+| `scroll` | Scroll the page | `direction` ("up"/"down"), `selector?` |
+| `screenshot` | Capture screenshot | `fullPage?`, `quality?`, `viewport?` |
+| `scrape` | Scrape current state | - |
+| `executeJavascript` | Run JavaScript | `script` |
+| `pdf` | Generate PDF | `format?`, `landscape?`, `scale?` |
 
 ### Example
+
+Here is an example of how to use actions to navigate to google.com, search for Firecrawl, click on the first result, and take a screenshot.
+
+<Tip>Always use the `wait` action before/after executing other actions to give the page time to load.</Tip>
+
 <CodeGroup>
 
 <ScrapeActionsPython />
-<ScrapeActionsNode /> 
+<ScrapeActionsNode />
 <ScrapeActionsCURL />
 
 </CodeGroup>
+
 ### Output
 
 <CodeGroup>
 
 <ScrapeActionsOutput />
 
-
 </CodeGroup>
-For more details about the actions parameters, refer to the [API Reference](https://docs.firecrawl.dev/api-reference/endpoint/scrape).
+
+### Action Execution Notes
+
+- **Write action**: You must first focus the element using a `click` action before using `write`. Text is typed character by character to simulate real keyboard input.
+- **Scroll with selector**: To scroll a specific element instead of the whole page, provide the `selector` parameter.
+- **Wait with selector**: Use `wait` with a `selector` to wait for a specific element to appear, or use `milliseconds` for a fixed delay.
+- **Sequential execution**: Actions run in order, and Firecrawl waits for each interaction to complete before proceeding.
+
+### Advanced Action Examples
+
+**Taking a screenshot after clicking:**
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/scrape \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer fc-YOUR_API_KEY' \
+  -d '{
+    "url": "https://example.com",
+    "actions": [
+      { "type": "click", "selector": "#load-more" },
+      { "type": "wait", "milliseconds": 1000 },
+      { "type": "screenshot", "fullPage": true, "quality": 80 }
+    ]
+  }'
+```
+
+**Clicking multiple elements:**
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/scrape \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer fc-YOUR_API_KEY' \
+  -d '{
+    "url": "https://example.com",
+    "actions": [
+      { "type": "click", "selector": ".expand-button", "all": true },
+      { "type": "wait", "milliseconds": 500 }
+    ],
+    "formats": ["markdown"]
+  }'
+```
+
+**Generating a PDF:**
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/scrape \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer fc-YOUR_API_KEY' \
+  -d '{
+    "url": "https://example.com",
+    "actions": [
+      { "type": "pdf", "format": "A4", "landscape": false }
+    ]
+  }'
+```
+
+For more details about action parameters, refer to the [API Reference](https://docs.firecrawl.dev/api-reference/endpoint/scrape).
 
 ## Location and Language
 
@@ -370,3 +533,16 @@ You can then use the job ID to check the status of the batch scrape by calling t
 For complex websites, Firecrawl offers enhanced mode that provides better success rates while maintaining privacy.
 
 Learn more about [Enhanced Mode](/features/enhanced-mode).
+
+## Whitelisting Firecrawl
+
+### Allowing Firecrawl to scrape your website
+
+If you want Firecrawl to scrape your own website and need to whitelist the crawler:
+
+- **User Agent**: Firecrawl identifies itself with the user agent `FirecrawlAgent`. Allow this user agent string in your firewall or security rules.
+- **IP Addresses**: Firecrawl does not use a fixed set of IP addresses for outbound scraping requests.
+
+### Allowing your application to call the Firecrawl API
+
+If your firewall blocks outbound requests from your application to external services, whitelist `35.245.250.27` to allow calls to Firecrawl's API.
