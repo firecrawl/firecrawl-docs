@@ -1,0 +1,947 @@
+---
+title: "Advanced Agent Guide"
+description: "Master Firecrawl's Agent API for autonomous web data gathering with advanced techniques and optimization strategies."
+og:title: "Advanced Agent Guide | Firecrawl"
+og:description: "Master Firecrawl's Agent API for autonomous web data gathering with advanced techniques and optimization strategies."
+---
+
+This guide covers advanced usage of Firecrawl's `/agent` endpoint, including schema design, model selection, cost optimization, and complex extraction patterns.
+
+## Overview
+
+The Agent endpoint is an autonomous AI that searches, navigates, and extracts data from the web:
+
+- **No URLs required**: Just describe what you need
+- **Deep web navigation**: Autonomously finds data across multiple sources
+- **Structured output**: Define schemas for consistent data formats
+- **Parallel processing**: Processes multiple sources simultaneously
+- **Two model options**: Balance cost vs. accuracy
+
+## Basic Usage
+
+### Prompt-Only Extraction
+
+The simplest usage requires only a `prompt`:
+
+<CodeGroup>
+
+```python Python
+from firecrawl import FirecrawlApp
+
+app = FirecrawlApp(api_key="fc-YOUR_API_KEY")
+
+result = app.agent(
+    prompt="Find the current pricing plans for Slack"
+)
+
+print(result.data)
+```
+
+```javascript Node
+import Firecrawl from '@mendable/firecrawl-js';
+
+const firecrawl = new Firecrawl({ apiKey: "fc-YOUR_API_KEY" });
+
+const result = await firecrawl.agent({
+  prompt: "Find the current pricing plans for Slack"
+});
+
+console.log(result.data);
+```
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/agent \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY" \
+  -d '{
+    "prompt": "Find the current pricing plans for Slack"
+  }'
+```
+
+</CodeGroup>
+
+### Response Structure
+
+```json
+{
+  "success": true,
+  "status": "completed",
+  "data": {
+    "pricing_plans": [
+      { "name": "Free", "price": "$0", "features": [...] },
+      { "name": "Pro", "price": "$8.75/user/month", "features": [...] }
+    ]
+  },
+  "expiresAt": "2024-12-15T00:00:00.000Z",
+  "creditsUsed": 12
+}
+```
+
+## Schema-Driven Extraction
+
+Define structured schemas for consistent, type-safe output.
+
+### Using Pydantic (Python)
+
+<CodeGroup>
+
+```python Python
+from firecrawl import FirecrawlApp
+from pydantic import BaseModel, Field
+from typing import List, Optional
+
+app = FirecrawlApp(api_key="fc-YOUR_API_KEY")
+
+class PricingTier(BaseModel):
+    name: str = Field(description="Plan name (e.g., Free, Pro, Enterprise)")
+    price: str = Field(description="Price per month or year")
+    billing_cycle: str = Field(description="monthly or annual")
+    features: List[str] = Field(description="List of included features")
+    limits: Optional[dict] = Field(None, description="Usage limits if any")
+
+class CompanyPricing(BaseModel):
+    company: str = Field(description="Company name")
+    currency: str = Field(description="Currency code (USD, EUR, etc.)")
+    tiers: List[PricingTier] = Field(description="Available pricing tiers")
+    free_trial: Optional[bool] = Field(None, description="Free trial available")
+    enterprise_contact: Optional[bool] = Field(None, description="Contact sales for enterprise")
+
+result = app.agent(
+    prompt="Extract the complete pricing information for Notion",
+    schema=CompanyPricing,
+    model="spark-1-mini"
+)
+
+pricing = result.data
+print(f"Company: {pricing['company']}")
+for tier in pricing['tiers']:
+    print(f"  {tier['name']}: {tier['price']}")
+```
+
+</CodeGroup>
+
+### Using Zod (Node.js)
+
+<CodeGroup>
+
+```javascript Node
+import Firecrawl from '@mendable/firecrawl-js';
+import { z } from 'zod';
+
+const firecrawl = new Firecrawl({ apiKey: "fc-YOUR_API_KEY" });
+
+const PricingTierSchema = z.object({
+  name: z.string().describe("Plan name"),
+  price: z.string().describe("Price per month or year"),
+  billingCycle: z.string().describe("monthly or annual"),
+  features: z.array(z.string()).describe("Included features"),
+  limits: z.record(z.string()).optional().describe("Usage limits")
+});
+
+const CompanyPricingSchema = z.object({
+  company: z.string().describe("Company name"),
+  currency: z.string().describe("Currency code"),
+  tiers: z.array(PricingTierSchema).describe("Pricing tiers"),
+  freeTrial: z.boolean().optional().describe("Free trial available"),
+  enterpriseContact: z.boolean().optional().describe("Contact for enterprise")
+});
+
+const result = await firecrawl.agent({
+  prompt: "Extract the complete pricing information for Notion",
+  schema: CompanyPricingSchema,
+  model: "spark-1-mini"
+});
+
+console.log(`Company: ${result.data.company}`);
+result.data.tiers.forEach(tier => {
+  console.log(`  ${tier.name}: ${tier.price}`);
+});
+```
+
+</CodeGroup>
+
+### JSON Schema (cURL/Raw)
+
+```bash
+curl -X POST https://api.firecrawl.dev/v2/agent \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY" \
+  -d '{
+    "prompt": "Extract the complete pricing information for Notion",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "company": { "type": "string", "description": "Company name" },
+        "currency": { "type": "string", "description": "Currency code" },
+        "tiers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "price": { "type": "string" },
+              "billingCycle": { "type": "string" },
+              "features": { "type": "array", "items": { "type": "string" } }
+            },
+            "required": ["name", "price"]
+          }
+        },
+        "freeTrial": { "type": "boolean" }
+      },
+      "required": ["company", "tiers"]
+    },
+    "model": "spark-1-mini"
+  }'
+```
+
+## URL-Constrained Extraction
+
+Provide URLs to focus the agent on specific pages:
+
+<CodeGroup>
+
+```python Python
+from firecrawl import FirecrawlApp
+from pydantic import BaseModel, Field
+from typing import List
+
+app = FirecrawlApp(api_key="fc-YOUR_API_KEY")
+
+class FeatureComparison(BaseModel):
+    feature_name: str
+    slack_support: str
+    teams_support: str
+    notes: str = ""
+
+class ComparisonResult(BaseModel):
+    features: List[FeatureComparison]
+    recommendation: str
+    last_updated: str = ""
+
+result = app.agent(
+    prompt="Compare the features and pricing between these two products",
+    urls=[
+        "https://slack.com/pricing",
+        "https://www.microsoft.com/en-us/microsoft-teams/compare-microsoft-teams-options"
+    ],
+    schema=ComparisonResult,
+    model="spark-1-pro"  # Use Pro for complex comparisons
+)
+
+print(result.data)
+```
+
+```javascript Node
+import Firecrawl from '@mendable/firecrawl-js';
+import { z } from 'zod';
+
+const firecrawl = new Firecrawl({ apiKey: "fc-YOUR_API_KEY" });
+
+const FeatureComparison = z.object({
+  featureName: z.string(),
+  slackSupport: z.string(),
+  teamsSupport: z.string(),
+  notes: z.string().optional()
+});
+
+const ComparisonResult = z.object({
+  features: z.array(FeatureComparison),
+  recommendation: z.string(),
+  lastUpdated: z.string().optional()
+});
+
+const result = await firecrawl.agent({
+  prompt: "Compare the features and pricing between these two products",
+  urls: [
+    "https://slack.com/pricing",
+    "https://www.microsoft.com/en-us/microsoft-teams/compare-microsoft-teams-options"
+  ],
+  schema: ComparisonResult,
+  model: "spark-1-pro"
+});
+
+console.log(result.data);
+```
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/agent \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY" \
+  -d '{
+    "prompt": "Compare the features and pricing between these two products",
+    "urls": [
+      "https://slack.com/pricing",
+      "https://www.microsoft.com/en-us/microsoft-teams/compare-microsoft-teams-options"
+    ],
+    "model": "spark-1-pro"
+  }'
+```
+
+</CodeGroup>
+
+## Model Selection
+
+### Spark 1 Mini (Default)
+
+**60% cheaper** - Best for most extraction tasks:
+
+| Use Case | Example |
+|----------|---------|
+| Simple data points | Contact info, addresses, phone numbers |
+| Well-structured sites | Product pages, pricing tables |
+| High-volume jobs | Batch extraction of similar data |
+| Cost-sensitive tasks | Prototyping, testing |
+
+```python
+result = app.agent(
+    prompt="Find the contact email for Acme Corp",
+    model="spark-1-mini"  # Default, can be omitted
+)
+```
+
+### Spark 1 Pro
+
+**Higher accuracy** - Best for complex tasks:
+
+| Use Case | Example |
+|----------|---------|
+| Multi-domain research | Competitive analysis across 5+ sites |
+| Complex reasoning | Analyzing trends, making comparisons |
+| Critical accuracy | Financial data, legal information |
+| Ambiguous data | Poorly structured sites |
+
+```python
+result = app.agent(
+    prompt="Analyze the competitive landscape of the CRM market including pricing, features, and market positioning for the top 5 players",
+    model="spark-1-pro"
+)
+```
+
+### Model Selection Decision Tree
+
+```
+Is the data straightforward and well-structured?
+├── Yes → Use spark-1-mini
+└── No → Does the task require:
+    ├── Multi-domain research → spark-1-pro
+    ├── Complex comparisons → spark-1-pro
+    ├── Deep reasoning → spark-1-pro
+    └── Simple extraction → spark-1-mini
+```
+
+## Asynchronous Operations
+
+For long-running tasks, use the async pattern:
+
+### Start and Poll Pattern
+
+<CodeGroup>
+
+```python Python
+from firecrawl import FirecrawlApp
+import time
+
+app = FirecrawlApp(api_key="fc-YOUR_API_KEY")
+
+# Start the job
+job = app.start_agent(
+    prompt="Research the top 10 AI startups founded in 2024 with their funding amounts",
+    model="spark-1-pro"
+)
+
+print(f"Job started: {job.id}")
+
+# Poll for completion
+while True:
+    status = app.get_agent_status(job.id)
+
+    if status.status == "completed":
+        print("Extraction complete!")
+        print(status.data)
+        break
+    elif status.status == "failed":
+        print(f"Extraction failed: {status.error}")
+        break
+    else:
+        print(f"Status: {status.status}")
+        time.sleep(5)  # Wait 5 seconds before checking again
+```
+
+```javascript Node
+import Firecrawl from '@mendable/firecrawl-js';
+
+const firecrawl = new Firecrawl({ apiKey: "fc-YOUR_API_KEY" });
+
+// Start the job
+const job = await firecrawl.startAgent({
+  prompt: "Research the top 10 AI startups founded in 2024 with their funding amounts",
+  model: "spark-1-pro"
+});
+
+console.log(`Job started: ${job.id}`);
+
+// Poll for completion
+const pollStatus = async () => {
+  while (true) {
+    const status = await firecrawl.getAgentStatus(job.id);
+
+    if (status.status === "completed") {
+      console.log("Extraction complete!");
+      console.log(status.data);
+      break;
+    } else if (status.status === "failed") {
+      console.log(`Extraction failed: ${status.error}`);
+      break;
+    } else {
+      console.log(`Status: ${status.status}`);
+      await new Promise(resolve => setTimeout(resolve, 5000));
+    }
+  }
+};
+
+await pollStatus();
+```
+
+```bash cURL
+# Start the job
+curl -X POST https://api.firecrawl.dev/v2/agent \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY" \
+  -d '{
+    "prompt": "Research the top 10 AI startups founded in 2024"
+  }'
+
+# Response: { "success": true, "id": "job-uuid-here" }
+
+# Check status
+curl -X GET https://api.firecrawl.dev/v2/agent/job-uuid-here \
+  -H "Authorization: Bearer fc-YOUR_API_KEY"
+
+# Cancel if needed
+curl -X DELETE https://api.firecrawl.dev/v2/agent/job-uuid-here \
+  -H "Authorization: Bearer fc-YOUR_API_KEY"
+```
+
+</CodeGroup>
+
+### Job States
+
+| Status | Description | Action |
+|--------|-------------|--------|
+| `processing` | Agent is working | Continue polling |
+| `completed` | Extraction successful | Access `data` field |
+| `failed` | Error occurred | Check `error` field |
+
+## Cost Management
+
+### Understanding Pricing
+
+Agent pricing is dynamic based on:
+- Prompt complexity
+- Amount of data processed
+- Number of sources visited
+- Output structure complexity
+
+### Using maxCredits
+
+Set a spending limit to control costs:
+
+<CodeGroup>
+
+```python Python
+from firecrawl import FirecrawlApp
+
+app = FirecrawlApp(api_key="fc-YOUR_API_KEY")
+
+try:
+    result = app.agent(
+        prompt="Research AI trends",
+        maxCredits=50  # Stop if it would exceed 50 credits
+    )
+    print(f"Credits used: {result.credits_used}")
+except Exception as e:
+    print(f"Job stopped: {e}")
+```
+
+```javascript Node
+import Firecrawl from '@mendable/firecrawl-js';
+
+const firecrawl = new Firecrawl({ apiKey: "fc-YOUR_API_KEY" });
+
+try {
+  const result = await firecrawl.agent({
+    prompt: "Research AI trends",
+    maxCredits: 50
+  });
+  console.log(`Credits used: ${result.creditsUsed}`);
+} catch (error) {
+  console.log(`Job stopped: ${error.message}`);
+}
+```
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/agent \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY" \
+  -d '{
+    "prompt": "Research AI trends",
+    "maxCredits": 50
+  }'
+```
+
+</CodeGroup>
+
+**Important**: If `maxCredits` is exceeded, the job fails and no data is returned. Credits for work already performed are still charged.
+
+### Cost Optimization Strategies
+
+**1. Start with spark-1-mini:**
+```python
+# Default model is 60% cheaper
+result = app.agent(prompt="...", model="spark-1-mini")
+```
+
+**2. Write specific prompts:**
+```python
+# Bad: Vague prompt requires more exploration
+result = app.agent(prompt="Tell me about Stripe")
+
+# Good: Specific prompt is more efficient
+result = app.agent(prompt="Extract Stripe's pricing tiers, including price per transaction and monthly fees")
+```
+
+**3. Provide URLs when known:**
+```python
+# More efficient with URL hints
+result = app.agent(
+    prompt="Extract pricing information",
+    urls=["https://stripe.com/pricing"]
+)
+```
+
+**4. Use your 5 free daily runs for testing:**
+```python
+# Test prompts with free runs before production
+result = app.agent(prompt="test prompt here")
+```
+
+**5. Set appropriate maxCredits:**
+```python
+# Prevent runaway costs
+result = app.agent(
+    prompt="Complex research task",
+    maxCredits=100
+)
+```
+
+## Advanced Schema Patterns
+
+### Nested Objects
+
+```python
+from pydantic import BaseModel, Field
+from typing import List, Optional
+
+class Address(BaseModel):
+    street: str
+    city: str
+    state: str
+    country: str
+    postal_code: str
+
+class SocialLinks(BaseModel):
+    linkedin: Optional[str] = None
+    twitter: Optional[str] = None
+    github: Optional[str] = None
+
+class Person(BaseModel):
+    name: str
+    title: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    social: Optional[SocialLinks] = None
+
+class Company(BaseModel):
+    name: str
+    description: str
+    website: str
+    founded: Optional[int] = None
+    headquarters: Optional[Address] = None
+    leadership: List[Person] = Field(default_factory=list)
+    employee_count: Optional[str] = None
+    funding: Optional[str] = None
+
+result = app.agent(
+    prompt="Extract complete company information for Anthropic",
+    schema=Company,
+    model="spark-1-pro"
+)
+```
+
+### Arrays with Constraints
+
+```python
+from pydantic import BaseModel, Field
+from typing import List
+
+class ProductReview(BaseModel):
+    product_name: str
+    rating: float = Field(ge=1, le=5, description="Rating from 1-5")
+    pros: List[str] = Field(min_length=1, max_length=5)
+    cons: List[str] = Field(min_length=1, max_length=5)
+    summary: str = Field(max_length=500)
+    reviewer: Optional[str] = None
+    date: Optional[str] = None
+
+class ProductAnalysis(BaseModel):
+    products: List[ProductReview] = Field(
+        description="List of product reviews",
+        min_length=3,
+        max_length=10
+    )
+    overall_recommendation: str
+
+result = app.agent(
+    prompt="Analyze reviews for the top wireless earbuds under $100",
+    schema=ProductAnalysis
+)
+```
+
+### Enum Fields
+
+```python
+from pydantic import BaseModel, Field
+from typing import List, Literal
+from enum import Enum
+
+class SentimentType(str, Enum):
+    positive = "positive"
+    neutral = "neutral"
+    negative = "negative"
+
+class NewsArticle(BaseModel):
+    title: str
+    source: str
+    url: str
+    published_date: str
+    sentiment: Literal["positive", "neutral", "negative"]
+    key_topics: List[str]
+    summary: str
+
+class NewsAnalysis(BaseModel):
+    query: str
+    articles: List[NewsArticle]
+    overall_sentiment: Literal["positive", "neutral", "negative"]
+    trending_topics: List[str]
+
+result = app.agent(
+    prompt="Analyze recent news about Tesla stock",
+    schema=NewsAnalysis,
+    model="spark-1-mini"
+)
+```
+
+## Complex Use Cases
+
+### Competitive Analysis
+
+```python
+from firecrawl import FirecrawlApp
+from pydantic import BaseModel, Field
+from typing import List, Optional
+
+app = FirecrawlApp(api_key="fc-YOUR_API_KEY")
+
+class PricingPlan(BaseModel):
+    name: str
+    price: str
+    billing: str
+    key_features: List[str]
+
+class Competitor(BaseModel):
+    name: str
+    website: str
+    tagline: str
+    target_market: str
+    pricing: List[PricingPlan]
+    strengths: List[str]
+    weaknesses: List[str]
+    unique_features: List[str]
+
+class CompetitiveAnalysis(BaseModel):
+    market: str
+    competitors: List[Competitor]
+    market_trends: List[str]
+    opportunities: List[str]
+    threats: List[str]
+
+result = app.agent(
+    prompt="""
+    Perform a competitive analysis of the project management software market.
+    Include Asana, Monday.com, ClickUp, and Notion.
+    Focus on pricing, key features, target markets, and market positioning.
+    """,
+    schema=CompetitiveAnalysis,
+    model="spark-1-pro",
+    maxCredits=200
+)
+
+# Process results
+for competitor in result.data['competitors']:
+    print(f"\n{competitor['name']}")
+    print(f"  Target: {competitor['target_market']}")
+    print(f"  Strengths: {', '.join(competitor['strengths'][:3])}")
+```
+
+### Lead Generation
+
+```python
+from firecrawl import FirecrawlApp
+from pydantic import BaseModel, Field
+from typing import List, Optional
+
+app = FirecrawlApp(api_key="fc-YOUR_API_KEY")
+
+class Contact(BaseModel):
+    name: str
+    title: str
+    email: Optional[str] = None
+    linkedin: Optional[str] = None
+
+class Company(BaseModel):
+    name: str
+    website: str
+    industry: str
+    company_size: str
+    location: str
+    description: str
+    technologies_used: List[str] = Field(default_factory=list)
+    key_contacts: List[Contact] = Field(default_factory=list)
+
+class LeadList(BaseModel):
+    search_criteria: str
+    leads: List[Company]
+    total_found: int
+
+result = app.agent(
+    prompt="""
+    Find 10 B2B SaaS companies in the San Francisco Bay Area
+    that are Series A or B funded, have 50-200 employees,
+    and are in the developer tools or infrastructure space.
+    Include their key contacts if available.
+    """,
+    schema=LeadList,
+    model="spark-1-pro"
+)
+
+for lead in result.data['leads']:
+    print(f"{lead['name']} - {lead['company_size']} employees")
+    for contact in lead.get('key_contacts', []):
+        print(f"  Contact: {contact['name']} ({contact['title']})")
+```
+
+### Research Aggregation
+
+```python
+from firecrawl import FirecrawlApp
+from pydantic import BaseModel, Field
+from typing import List, Optional
+
+app = FirecrawlApp(api_key="fc-YOUR_API_KEY")
+
+class Source(BaseModel):
+    title: str
+    url: str
+    publication_date: Optional[str] = None
+    author: Optional[str] = None
+    credibility: str = Field(description="high, medium, or low")
+
+class Finding(BaseModel):
+    claim: str
+    evidence: str
+    sources: List[str] = Field(description="URLs supporting this finding")
+    confidence: str = Field(description="high, medium, or low")
+
+class ResearchReport(BaseModel):
+    topic: str
+    executive_summary: str
+    key_findings: List[Finding]
+    sources: List[Source]
+    limitations: List[str]
+    recommendations: List[str]
+
+result = app.agent(
+    prompt="""
+    Research the current state of quantum computing for drug discovery.
+    Include recent breakthroughs, major players, challenges, and timeline predictions.
+    Focus on peer-reviewed sources and industry reports.
+    """,
+    schema=ResearchReport,
+    model="spark-1-pro",
+    maxCredits=150
+)
+
+print(f"Topic: {result.data['topic']}")
+print(f"\nSummary:\n{result.data['executive_summary']}")
+print(f"\nKey Findings:")
+for finding in result.data['key_findings']:
+    print(f"  - {finding['claim']} (confidence: {finding['confidence']})")
+```
+
+## Error Handling
+
+```python
+from firecrawl import FirecrawlApp
+from firecrawl.exceptions import FirecrawlError
+
+app = FirecrawlApp(api_key="fc-YOUR_API_KEY")
+
+try:
+    result = app.agent(
+        prompt="Extract data",
+        maxCredits=50
+    )
+    print(f"Success! Credits used: {result.credits_used}")
+
+except FirecrawlError as e:
+    if e.status_code == 402:
+        print("Insufficient credits or maxCredits exceeded")
+    elif e.status_code == 408:
+        print("Request timeout - task took too long")
+    elif e.status_code == 429:
+        print("Rate limited - too many requests")
+    elif e.status_code == 500:
+        print("Server error - retry later")
+    else:
+        print(f"Error {e.status_code}: {e.message}")
+
+except Exception as e:
+    print(f"Unexpected error: {e}")
+```
+
+## Best Practices
+
+### Prompt Engineering
+
+**1. Be specific about what you want:**
+```python
+# Bad
+prompt = "Get company info"
+
+# Good
+prompt = "Extract the company name, founding year, headquarters location, number of employees, and main products for OpenAI"
+```
+
+**2. Specify the format implicitly:**
+```python
+# Good - implies structured output
+prompt = "List the top 5 features of Notion, including feature name, description, and which pricing tier includes it"
+```
+
+**3. Add context when helpful:**
+```python
+# Good - provides context
+prompt = "Find the API pricing for Stripe. I'm specifically interested in payment processing fees for US businesses, including per-transaction fees and monthly costs"
+```
+
+### Schema Design
+
+**1. Use descriptive field names:**
+```python
+class Good(BaseModel):
+    company_name: str
+    annual_revenue_usd: str
+    employee_count: int
+
+class Bad(BaseModel):
+    name: str
+    rev: str
+    emp: int
+```
+
+**2. Add Field descriptions:**
+```python
+class Product(BaseModel):
+    name: str = Field(description="Official product name")
+    price: str = Field(description="Price in USD, including currency symbol")
+    availability: str = Field(description="in_stock, out_of_stock, or preorder")
+```
+
+**3. Make fields optional when appropriate:**
+```python
+class Company(BaseModel):
+    name: str  # Required - always available
+    founded: Optional[int] = None  # Optional - might not be found
+    funding: Optional[str] = None  # Optional - private companies won't have this
+```
+
+### Performance
+
+**1. Use parallel extraction for multiple independent queries:**
+```python
+import asyncio
+
+async def extract_multiple():
+    tasks = [
+        app.agent(prompt="Get pricing for Slack"),
+        app.agent(prompt="Get pricing for Teams"),
+        app.agent(prompt="Get pricing for Discord")
+    ]
+    results = await asyncio.gather(*tasks)
+    return results
+```
+
+**2. Cache results when appropriate:**
+```python
+import json
+from datetime import datetime
+
+def get_or_extract(prompt, cache_file, max_age_hours=24):
+    try:
+        with open(cache_file) as f:
+            cached = json.load(f)
+            if (datetime.now() - datetime.fromisoformat(cached['timestamp'])).hours < max_age_hours:
+                return cached['data']
+    except FileNotFoundError:
+        pass
+
+    result = app.agent(prompt=prompt)
+
+    with open(cache_file, 'w') as f:
+        json.dump({
+            'timestamp': datetime.now().isoformat(),
+            'data': result.data
+        }, f)
+
+    return result.data
+```
+
+## Parameters Reference
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `prompt` | string | **Yes** | Natural language description (max 10,000 chars) |
+| `model` | string | No | `spark-1-mini` (default) or `spark-1-pro` |
+| `urls` | array | No | URLs to focus extraction on |
+| `schema` | object | No | JSON schema for structured output |
+| `maxCredits` | number | No | Maximum credits to spend |
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/v2/agent` | Start an agent job |
+| `GET` | `/v2/agent/{jobId}` | Check job status |
+| `DELETE` | `/v2/agent/{jobId}` | Cancel a job |
+
+## Pricing Summary
+
+- **5 free daily runs** for all users
+- **spark-1-mini**: 60% cheaper, standard accuracy
+- **spark-1-pro**: Standard pricing, higher accuracy
+- **Dynamic pricing** based on task complexity
+- **maxCredits** parameter for cost control
+
+For complete API documentation, see the [Agent API Reference](/api-reference/endpoint/agent).
+
+Have questions? Email [help@firecrawl.com](mailto:help@firecrawl.com).
