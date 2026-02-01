@@ -299,54 +299,197 @@ curl -X POST https://api.firecrawl.dev/v2/scrape \
   }'
 ```
 
-## Extract endpoint
+## Agent endpoint
 
-Use the dedicated extract job API when you want asynchronous extraction with status polling.
+Use the `/agent` endpoint when you need autonomous data gathering. Just describe what you want, and Firecrawl's agent searches, navigates, and extracts the data—no URLs required.
 
 <CodeGroup>
+
+```python Python
+from firecrawl import FirecrawlApp
+from pydantic import BaseModel, Field
+from typing import List, Optional
+
+app = FirecrawlApp(api_key="fc-YOUR-API-KEY")
+
+class Feature(BaseModel):
+    name: str = Field(description="Feature name")
+    description: Optional[str] = Field(None, description="Feature description")
+
+class FeaturesSchema(BaseModel):
+    features: List[Feature] = Field(description="List of features")
+
+result = app.agent(
+    prompt="Find the main features of Firecrawl",
+    schema=FeaturesSchema,
+    model="spark-1-mini"
+)
+
+print(result.data)
+```
+
+```js Node
+import Firecrawl from '@mendable/firecrawl-js';
+import { z } from 'zod';
+
+const firecrawl = new Firecrawl({ apiKey: 'fc-YOUR-API-KEY' });
+
+const result = await firecrawl.agent({
+  prompt: "Find the main features of Firecrawl",
+  schema: z.object({
+    features: z.array(z.object({
+      name: z.string().describe("Feature name"),
+      description: z.string().describe("Feature description").optional()
+    })).describe("List of features")
+  }),
+  model: "spark-1-mini"
+});
+
+console.log(result.data);
+```
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/agent \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer fc-YOUR-API-KEY' \
+  -d '{
+    "prompt": "Find the main features of Firecrawl",
+    "model": "spark-1-mini",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "features": {
+          "type": "array",
+          "description": "List of features",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string", "description": "Feature name" },
+              "description": { "type": "string", "description": "Feature description" }
+            },
+            "required": ["name"]
+          }
+        }
+      },
+      "required": ["features"]
+    }
+  }'
+```
+</CodeGroup>
+
+<Accordion title="Example Response">
+```json
+{
+  "success": true,
+  "status": "completed",
+  "data": {
+    "features": [
+      {
+        "name": "Scrape",
+        "description": "Convert any URL into clean, LLM-ready markdown"
+      },
+      {
+        "name": "Crawl",
+        "description": "Recursively scrape all pages of a website"
+      },
+      {
+        "name": "Map",
+        "description": "Discover all URLs on a website"
+      },
+      {
+        "name": "Agent",
+        "description": "Autonomous data gathering from the web"
+      }
+    ]
+  },
+  "expiresAt": "2025-01-15T00:00:00.000Z",
+  "creditsUsed": 12
+}
+```
+</Accordion>
+
+For async usage, use `start_agent` (Python) or `startAgent` (Node) to get a Job ID, then poll with `get_agent_status` / `getAgentStatus`:
+
+<CodeGroup>
+
+```python Python
+from firecrawl import FirecrawlApp
+
+app = FirecrawlApp(api_key="fc-YOUR-API-KEY")
+
+# Start agent job
+job = app.start_agent(
+    prompt="Find the founders of Firecrawl and their backgrounds"
+)
+
+# Poll status
+status = app.get_agent_status(job.id)
+print(status.status, status.data)
+```
 
 ```js Node
 import Firecrawl from '@mendable/firecrawl-js';
 
 const firecrawl = new Firecrawl({ apiKey: 'fc-YOUR-API-KEY' });
 
-// Start extract job
-const started = await firecrawl.startExtract({
-  urls: ['https://docs.firecrawl.dev'],
-  prompt: 'Extract title',
-  schema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] }
+// Start agent job
+const job = await firecrawl.startAgent({
+  prompt: "Find the founders of Firecrawl and their backgrounds"
 });
 
 // Poll status
-const status = await firecrawl.getExtractStatus(started.id);
+const status = await firecrawl.getAgentStatus(job.id);
 console.log(status.status, status.data);
 ```
 
-```python Python
-from firecrawl import Firecrawl
-
-firecrawl = Firecrawl(api_key='fc-YOUR-API-KEY')
-
-started = firecrawl.start_extract(
-    urls=["https://docs.firecrawl.dev"],
-    prompt="Extract title",
-    schema={"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]}
-)
-status = firecrawl.get_extract_status(started.id)
-print(status.get("status"), status.get("data"))
-```
-
 ```bash cURL
-curl -X POST https://api.firecrawl.dev/v2/extract \
+# Start agent job
+curl -X POST https://api.firecrawl.dev/v2/agent \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer fc-YOUR-API-KEY' \
   -d '{
-    "urls": ["https://docs.firecrawl.dev"],
-    "prompt": "Extract title",
-    "schema": {"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]}
+    "prompt": "Find the founders of Firecrawl and their backgrounds"
   }'
+
+# Returns: { "success": true, "id": "job-id-here" }
+
+# Check status
+curl -X GET https://api.firecrawl.dev/v2/agent/job-id-here \
+  -H 'Authorization: Bearer fc-YOUR-API-KEY'
 ```
 </CodeGroup>
+
+<Accordion title="Example Status Response">
+```json
+{
+  "success": true,
+  "status": "completed",
+  "data": {
+    "founders": [
+      {
+        "name": "Eric Ciarla",
+        "role": "Co-founder",
+        "background": "Previously at Mendable"
+      },
+      {
+        "name": "Nicolas Camara",
+        "role": "Co-founder",
+        "background": "Previously at Mendable"
+      },
+      {
+        "name": "Caleb Peffer",
+        "role": "Co-founder",
+        "background": "Previously at Mendable"
+      }
+    ]
+  },
+  "expiresAt": "2025-01-15T00:00:00.000Z",
+  "creditsUsed": 15
+}
+```
+</Accordion>
+
+See the full [Agent documentation](/features/agent) for more details on parameters, model selection, and pricing.
 
 
 ## Crawling multiple pages
