@@ -15,7 +15,7 @@
       ctaWidget.id = 'firecrawl-cta-widget';
       ctaWidget.innerHTML = `
         <div class="firecrawl-cta-box">
-          <img src="/logo/firecrawl-icon.png" alt="Firecrawl" class="firecrawl-cta-logo" />
+          <img src="/logo/logo.png" alt="Firecrawl" class="firecrawl-cta-logo firecrawl-cta-logo-light" /><img src="/logo/logo-dark.png" alt="Firecrawl" class="firecrawl-cta-logo firecrawl-cta-logo-dark" />
           <h3 class="firecrawl-cta-title">Ready to build?</h3>
           <p class="firecrawl-cta-description">
             Start getting web data for free and scale seamlessly as your project expands. <strong>No credit card needed.</strong>
