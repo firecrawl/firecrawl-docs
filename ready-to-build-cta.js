@@ -16,7 +16,7 @@
       ctaWidget.innerHTML = `
         <div class="firecrawl-cta-box">
           <div class="firecrawl-cta-badge">
-            <img src="/logo/logo.png" alt="Firecrawl" class="firecrawl-cta-logo" />
+            <img src="/logo/firecrawl-icon.png" alt="Firecrawl" class="firecrawl-cta-logo" />
             Get started
           </div>
           <h3 class="firecrawl-cta-title">Ready to build?</h3>
