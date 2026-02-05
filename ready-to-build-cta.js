@@ -15,14 +15,14 @@
       ctaWidget.id = 'firecrawl-cta-widget';
       ctaWidget.innerHTML = `
         <div class="firecrawl-cta-box">
-          <img src="/logo/logo.png" alt="Firecrawl" class="firecrawl-cta-logo firecrawl-cta-logo-light" /><img src="/logo/logo-dark.png" alt="Firecrawl" class="firecrawl-cta-logo firecrawl-cta-logo-dark" />
+          <img src="/logo/light.svg" alt="Firecrawl" class="firecrawl-cta-logo firecrawl-cta-logo-light" /><img src="/logo/dark.svg" alt="Firecrawl" class="firecrawl-cta-logo firecrawl-cta-logo-dark" />
           <h3 class="firecrawl-cta-title">Ready to build?</h3>
           <p class="firecrawl-cta-description">
             Start getting web data for free and scale seamlessly as your project expands. <strong>No credit card needed.</strong>
           </p>
           <div class="firecrawl-cta-buttons">
-            <a href="https://www.firecrawl.dev/signin?utm_source=firecrawl-docs&utm_medium=docs_card&utm_content=start" class="firecrawl-cta-btn-primary">Start for free</a>
-            <a href="https://www.firecrawl.dev/pricing?utm_source=firecrawl-docs&utm_medium=docs_card&utm_content=plans" class="firecrawl-cta-btn-secondary">See our plans</a>
+            <a href="https://www.firecrawl.dev/signin?utm_source=firecrawl_docs&utm_medium=docs_card&utm_content=start_for_free" class="firecrawl-cta-btn-primary">Start for free</a>
+            <a href="https://www.firecrawl.dev/pricing?utm_source=firecrawl_docs&utm_medium=docs_card&utm_content=see_our_plans" class="firecrawl-cta-btn-secondary">See our plans</a>
           </div>
         </div>
       `;
