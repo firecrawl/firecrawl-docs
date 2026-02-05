@@ -15,17 +15,14 @@
       ctaWidget.id = 'firecrawl-cta-widget';
       ctaWidget.innerHTML = `
         <div class="firecrawl-cta-box">
-          <div class="firecrawl-cta-badge">
-            <img src="/logo/firecrawl-icon.png" alt="Firecrawl" class="firecrawl-cta-logo" />
-            Get started
-          </div>
+          <img src="/logo/firecrawl-icon.png" alt="Firecrawl" class="firecrawl-cta-logo" />
           <h3 class="firecrawl-cta-title">Ready to build?</h3>
           <p class="firecrawl-cta-description">
-            Start getting Web Data for free and scale seamlessly as your project expands. <strong>No credit card needed.</strong>
+            Start getting web data for free and scale seamlessly as your project expands. <strong>No credit card needed.</strong>
           </p>
           <div class="firecrawl-cta-buttons">
-            <a href="https://www.firecrawl.dev/signin" class="firecrawl-cta-btn-primary">Start for free</a>
-            <a href="https://www.firecrawl.dev/pricing" class="firecrawl-cta-btn-secondary">See our plans</a>
+            <a href="https://www.firecrawl.dev/signin?utm_source=firecrawl-docs&utm_medium=docs_card&utm_content=start" class="firecrawl-cta-btn-primary">Start for free</a>
+            <a href="https://www.firecrawl.dev/pricing?utm_source=firecrawl-docs&utm_medium=docs_card&utm_content=plans" class="firecrawl-cta-btn-secondary">See our plans</a>
           </div>
         </div>
       `;
