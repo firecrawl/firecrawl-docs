@@ -1,0 +1,178 @@
+---
+title: "Scrape Performance"
+description: "Understanding scrape times, what affects performance, and how to optimize your requests."
+og:title: "Scrape Performance | Firecrawl"
+og:description: "Learn what affects scrape times and how to optimize your Firecrawl requests for better performance."
+---
+
+## Expected Scrape Times
+
+Scrape times vary based on page complexity and the options you use. Here's what to expect:
+
+| Page Type | Typical Time | Examples |
+|-----------|--------------|----------|
+| Simple static pages | 1-5 seconds | Documentation, blogs, landing pages |
+| JavaScript-rendered pages | 5-15 seconds | SPAs, dynamic dashboards, product pages |
+| Complex interactive pages | 15-40 seconds | E-commerce sites, pages requiring actions |
+| Pages with PDF generation | 20-60 seconds | Any page with `actions: [{type: "pdf"}]` |
+
+<Info>These are typical ranges. Actual times depend on page size, server response time, and network conditions.</Info>
+
+## What Affects Scrape Performance
+
+### 1. Page Complexity
+
+JavaScript-heavy pages take longer because Firecrawl must wait for the page to fully render. Sites built with React, Vue, Angular, or other frameworks often require more time than simple HTML pages.
+
+### 2. Actions
+
+Using [actions](/advanced-scraping-guide#actions-actions) adds processing time:
+
+| Action | Performance Impact |
+|--------|-------------------|
+| `wait` | Adds specified milliseconds directly |
+| `click`, `scroll`, `write` | Minor impact (milliseconds) |
+| `pdf` | **Significant impact** - adds 10-30+ seconds |
+| `screenshot` | Moderate impact (1-5 seconds) |
+
+<Warning>The `pdf` action requires full page rendering and PDF generation. Only use it when you specifically need a PDF output. For most use cases, `markdown` or `html` formats are faster and sufficient.</Warning>
+
+### 3. Automatic Quality Retries
+
+Firecrawl automatically ensures you get complete, usable content. If the initial scrape returns insufficient content (e.g., a page that hasn't fully loaded), the system automatically retries with a backup rendering engine.
+
+**How it works:**
+
+1. Firecrawl attempts to scrape with the primary engine
+2. If the content appears incomplete (too short, missing expected elements), it automatically retries
+3. The retry uses a different rendering approach optimized for complex pages
+4. You receive the successful result
+
+This retry mechanism is **by design** - it ensures you get quality results rather than empty or partial content. However, it does add time when triggered.
+
+**Signs a retry occurred:**
+- Scrape time of 25-40+ seconds on a moderately complex page
+- The page is JavaScript-heavy or has dynamic content
+
+### 4. Proxy Type
+
+Different proxy types have different performance characteristics:
+
+| Proxy | Speed | Use Case |
+|-------|-------|----------|
+| `basic` | Fastest | Most websites |
+| `stealth` | Slower | Sites with bot detection |
+| `auto` | Varies | Automatically retries with stealth if basic fails |
+
+## Optimizing Scrape Performance
+
+### Use Caching with `maxAge`
+
+If you don't need real-time data, leverage Firecrawl's cache for **up to 500% faster** responses:
+
+```python
+result = firecrawl.scrape("https://example.com", {
+    "formats": ["markdown"],
+    "maxAge": 86400000  # Accept cached data up to 1 day old
+})
+```
+
+[Learn more about caching →](/features/fast-scraping)
+
+### Add `waitFor` for JavaScript-Heavy Pages
+
+If you're experiencing retries on dynamic pages, adding `waitFor` can help the page fully render on the first attempt:
+
+```python
+result = firecrawl.scrape("https://spa-website.com", {
+    "formats": ["markdown"],
+    "waitFor": 3000  # Wait 3 seconds for JS to render
+})
+```
+
+<Tip>Start with 2000-5000ms for most SPAs. Increase if you're still seeing incomplete content.</Tip>
+
+### Remove Unnecessary Actions
+
+Only include actions you actually need:
+
+```python
+# Slower - includes PDF generation
+result = firecrawl.scrape("https://example.com", {
+    "formats": ["markdown"],
+    "actions": [{"type": "pdf"}]  # Adds 10-30+ seconds
+})
+
+# Faster - just get the content
+result = firecrawl.scrape("https://example.com", {
+    "formats": ["markdown"]
+})
+```
+
+### Choose the Right Formats
+
+Only request the formats you need:
+
+```python
+# Slower - requesting multiple formats
+result = firecrawl.scrape("https://example.com", {
+    "formats": ["markdown", "html", "rawHtml", "links", {"type": "screenshot", "fullPage": True}]
+})
+
+# Faster - just what you need
+result = firecrawl.scrape("https://example.com", {
+    "formats": ["markdown"]
+})
+```
+
+## Debugging Slow Scrapes
+
+Every scrape response includes a `scrapeId` in the metadata:
+
+```json
+{
+  "metadata": {
+    "scrapeId": "019bc08e-0ebd-726b-83e6-8b4cfc772e51",
+    "statusCode": 200,
+    ...
+  }
+}
+```
+
+If you're experiencing unexpected performance issues:
+
+1. **Note the `scrapeId`** from your response
+2. **Check your request options** - are you using PDF actions or other heavy options?
+3. **Test with minimal options** - try a basic scrape without actions to establish a baseline
+4. **Contact support** - share the `scrapeId` and we can investigate the detailed timing breakdown
+
+## Common Questions
+
+### Why did my scrape take 30+ seconds?
+
+Most likely causes:
+1. **JavaScript-heavy page** - The page required additional rendering time or triggered an automatic retry
+2. **PDF generation** - The `pdf` action adds significant processing time
+3. **Large page size** - Very large pages (500KB+ HTML) take longer to process
+
+### Why do times vary for the same URL?
+
+Several factors can cause variation:
+- **Cache state** - Cached responses are instant; fresh scrapes take longer
+- **Target server response time** - The website's own performance affects scrape time
+- **Page content changes** - Dynamic pages may trigger retries on some requests
+
+### How can I tell if a retry happened?
+
+Currently, retry information isn't exposed in the API response. If you're seeing times of 25-40+ seconds on pages that seem simple, a quality retry likely occurred. Adding `waitFor` can help avoid retries.
+
+## Summary
+
+| Goal | Solution |
+|------|----------|
+| Faster repeated scrapes | Use `maxAge` for caching |
+| Avoid retries on JS pages | Add `waitFor: 3000-5000` |
+| Reduce processing time | Remove `pdf` action if not needed |
+| Debug slow scrapes | Share `scrapeId` with support |
+
+For most use cases, Firecrawl automatically handles complexity to ensure you get quality results. If you're optimizing for speed, focus on caching and removing unnecessary options.
