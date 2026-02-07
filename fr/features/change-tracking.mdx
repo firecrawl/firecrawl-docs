@@ -1,200 +1,663 @@
 ---
 title: 'Suivi des modifications'
-description: 'Firecrawl peut suivre les changements entre la page actuelle et une version précédente et indiquer si elle a été mise à jour ou non'
-og:title: "Suivi des modifications | Firecrawl"
+description: 'Détecter et surveiller les changements dans le contenu web entre les extractions'
+og:title: "Change Tracking | Firecrawl"
 sidebarTitle: "Suivi des modifications"
-og:description: "Firecrawl peut suivre les changements entre la page actuelle et une version précédente et indiquer si elle a été mise à jour ou non"
+og:description: "Détecter et surveiller les changements dans le contenu web entre les extractions"
 ---
 
-![Suivi des modifications](/images/launch-week/lw3d12.webp)
+![Change Tracking](/images/launch-week/lw3d12.webp)
 
-Le suivi des modifications vous permet de surveiller et de détecter les changements dans le contenu web au fil du temps. Cette fonctionnalité est disponible dans les SDK JavaScript et Python.
+Le suivi des modifications compare le contenu actuel d’une page à celui de la dernière fois où vous l’avez extraite. Ajoutez `changeTracking` à votre tableau `formats` pour détecter si une page est nouvelle, inchangée ou modifiée et, si vous le souhaitez, obtenir un diff structuré de ce qui a changé.
 
-<div id="overview">
-  ## Vue d’ensemble
+* Fonctionne avec `/scrape`, `/crawl` et `/batch/scrape`
+* Deux modes de diff : `git-diff` pour les changements au niveau des lignes, `json` pour la comparaison au niveau des champs
+* Limité à votre équipe, et éventuellement limité à un tag que vous fournissez
+
+<div id="how-it-works">
+  ## Comment ça fonctionne
 </div>
 
-Le suivi des modifications vous permet de :
+Chaque scrape avec `changeTracking` activé stocke un instantané et le compare à l’instantané précédent pour cette URL.
 
-- Détecter si une page web a changé depuis le dernier scrape
-- Voir les changements précis entre les scrapes
-- Obtenir des données structurées sur ce qui a changé
-- Contrôler la visibilité des changements
+| Scrape | Résultat |
+|--------|----------|
+| Première fois | `changeStatus: "new"` (aucune version précédente n&#39;existe) |
+| Contenu inchangé | `changeStatus: "same"` |
+| Contenu modifié | `changeStatus: "changed"` (données de diff disponibles) |
+| Page supprimée | `changeStatus: "removed"` |
 
-En utilisant le format `suiviDesModifications`, vous pouvez surveiller les changements sur un site web et recevoir des informations sur :
+La réponse inclut ces champs dans l&#39;objet `changeTracking` :
 
-- `previousScrapeAt` : l’horodatage du scrape précédent auquel la page actuelle est comparée (`null` s’il n’y a pas eu de scrape précédent)
-- `changeStatus` : le résultat de la comparaison entre les deux versions de la page
-  - `new` : cette page n’existait pas ou n’avait pas été découverte auparavant (a généralement un `previousScrapeAt` à `null`)
-  - `same` : le contenu de cette page n’a pas changé depuis le dernier scrape
-  - `changed` : le contenu de cette page a changé depuis le dernier scrape
-  - `removed` : cette page a été supprimée depuis le dernier scrape
-- `visibility` : la visibilité de la page/URL actuelle
-  - `visible` : cette page est visible, ce qui signifie que son URL a été découverte par une voie organique (via des liens sur d’autres pages visibles ou le sitemap)
-  - `hidden` : cette page n’est pas visible, ce qui signifie qu’elle est toujours accessible sur le web, mais n’est plus découvrable via le sitemap ou l’exploration du site. Nous ne pouvons identifier des liens invisibles que s’ils avaient été visibles, et capturés, lors d’un crawl ou d’un scrape précédent
-
-<div id="sdks">
-  ## SDKs
-</div>
+| Champ | Type | Description |
+|-------|------|-------------|
+| `previousScrapeAt` | `string \| null` | Horodatage du scrape précédent (`null` lors du premier scrape) |
+| `changeStatus` | `string` | `"new"`, `"same"`, `"changed"` ou `"removed"` |
+| `visibility` | `string` | `"visible"` (accessible via des liens / le sitemap) ou `"hidden"` (l&#39;URL fonctionne mais n&#39;est plus référencée) |
+| `diff` | `object \| undefined` | Diff ligne par ligne (présent uniquement en mode `git-diff` lorsque le statut est `"changed"`) |
+| `json` | `object \| undefined` | Comparaison au niveau des champs (présente uniquement en mode `json` lorsque le statut est `"changed"`) |
 
 <div id="basic-usage">
-  ### Utilisation de base
+  ## Utilisation de base
 </div>
 
-Pour utiliser le suivi des modifications, incluez « suiviDesModifications » dans les formats lors du scraping d’une URL :
+Incluez à la fois `markdown` et `changeTracking` dans le tableau `formats`. Le format `markdown` est obligatoire, car la fonctionnalité de suivi des modifications compare les pages à partir de leur contenu Markdown.
 
 <CodeGroup>
+  ```python Python
+  from firecrawl import Firecrawl
+
+  firecrawl = Firecrawl(api_key="fc-YOUR-API-KEY")
+
+  result = firecrawl.scrape(
+      "https://example.com/pricing",
+      formats=["markdown", "changeTracking"]
+  )
+
+  print(result.changeTracking)
+  ```
+
   ```js Node
-  const firecrawl = new Firecrawl({ apiKey: 'your-api-key' });
-  const result = await firecrawl.scrape('https://example.com', {
+  import Firecrawl from '@mendable/firecrawl-js';
+
+  const firecrawl = new Firecrawl({ apiKey: "fc-YOUR-API-KEY" });
+
+  const result = await firecrawl.scrape('https://example.com/pricing', {
     formats: ['markdown', 'changeTracking']
   });
 
-  // Accéder aux données de suivi des modifications
-  console.log(result.changeTracking)
+  console.log(result.changeTracking);
   ```
 
-  ```python Python
-  from firecrawl import Firecrawl
-  from pydantic import BaseModel
-
-  firecrawl = Firecrawl(api_key='your-api-key')
-  result = firecrawl.scrape('https://example.com',
-      formats=['markdown', 'change_tracking']
-  )
-
-  # Accéder aux données de suivi des modifications
-  print("Change Tracking:", result.change_tracking)
+  ```bash cURL
+  curl -s -X POST "https://api.firecrawl.dev/v2/scrape" \
+    -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "url": "https://example.com/pricing",
+      "formats": ["markdown", "changeTracking"]
+    }'
   ```
 </CodeGroup>
 
-Exemple de réponse :
+<div id="response">
+  ### Réponse
+</div>
+
+Lors du premier scrape, `changeStatus` est `"new"` et `previousScrapeAt` est `null` :
 
 ```json
 {
-  "url": "https://firecrawl.dev",
-  "markdown": "# Agents IA pour offrir d’excellentes expériences client\n\nDes chatbots qui enchantent vos utilisateurs...",
-  "changeTracking": {
-    "previousScrapeAt": "2025-04-10T12:00:00Z",
-    "changeStatus": "changé",
-    "visibility": "visible"
+  "success": true,
+  "data": {
+    "markdown": "# Pricing\n\nStarter: $9/mo\nPro: $29/mo...",
+    "changeTracking": {
+      "previousScrapeAt": null,
+      "changeStatus": "new",
+      "visibility": "visible"
+    }
   }
 }
 ```
 
-<div id="advanced-options">
-  ### Options avancées
+Lors des extractions ultérieures, `changeStatus` indique si le contenu a été modifié :
+
+```json
+{
+  "success": true,
+  "data": {
+    "markdown": "# Pricing\n\nStarter: $12/mo\nPro: $39/mo...",
+    "changeTracking": {
+      "previousScrapeAt": "2025-06-01T10:00:00.000+00:00",
+      "changeStatus": "changed",
+      "visibility": "visible"
+    }
+  }
+}
+```
+
+<div id="git-diff-mode">
+  ## Mode git-diff
 </div>
 
-Vous pouvez configurer le suivi des modifications en passant un objet dans le tableau `formats` :
+Le mode `git-diff` retourne les modifications ligne par ligne dans un format similaire à celui de `git diff`. Indiquez un objet dans le tableau `formats` avec `modes: ["git-diff"]` :
 
 <CodeGroup>
+  ```python Python
+  result = firecrawl.scrape(
+      "https://example.com/pricing",
+      formats=[
+          "markdown",
+          {
+              "type": "changeTracking",
+              "modes": ["git-diff"]
+          }
+      ]
+  )
 
-```js Node
-const result = await firecrawl.scrape('https://example.com', {
-  formats: [
-    'markdown',
-    {
-      type: 'changeTracking',
-      modes: ['git-diff', 'json'], // Activer des modes spécifiques de suivi des modifications
-      schema: {
-        type: 'object',
-        properties: {
-          title: { type: 'string' },
-          content: { type: 'string' }
-        }
-      }, // Schéma pour une comparaison JSON structurée
-      prompt: 'Invite personnalisée pour l’extraction', // Invite personnalisée optionnelle
-      tag: 'production' // Tag optionnel pour des historiques de suivi des modifications séparés
-    }
-  ]
-});
+  if result.changeTracking.changeStatus == "changed":
+      print(result.changeTracking.diff.text)
+  ```
 
-// Accéder aux modifications au format git-diff
-if (result.changeTracking.diff) {
-  console.log(result.changeTracking.diff.text); // Texte de diff au format Git
-  console.log(result.changeTracking.diff.json); // Données de diff structurées
-}
-
-// Accéder aux modifications de comparaison JSON
-if (result.changeTracking.json) {
-  console.log(result.changeTracking.json.title.previous); // Titre précédent
-  console.log(result.changeTracking.json.title.current); // Titre actuel
-}
-```
-
-```python Python
-result = firecrawl.scrape('https://example.com',
-    formats=[
-        'markdown',
-        {
-            'type': 'change_tracking',
-            'modes': ['git-diff', 'json'],  # Activer des modes spécifiques de suivi des modifications
-            'schema': {
-                'type': 'object',
-                'properties': {
-                    'title': {'type': 'string'},
-                    'content': {'type': 'string'}
-                }
-            },  # Schéma pour une comparaison JSON structurée
-            'prompt': 'Invite personnalisée pour l’extraction',  # Invite personnalisée optionnelle
-            'tag': 'production'  # Tag optionnel pour des historiques de suivi des modifications séparés
-        }
+  ```js Node
+  const result = await firecrawl.scrape('https://example.com/pricing', {
+    formats: [
+      'markdown',
+      { type: 'changeTracking', modes: ['git-diff'] }
     ]
-)
+  });
 
-# Accéder aux modifications au format git-diff
-if 'diff' in result.change_tracking:
-    print(result.change_tracking.diff.text)  # Texte de diff au format Git
-    print(result.change_tracking.diff.json)  # Données de diff structurées
+  if (result.changeTracking.changeStatus === 'changed') {
+    console.log(result.changeTracking.diff.text);
+  }
+  ```
 
-# Accéder aux modifications de comparaison JSON
-if 'json' in result.change_tracking:
-    print(result.change_tracking.json.title.previous)  # Titre précédent
-    print(result.change_tracking.json.title.current)  # Titre actuel
-```
-
+  ```bash cURL
+  curl -s -X POST "https://api.firecrawl.dev/v2/scrape" \
+    -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "url": "https://example.com/pricing",
+      "formats": [
+        "markdown",
+        { "type": "changeTracking", "modes": ["git-diff"] }
+      ]
+    }'
+  ```
 </CodeGroup>
 
-<div id="git-diff-results-example">
-  ### Exemple de résultats Git‑diff :
+<div id="response">
+  ### Réponse
 </div>
 
-```
- **13 avril 2025**
- 
--**17:55:05**
-+**17:58:57**
-
-...
-```
-
-<div id="json-comparison-results-example">
-  ### Exemple de résultats de comparaison JSON :
-</div>
+L&#39;objet `diff` contient à la fois un diff en texte brut et une représentation JSON structurée :
 
 ```json
 {
-  "time": { 
-    "previous": "2025-04-13T17:54:32Z", 
-    "current": "2025-04-13T17:55:05Z" 
+  "suiviDesModifications": {
+    "previousScrapeAt": "2025-06-01T10:00:00.000+00:00",
+    "changeStatus": "changed",
+    "visibility": "visible",
+    "diff": {
+      "text": "@@ -1,3 +1,3 @@\n # Pricing\n-Starter: $9/mo\n-Pro: $29/mo\n+Starter: $12/mo\n+Pro: $39/mo",
+      "json": {
+        "files": [{
+          "chunks": [{
+            "content": "@@ -1,3 +1,3 @@",
+            "changes": [
+              { "type": "normal", "content": "# Pricing" },
+              { "type": "del", "ln": 2, "content": "Starter: $9/mo" },
+              { "type": "del", "ln": 3, "content": "Pro: $29/mo" },
+              { "type": "add", "ln": 2, "content": "Starter: $12/mo" },
+              { "type": "add", "ln": 3, "content": "Pro: $39/mo" }
+            ]
+          }]
+        }]
+      }
+    }
   }
 }
 ```
 
+L&#39;objet structuré `diff.json` contient :
+
+* `files` : tableau des fichiers modifiés (généralement un seul par page web)
+* `chunks` : sections de modifications au sein d&#39;un fichier
+* `changes` : modifications de lignes individuelles avec un `type` (`"add"`, `"del"` ou `"normal"`), un numéro de ligne (`ln`) et un `content`
+
+<div id="json-mode">
+  ## mode JSON
+</div>
+
+Le mode `json` extrait des champs spécifiques à partir de la version actuelle et de la version précédente de la page à l’aide d’un schéma que vous définissez. C’est utile pour suivre les changements dans des données structurées comme les prix, les niveaux de stock ou les métadonnées, sans analyser un diff complet.
+
+Passez `modes: ["json"]` avec un `schema` définissant les champs à extraire :
+
+<CodeGroup>
+  ```python Python
+  result = firecrawl.scrape(
+      "https://example.com/product/widget",
+      formats=[
+          "markdown",
+          {
+              "type": "changeTracking",
+              "modes": ["json"],
+              "schema": {
+                  "type": "object",
+                  "properties": {
+                      "price": { "type": "string" },
+                      "availability": { "type": "string" }
+                  }
+              }
+          }
+      ]
+  )
+
+  if result.changeTracking.changeStatus == "changed":
+      changes = result.changeTracking.json
+      print(f"Price: {changes['price']['previous']} → {changes['price']['current']}")
+  ```
+
+  ```js Node
+  const result = await firecrawl.scrape('https://example.com/product/widget', {
+    formats: [
+      'markdown',
+      {
+        type: 'changeTracking',
+        modes: ['json'],
+        schema: {
+          type: 'object',
+          properties: {
+            price: { type: 'string' },
+            availability: { type: 'string' }
+          }
+        }
+      }
+    ]
+  });
+
+  if (result.changeTracking.changeStatus === 'changed') {
+    const changes = result.changeTracking.json;
+    console.log(`Price: ${changes.price.previous} → ${changes.price.current}`);
+  }
+  ```
+
+  ```bash cURL
+  curl -s -X POST "https://api.firecrawl.dev/v2/scrape" \
+    -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "url": "https://example.com/product/widget",
+      "formats": [
+        "markdown",
+        {
+          "type": "changeTracking",
+          "modes": ["json"],
+          "schema": {
+            "type": "object",
+            "properties": {
+              "price": { "type": "string" },
+              "availability": { "type": "string" }
+            }
+          }
+        }
+      ]
+    }'
+  ```
+</CodeGroup>
+
+<div id="response">
+  ### Réponse
+</div>
+
+Chaque champ du schéma est renvoyé avec les valeurs `previous` et `current` :
+
+```json
+{
+  "changeTracking": {
+    "previousScrapeAt": "2025-06-05T08:00:00.000+00:00",
+    "changeStatus": "changed",
+    "visibility": "visible",
+    "json": {
+      "price": {
+        "previous": "$19.99",
+        "current": "$24.99"
+      },
+      "availability": {
+        "previous": "In Stock",
+        "current": "In Stock"
+      }
+    }
+  }
+}
+```
+
+Vous pouvez également transmettre un `prompt` facultatif pour guider l&#39;extraction par le LLM en complément du schéma.
+
+<Info>
+  Le mode JSON utilise l&#39;extraction par LLM et coûte **5 crédits par page**. Le suivi des modifications de base et le mode `git-diff` n&#39;entraînent aucun coût supplémentaire.
+</Info>
+
+<div id="using-tags">
+  ## Utilisation des tags
+</div>
+
+Par défaut, le suivi des modifications compare les résultats au scrape le plus récent de la même URL effectué par votre équipe. Les tags vous permettent de maintenir **des historiques de suivi distincts** pour une même URL, ce qui est utile lorsque vous surveillez la même page à des intervalles ou dans des contextes différents.
+
+<CodeGroup>
+  ```python Python
+  # Surveillance horaire (comparée au dernier scrape « hourly »)
+  result = firecrawl.scrape(
+      "https://example.com/pricing",
+      formats=[
+          "markdown",
+          { "type": "changeTracking", "tag": "hourly" }
+      ]
+  )
+
+  # Résumé quotidien (comparé au dernier scrape « daily »
+  result = firecrawl.scrape(
+      "https://example.com/pricing",
+      formats=[
+          "markdown",
+          { "type": "changeTracking", "tag": "daily" }
+      ]
+  )
+  ```
+
+  ```js Node
+  // Surveillance horaire (comparée au dernier scrape « hourly »)
+  const result = await firecrawl.scrape('https://example.com/pricing', {
+    formats: [
+      'markdown',
+      { type: 'changeTracking', tag: 'hourly' }
+    ]
+  });
+
+  // Résumé quotidien (comparé au dernier scrape « daily »)
+  const result2 = await firecrawl.scrape('https://example.com/pricing', {
+    formats: [
+      'markdown',
+      { type: 'changeTracking', tag: 'daily' }
+    ]
+  });
+  ```
+
+  ```bash cURL
+  curl -s -X POST "https://api.firecrawl.dev/v2/scrape" \
+    -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "url": "https://example.com/pricing",
+      "formats": [
+        "markdown",
+        { "type": "changeTracking", "tag": "hourly" }
+      ]
+    }'
+  ```
+</CodeGroup>
+
+<div id="crawl-with-change-tracking">
+  ## Crawl avec suivi des modifications
+</div>
+
+Ajoutez le suivi des modifications aux opérations de crawl pour surveiller l&#39;ensemble d&#39;un site et détecter les changements. Indiquez le format `changeTracking` dans `scrapeOptions` :
+
+<CodeGroup>
+  ```python Python
+  result = firecrawl.crawl(
+      "https://example.com",
+      limit=50,
+      scrape_options={
+          "formats": ["markdown", "changeTracking"]
+      }
+  )
+
+  for page in result.data:
+      status = page.changeTracking.changeStatus
+      url = page.metadata.url
+      print(f"{url}: {status}")
+  ```
+
+  ```js Node
+  const result = await firecrawl.crawl('https://example.com', {
+    limit: 50,
+    scrapeOptions: {
+      formats: ['markdown', 'changeTracking']
+    }
+  });
+
+  for (const page of result.data) {
+    console.log(`${page.metadata.url}: ${page.changeTracking.changeStatus}`);
+  }
+  ```
+
+  ```bash cURL
+  curl -s -X POST "https://api.firecrawl.dev/v2/crawl" \
+    -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "url": "https://example.com",
+      "limit": 50,
+      "scrapeOptions": {
+        "formats": ["markdown", "changeTracking"]
+      }
+    }'
+  ```
+</CodeGroup>
+
+<div id="batch-scrape-with-change-tracking">
+  ## Scrape par lot avec suivi des modifications
+</div>
+
+Utilisez le [scrape par lot](/fr/features/batch-scrape) pour surveiller un ensemble précis d’URL :
+
+<CodeGroup>
+  ```python Python
+  result = firecrawl.batch_scrape(
+      [
+          "https://example.com/pricing",
+          "https://example.com/product/widget",
+          "https://example.com/blog/latest"
+      ],
+      formats=["markdown", {"type": "changeTracking", "modes": ["git-diff"]}]
+  )
+  ```
+
+  ```js Node
+  const result = await firecrawl.batchScrape([
+    'https://example.com/pricing',
+    'https://example.com/product/widget',
+    'https://example.com/blog/latest'
+  ], {
+    options: {
+      formats: ['markdown', { type: 'changeTracking', modes: ['git-diff'] }]
+    }
+  });
+  ```
+
+  ```bash cURL
+  curl -s -X POST "https://api.firecrawl.dev/v2/batch/scrape" \
+    -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "urls": [
+        "https://example.com/pricing",
+        "https://example.com/product/widget",
+        "https://example.com/blog/latest"
+      ],
+      "formats": [
+        "markdown",
+        { "type": "changeTracking", "modes": ["git-diff"] }
+      ]
+    }'
+  ```
+</CodeGroup>
+
+<div id="scheduling-change-tracking">
+  ## Planification du suivi des modifications
+</div>
+
+Le suivi des modifications est particulièrement utile lorsque vous effectuez du scraping à intervalles réguliers. Vous pouvez l&#39;automatiser à l&#39;aide de cron, d&#39;ordonnanceurs cloud ou d&#39;outils de workflow.
+
+<div id="cron-job">
+  ### Tâche cron
+</div>
+
+Créez un script qui surveille une URL et envoie une alerte en cas de changement :
+
+```bash check-pricing.sh
+#!/bin/bash
+RESPONSE=$(curl -s -X POST "https://api.firecrawl.dev/v2/scrape" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://competitor.com/pricing",
+    "formats": [
+      "markdown",
+      {
+        "type": "changeTracking",
+        "modes": ["json"],
+        "schema": {
+          "type": "object",
+          "properties": {
+            "starter_price": { "type": "string" },
+            "pro_price": { "type": "string" }
+          }
+        }
+      }
+    ]
+  }')
+
+STATUS=$(echo "$RESPONSE" | jq -r '.data.changeTracking.changeStatus')
+
+if [ "$STATUS" = "changed" ]; then
+  echo "$RESPONSE" | jq '.data.changeTracking.json'
+  # Envoyer une alerte par e-mail, Slack, etc.
+fi
+```
+
+Programmez-le avec `crontab -e` :
+
+```bash
+0 */6 * * * /path/to/check-pricing.sh >> /var/log/price-monitor.log 2>&1
+```
+
+| Planification        | Expression    |
+| -------------------- | ------------- |
+| Toutes les heures    | `0 * * * *`   |
+| Toutes les 6 heures  | `0 */6 * * *` |
+| Tous les jours à 9 h | `0 9 * * *`   |
+| Chaque lundi à 8 h   | `0 8 * * 1`   |
+
+<div id="cloud-and-serverless-schedulers">
+  ### Planificateurs cloud et serverless
+</div>
+
+* **AWS** : règle EventBridge qui déclenche une fonction Lambda
+* **GCP** : Cloud Scheduler qui déclenche une Cloud Function
+* **Vercel / Netlify** : fonctions serverless déclenchées par des tâches cron
+* **GitHub Actions** : workflows planifiés avec les déclencheurs `schedule` et `cron`
+
+<div id="workflow-automation">
+  ### Automatisation des workflows
+</div>
+
+Des plateformes no-code comme **n8n**, **Zapier** et **Make** peuvent appeler l&#39;API Firecrawl à intervalles réguliers et envoyer les résultats vers Slack, l&#39;email ou des bases de données. Consultez les [guides d&#39;automatisation de workflows](/fr/developer-guides/workflow-automation/n8n).
+
+<div id="webhooks">
+  ## Webhooks
+</div>
+
+Pour les opérations asynchrones comme `crawl` et `batch scrape`, utilisez des [webhooks](/fr/webhooks/overview) pour recevoir les résultats de suivi des modifications dès qu&#39;ils sont disponibles, au lieu d&#39;effectuer du polling.
+
+<CodeGroup>
+  ```python Python
+  job = firecrawl.start_crawl(
+      "https://example.com",
+      limit=50,
+      scrape_options={
+          "formats": [
+              "markdown",
+              {"type": "changeTracking", "modes": ["git-diff"]}
+          ]
+      },
+      webhook={
+          "url": "https://your-server.com/firecrawl-webhook",
+          "headers": {"Authorization": "Bearer your-webhook-secret"},
+          "events": ["crawl.page", "crawl.completed"]
+      }
+  )
+  ```
+
+  ```js Node
+  const { id } = await firecrawl.startCrawl('https://example.com', {
+    limit: 50,
+    scrapeOptions: {
+      formats: [
+        'markdown',
+        { type: 'changeTracking', modes: ['git-diff'] }
+      ]
+    },
+    webhook: {
+      url: 'https://your-server.com/firecrawl-webhook',
+      headers: { Authorization: 'Bearer your-webhook-secret' },
+      events: ['crawl.page', 'crawl.completed']
+    }
+  });
+  ```
+
+  ```bash cURL
+  curl -s -X POST "https://api.firecrawl.dev/v2/crawl" \
+    -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "url": "https://example.com",
+      "limit": 50,
+      "scrapeOptions": {
+        "formats": [
+          "markdown",
+          { "type": "changeTracking", "modes": ["git-diff"] }
+        ]
+      },
+      "webhook": {
+        "url": "https://your-server.com/firecrawl-webhook",
+        "headers": { "Authorization": "Bearer your-webhook-secret" },
+        "events": ["crawl.page", "crawl.completed"]
+      }
+    }'
+  ```
+</CodeGroup>
+
+Le payload de l&#39;événement `crawl.page` inclut l&#39;objet `changeTracking` pour chaque page :
+
+```json
+{
+  "success": true,
+  "type": "crawl.page",
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "data": [{
+    "markdown": "# Pricing\n\nStarter: $12/mo...",
+    "metadata": {
+      "title": "Pricing",
+      "url": "https://example.com/pricing",
+      "statusCode": 200
+    },
+    "changeTracking": {
+      "previousScrapeAt": "2025-06-05T12:00:00.000+00:00",
+      "changeStatus": "changed",
+      "visibility": "visible",
+      "diff": {
+        "text": "@@ -2,1 +2,1 @@\n-Starter: $9/mo\n+Starter: $12/mo"
+      }
+    }
+  }]
+}
+```
+
+Pour plus de détails sur la configuration des webhooks (en-têtes, métadonnées, événements, réessais, vérification de la signature), consultez la [documentation sur les webhooks](/fr/webhooks/overview).
+
+<div id="configuration-reference">
+  ## Référence de configuration
+</div>
+
+Ensemble complet des options disponibles lorsque vous passez un objet de format `changeTracking` :
+
+| Paramètre | Type | Valeur par défaut | Description |
+|-----------|------|-------------------|-------------|
+| `type` | `string` | (requis) | Doit être `"changeTracking"` |
+| `modes` | `string[]` | `[]` | Modes de comparaison (diff) à activer : `"git-diff"`, `"json"`, ou les deux |
+| `schema` | `object` | (aucune) | JSON Schema pour la comparaison au niveau des champs (requis pour le mode `json`) |
+| `prompt` | `string` | (aucun) | Prompt personnalisé pour guider l’extraction par le LLM (utilisé avec le mode `json`) |
+| `tag` | `string` | `null` | Identifiant distinct pour l’historique de suivi des modifications |
 
 <div id="data-models">
   ### Modèles de données
 </div>
 
-La fonctionnalité de suivi des modifications comprend les modèles de données suivants :
-
 <CodeGroup>
-
-```js Node
-interface FirecrawlDocument {
-  // ... autres propriétés
-  changeTracking?: {
+  ```ts TypeScript
+  interface ChangeTrackingResult {
     previousScrapeAt: string | null;
     changeStatus: "new" | "same" | "changed" | "removed";
     visibility: "visible" | "hidden";
@@ -207,8 +670,7 @@ interface FirecrawlDocument {
           chunks: Array<{
             content: string;
             changes: Array<{
-              type: string;
-              normal?: boolean;
+              type: "add" | "del" | "normal";
               ln?: number;
               ln1?: number;
               ln2?: number;
@@ -218,245 +680,41 @@ interface FirecrawlDocument {
         }>;
       };
     };
-    json?: any;
-  };
-}
-
-interface ChangeTrackingFormat {
-  type: 'changeTracking';
-  prompt?: string;
-  schema?: any;
-  modes?: ("json" | "git-diff")[];
-  tag?: string | null;
-}
-
-interface ScrapeParams {
-  // ... autres propriétés
-  formats?: Array<'markdown' | 'html' | ChangeTrackingFormat>;
-}
-```
-
-```python Python
-class ChangeTrackingData(BaseModel):
-    """
-    Données pour le format de suivi des modifications.
-    """
-    previous_scrape_at: Optional[str] = None
-    change_status: str  # "new" | "same" | "changed" | "removed"
-    visibility: str  # "visible" | "hidden"
-    diff: Optional[Dict[str, Any]] = None
-    json: Optional[Dict[str, Any]] = None
-```
-
-</CodeGroup>
-
-<div id="change-tracking-modes">
-  ## Modes de suivi des modifications
-</div>
-
-La fonctionnalité de suivi des modifications prend en charge deux modes :
-
-<div id="git-diff-mode">
-  ### Mode Git-Diff
-</div>
-
-Le mode `git-diff` propose un format de diff classique, similaire à la sortie de Git. Il affiche les changements ligne par ligne, avec les ajouts et suppressions clairement signalés.
-
-Exemple de sortie :
-
-```
-@@ -1,1 +1,1 @@
--ancien contenu
-+nouveau contenu
-```
-
-La représentation JSON structurée du diff comprend :
-
-* `files` : tableau des fichiers modifiés (dans un contexte web, généralement un seul)
-* `chunks` : sections de modifications à l’intérieur d’un fichier
-* `changes` : modifications de lignes individuelles avec type (add, delete, normal)
-
-<div id="json-mode">
-  ### Mode JSON
-</div>
-
-Le mode `json` fournit une comparaison structurée de champs spécifiques extraits du contenu. Il est utile pour suivre l’évolution de points de données précis plutôt que de l’intégralité du contenu.
-
-Exemple de résultat :
-
-```json
-{
-  "title": {
-    "previous": "Old Title",
-    "current": "New Title"
-  },
-  "price": {
-    "previous": "$19.99",
-    "current": "$24.99"
+    json?: Record<string, { previous: any; current: any }>;
   }
-}
-```
+  ```
 
-Pour utiliser le mode JSON, vous devez fournir un schéma définissant les champs à extraire et à comparer.
-
-
-<div id="important-facts">
-  ## Faits importants
-</div>
-
-Voici quelques points essentiels à connaître lors de l’utilisation de la fonctionnalité de suiviDesModifications :
-
-- **Méthode de comparaison** : Les extractions sont toujours comparées à partir de leur réponse en markdown.
-  - Le format `markdown` doit également être spécifié lorsque vous utilisez le format `suiviDesModifications` (`changeTracking`). D’autres formats peuvent être ajoutés en complément.
-  - L’algorithme de comparaison est tolérant aux variations d’espaces et à l’ordre du contenu. Les URL sources des iframes sont actuellement ignorées afin de mieux gérer les captchas et les antibots qui génèrent des URL aléatoires.
-
-- **Mise en cache** : Les requêtes avec `changeTracking` contournent le cache de l’index, donc `maxAge` est ignoré.
-
-- **Correspondance avec les extractions précédentes** : Les extractions précédentes utilisées pour la comparaison sont actuellement appariées sur l’URL source, l’ID d’équipe, le format `markdown` et le paramètre `tag`.
-  - Pour une comparaison fiable, l’URL fournie doit être exactement la même que lors de la requête précédente visant le même contenu.
-  - Explorer les mêmes URL avec des `includePaths`/`excludePaths` différents entraînera des incohérences avec `suiviDesModifications`.
-  - Scraper les mêmes URL avec des `includeTags`/`excludeTags`/`onlyMainContent` différents entraînera des incohérences avec `suiviDesModifications`.
-  - Les pages seront également comparées à des extractions précédentes qui n’avaient que le format `markdown`, sans le format `suiviDesModifications`.
-  - Les comparaisons sont limitées à votre équipe. Si vous scrapez une URL pour la première fois avec votre clé API, son `changeStatus` sera toujours `new`, même si d’autres utilisateurs de Firecrawl l’ont déjà traitée auparavant.
-
-- **Gestion des erreurs** : Il est recommandé de surveiller le champ `warning` du document résultant et de prendre en compte l’éventuelle absence de l’objet `suiviDesModifications` dans la réponse.
-  - Cela peut se produire si la recherche en base de données du précédent scrape à comparer arrive à expiration.
-
-<div id="examples">
-  ## Exemples
-</div>
-
-<div id="basic-scrape-example">
-  ### Exemple de scraping simple
-</div>
-
-```json
-// Requête
-{
-    "url": "https://firecrawl.dev",
-    "formats": ["markdown", "suiviDesModifications"]
-}
-
-// Réponse
-{
-  "success": true,
-  "data": {
-    "markdown": "...",
-    "metadata": {...},
-    "suiviDesModifications": {
-      "previousScrapeAt": "2025-03-30T15:07:17.543071+00:00",
-      "changeStatus": "identique",
-      "visibility": "visible"
-    }
-  }
-}
-```
-
-<div id="crawl-example">
-  ### Exemple de crawl
-</div>
-
-```json
-// Requête
-{
-    "url": "https://firecrawl.dev",
-    "scrapeOptions": {
-        "formats": ["markdown", "changeTracking"]
-    }
-}
-```
-
-
-<div id="tracking-product-price-changes">
-  ### Suivi des changements de prix d’un produit
-</div>
-
-<CodeGroup>
-
-```js Node
-const result = await firecrawl.scrape('https://example.com/product', {
-  formats: [
-    'markdown',
-    {
-      type: 'changeTracking',
-      modes: ['json'],
-      schema: {
-        type: 'object',
-        properties: {
-          price: { type: 'string' },
-          availability: { type: 'string' }
-        }
-      }
-    }
-  ]
-});
-
-if (result.changeTracking.changeStatus === 'changed') {
-  console.log(`Price changed from ${result.changeTracking.json.price.previous} to ${result.changeTracking.json.price.current}`);
-}
-```
-
-```python Python
-result = firecrawl.scrape('https://example.com/product',
-    formats=[
-        'markdown',
-        {
-            'type': 'change_tracking',
-            'modes': ['json'],
-            'schema': {
-                'type': 'object',
-                'properties': {
-                    'price': {'type': 'string'},
-                    'availability': {'type': 'string'}
-                }
-            }
-        }
-    ]
-)
-
-if result.change_tracking.change_status == 'changed':
-    print(f"Price changed from {result.change_tracking.json.price.previous} to {result.change_tracking.json.price.current}")
-```
-
+  ```python Python
+  class ChangeTrackingData(BaseModel):
+      previous_scrape_at: Optional[str] = None
+      change_status: str  # "new" | "same" | "changed" | "removed"
+      visibility: str     # "visible" | "hidden"
+      diff: Optional[Dict[str, Any]] = None
+      json: Optional[Dict[str, Any]] = None
+  ```
 </CodeGroup>
 
-<div id="monitoring-content-changes-with-git-diff">
-  ### Suivre les modifications de contenu avec Git-Diff
+<div id="important-details">
+  ## Détails importants
 </div>
 
-<CodeGroup>
+<Warning>
+  Le format `markdown` doit toujours être inclus en même temps que `changeTracking`. Le suivi des modifications compare les pages via leur contenu markdown.
+</Warning>
 
-```js Node
-const result = await firecrawl.scrape('https://example.com/blog', {
-  formats: [
-    'markdown',
-    { type: 'changeTracking', modes: ['git-diff'] }
-  ]
-});
-
-if (result.changeTracking.changeStatus === 'changed') {
-  console.log('Modifications du contenu :');
-  console.log(result.changeTracking.diff.text);
-}
-```
-
-```python Python
-result = firecrawl.scrape('https://example.com/blog',
-    formats=[
-        'markdown',
-        { 'type': 'change_tracking', 'modes': ['git-diff'] }
-    ]
-)
-
-if result.change_tracking.change_status == 'changed':
-    print('Modifications du contenu :')
-    print(result.change_tracking.diff.text)
-```
-
-</CodeGroup>
+* **Portée** : Les comparaisons sont limitées à votre équipe. Votre premier scrape de n&#39;importe quelle URL renvoie `"new"`, même si d&#39;autres utilisateurs l&#39;ont déjà scrappée.
+* **Correspondance d&#39;URL** : Les scrapes précédents sont associés à l&#39;URL source exacte, à l&#39;ID d&#39;équipe, au format `markdown` et au `tag`. Gardez les URL cohérentes entre les scrapes.
+* **Cohérence des paramètres** : Utiliser des paramètres `includeTags`, `excludeTags` ou `onlyMainContent` différents entre les scrapes de la même URL produit des comparaisons peu fiables.
+* **Algorithme de comparaison** : L&#39;algorithme est résistant aux variations d&#39;espacement et aux changements dans l&#39;ordre du contenu. Les URL sources d&#39;iframe sont ignorées pour gérer la variation aléatoire introduite par les systèmes captcha/antibot.
+* **Mise en cache** : Les requêtes avec `changeTracking` contournent le cache d&#39;index. Le paramètre `maxAge` est ignoré.
+* **Gestion des erreurs** : Surveillez le champ `warning` dans les réponses et gérez le cas où l&#39;objet `changeTracking` pourrait être absent (cela peut se produire si la recherche en base de données pour le scrape précédent dépasse le délai imparti).
 
 <div id="billing">
   ## Facturation
 </div>
 
-L’utilisation des fonctionnalités de base de suivi des modifications et du mode `git-diff` n’entraîne aucun coût supplémentaire. En revanche, si vous utilisez le mode `json` pour comparer des données structurées, l’extraction de la page coûtera 5 crédits par page.
+| Mode | Coût |
+|------|------|
+| Suivi simple des modifications | Aucun coût supplémentaire (crédits de scraping standard) |
+| Mode `git-diff` | Aucun coût supplémentaire |
+| Mode `json` | 5 crédits par page |
