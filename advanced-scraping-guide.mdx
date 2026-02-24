@@ -1,11 +1,11 @@
 ---
 title: "Advanced Scraping Guide"
-description: "Configure scrape options, browser actions, crawling, mapping, and extraction with Firecrawl's full API surface."
+description: "Configure scrape options, browser actions, crawling, mapping, and the agent endpoint with Firecrawl's full API surface."
 og:title: "Advanced Scraping Guide | Firecrawl"
-og:description: "Configure scrape options, browser actions, crawling, mapping, and extraction with Firecrawl's full API surface."
+og:description: "Configure scrape options, browser actions, crawling, mapping, and the agent endpoint with Firecrawl's full API surface."
 ---
 
-Reference for every option across Firecrawl's scrape, crawl, map, and extract endpoints.
+Reference for every option across Firecrawl's scrape, crawl, map, and agent endpoints.
 
 ## Basic scraping
 
@@ -56,19 +56,40 @@ Firecrawl supports PDFs. Use the `parsers` option (e.g., `parsers: ["pdf"]`) whe
 
 When using the `/scrape` endpoint, you can customize the request with the following options.
 
-### Formats
+### Formats (`formats`)
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `formats` | `array` | `["markdown"]` | Output formats to return. <br/> **Strings:** `"markdown"`, `"links"`, `"html"`, `"rawHtml"`, `"summary"`, `"images"` <br/> **Objects:** JSON (`type: "json"`), Screenshot (`type: "screenshot"`), Change tracking (`type: "changeTracking"`, requires `"markdown"`) |
+The `formats` array controls which output types the scraper returns. Default: `["markdown"]`.
+
+**String formats** — pass the name directly (e.g. `"markdown"`):
+
+| Format | Description |
+|--------|-------------|
+| `markdown` | Page content converted to clean Markdown. |
+| `html` | Processed HTML with unnecessary elements removed. |
+| `rawHtml` | Original HTML exactly as returned by the server. |
+| `links` | All links found on the page. |
+| `images` | All images found on the page. |
+| `summary` | An LLM-generated summary of the page content. |
+| `branding` | Extracts brand identity (colors, fonts, typography, spacing, UI components). |
+
+**Object formats** — pass an object with `type` and additional options:
+
+| Format | Options | Description |
+|--------|---------|-------------|
+| `json` | `prompt?: string`, `schema?: object` | Extract structured data using an LLM. Provide a JSON schema and/or a natural-language prompt (max 10,000 characters). |
+| `screenshot` | `fullPage?: boolean`, `quality?: number`, `viewport?: { width, height }` | Capture a screenshot. Max one per request. Viewport max resolution is 7680×4320. |
+| `changeTracking` | `modes?: ("json" \| "git-diff")[]`, `tag?: string`, `schema?: object`, `prompt?: string` | Track changes between scrapes. Requires `"markdown"` to also be in the formats array. |
+| `attributes` | `selectors: [{ selector: string, attribute: string }]` | Extract specific HTML attributes from elements matching CSS selectors. |
 
 ### Content filtering
+
+These parameters control which parts of the page appear in the output. `onlyMainContent` runs first to strip boilerplate (nav, footer, etc.), then `includeTags` and `excludeTags` further narrow the result. If you set `onlyMainContent: false`, the full page HTML is used as the starting point for tag filtering.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `onlyMainContent` | `boolean` | `true` | Return only the main content. Set `false` for the full page. |
-| `includeTags` | `array` | — | HTML tags, classes, or IDs to include. |
-| `excludeTags` | `array` | — | HTML tags, classes, or IDs to exclude. |
+| `includeTags` | `array` | — | HTML tags, classes, or IDs to include (e.g. `["h1", "p", ".main-content"]`). |
+| `excludeTags` | `array` | — | HTML tags, classes, or IDs to exclude (e.g. `["#ad", "#footer"]`). |
 
 ### Timing and cache
 
@@ -76,29 +97,29 @@ When using the `/scrape` endpoint, you can customize the request with the follow
 |-----------|------|---------|-------------|
 | `waitFor` | `integer` (ms) | `0` | Extra wait time before scraping, on top of smart-wait. Use sparingly. |
 | `maxAge` | `integer` (ms) | `172800000` (2 days) | Return a cached version if fresher than this value. Set `0` to always fetch fresh. |
-| `timeout` | `integer` (ms) | `30000` (30 s) | Max request duration before aborting. |
+| `timeout` | `integer` (ms) | `30000` (30 seconds) | Max request duration before aborting. |
 
 ### PDF parsing
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `parsers` | `array` | — | `["pdf"]` to parse (1 credit/page). `[{"type":"pdf","maxPages":10}]` to cap pages. `[]` to skip parsing and return base64 (1 credit flat). |
+| `parsers` | `array` | `["pdf"]` | `["pdf"]` to parse (1 credit/page). `[{"type":"pdf","maxPages":10}]` to cap pages. `[]` to skip parsing and return base64 (1 credit flat). |
 
 ### Actions
 
-Run browser actions before scraping — useful for dynamic content, navigation, or user-gated pages.
+Run browser actions before scraping — useful for dynamic content, navigation, or user-gated pages. You can include up to 50 actions per request, and the combined wait time across all `wait` actions and `waitFor` must not exceed 60 seconds.
 
-| Action | Description |
-|--------|-------------|
-| `wait` | Wait for a duration (`milliseconds`) or until an element appears (`selector`). |
-| `click` | Click an element by `selector`. Set `all: true` to click every match. |
-| `write` | Type `text` into a focused field (focus with `click` first). |
-| `press` | Press a keyboard `key`. |
-| `scroll` | Scroll `"up"` or `"down"`. Optionally target a `selector`. |
-| `screenshot` | Capture a screenshot. Options: `fullPage`, `quality`, `viewport`. |
-| `scrape` | Scrape a sub-element. |
-| `executeJavascript` | Run a `script` in the page context. |
-| `pdf` | Generate a PDF. Options: `format`, `landscape`, `scale`. |
+| Action | Parameters | Description |
+|--------|------------|-------------|
+| `wait` | `milliseconds?: number`, `selector?: string` | Wait for a fixed duration **or** until an element is visible (provide one, not both). When using `selector`, times out after 30 seconds. |
+| `click` | `selector: string`, `all?: boolean` | Click an element matching the CSS selector. Set `all: true` to click every match. |
+| `write` | `text: string` | Type text into the currently focused field. You must focus the element with a `click` action first. |
+| `press` | `key: string` | Press a keyboard key (e.g. `"Enter"`, `"Tab"`, `"Escape"`). |
+| `scroll` | `direction?: "up" \| "down"`, `selector?: string` | Scroll the page or a specific element. Direction defaults to `"down"`. |
+| `screenshot` | `fullPage?: boolean`, `quality?: number`, `viewport?: { width, height }` | Capture a screenshot. Max viewport resolution is 7680×4320. |
+| `scrape` | _(none)_ | Capture the current page HTML at this point in the action sequence. |
+| `executeJavascript` | `script: string` | Run JavaScript code in the page. Returns `{ type, value }`. |
+| `pdf` | `format?: string`, `landscape?: boolean`, `scale?: number` | Generate a PDF. Supported formats: `"A0"`–`"A6"`, `"Letter"`, `"Legal"`, `"Tabloid"`, `"Ledger"`. Defaults to `"Letter"`. |
 
 <CodeGroup>
 
@@ -247,7 +268,7 @@ curl -X POST https://api.firecrawl.dev/v2/scrape \
     }'
 ```
 
-This request returns markdown, HTML, raw HTML, links, and a full-page screenshot. It scopes content to `<h1>`, `<p>`, `<a>`, and `.main-content` while excluding `#ad` and `#footer`, waits 1 s before scraping, sets a 15 s timeout, and enables PDF parsing.
+This request returns markdown, HTML, raw HTML, links, and a full-page screenshot. It scopes content to `<h1>`, `<p>`, `<a>`, and `.main-content` while excluding `#ad` and `#footer`, waits 1 second before scraping, sets a 15 second timeout, and enables PDF parsing.
 
 See the full [Scrape API reference](https://docs.firecrawl.dev/api-reference/endpoint/scrape) for details.
 
@@ -314,9 +335,20 @@ curl -X POST https://api.firecrawl.dev/v2/scrape \
 
 </CodeGroup>
 
-## Extract endpoint
+## Agent endpoint
 
-Use the dedicated extract job API when you want asynchronous extraction with status polling.
+Use the `/v2/agent` endpoint for autonomous, multi-page data extraction. The agent runs asynchronously — you start a job, then poll for results.
+
+### Agent options
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `prompt` | `string` | _(required)_ | Natural-language instructions describing what data to extract (max 10,000 characters). |
+| `urls` | `array` | — | URLs to constrain the agent to. |
+| `schema` | `object` | — | JSON schema to structure the extracted data. |
+| `maxCredits` | `number` | `2500` | Maximum credits the agent can spend. |
+| `strictConstrainToURLs` | `boolean` | `false` | When `true`, the agent only visits the provided URLs. |
+| `model` | `string` | `"spark-1-mini"` | AI model to use. `"spark-1-mini"` (default, 60% cheaper) or `"spark-1-pro"` (higher accuracy). |
 
 <CodeGroup>
 
@@ -325,12 +357,15 @@ from firecrawl import Firecrawl
 
 firecrawl = Firecrawl(api_key='fc-YOUR-API-KEY')
 
-started = firecrawl.start_extract(
+# Start agent job
+started = firecrawl.start_agent(
+    prompt="Extract the title and description",
     urls=["https://docs.firecrawl.dev"],
-    prompt="Extract title",
-    schema={"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]}
+    schema={"type": "object", "properties": {"title": {"type": "string"}, "description": {"type": "string"}}, "required": ["title"]}
 )
-status = firecrawl.get_extract_status(started.id)
+
+# Poll status
+status = firecrawl.get_agent_status(started["id"])
 print(status.get("status"), status.get("data"))
 ```
 
@@ -339,30 +374,41 @@ import Firecrawl from '@mendable/firecrawl-js';
 
 const firecrawl = new Firecrawl({ apiKey: 'fc-YOUR-API-KEY' });
 
-// Start extract job
-const started = await firecrawl.startExtract({
+// Start agent job
+const started = await firecrawl.startAgent({
+  prompt: 'Extract the title and description',
   urls: ['https://docs.firecrawl.dev'],
-  prompt: 'Extract title',
-  schema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] }
+  schema: { type: 'object', properties: { title: { type: 'string' }, description: { type: 'string' } }, required: ['title'] }
 });
 
 // Poll status
-const status = await firecrawl.getExtractStatus(started.id);
+const status = await firecrawl.getAgentStatus(started.id);
 console.log(status.status, status.data);
 ```
 
 ```bash cURL
-curl -X POST https://api.firecrawl.dev/v2/extract \
+curl -X POST https://api.firecrawl.dev/v2/agent \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer fc-YOUR-API-KEY' \
   -d '{
+    "prompt": "Extract the title and description",
     "urls": ["https://docs.firecrawl.dev"],
-    "prompt": "Extract title",
-    "schema": {"type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]}
+    "schema": {"type": "object", "properties": {"title": {"type": "string"}, "description": {"type": "string"}}, "required": ["title"]}
   }'
 ```
 
 </CodeGroup>
+
+### Check agent status
+
+Poll `GET /v2/agent/{jobId}` to check progress. The response `status` field will be `"processing"`, `"completed"`, or `"failed"`.
+
+```bash cURL
+curl -X GET https://api.firecrawl.dev/v2/agent/YOUR-JOB-ID \
+  -H 'Authorization: Bearer fc-YOUR-API-KEY'
+```
+
+The Python and Node SDKs also provide a convenience method (`firecrawl.agent()`) that starts the job and polls automatically until completion.
 
 
 ## Crawling multiple pages
@@ -499,4 +545,8 @@ Here is the API Reference for it: [Map Endpoint Documentation](https://docs.fire
 
 ### Allowing your application to call the Firecrawl API
 
-Whitelist `35.245.250.27` if your firewall blocks outbound requests to external services.
+If your firewall blocks outbound requests from your application to external services, you need to whitelist Firecrawl's API server IP address so your application can reach the Firecrawl API (`api.firecrawl.dev`):
+
+- **IP Address**: `35.245.250.27`
+
+Add this IP to your firewall's outbound allowlist so your backend can send scrape, crawl, map, and agent requests to Firecrawl.
