@@ -1,0 +1,434 @@
+---
+title: 'Java'
+description: 'Firecrawl Java SDK is a wrapper around the Firecrawl API to help you easily turn websites into markdown.'
+icon: 'java'
+og:title: "Java SDK | Firecrawl"
+og:description: "Firecrawl Java SDK is a wrapper around the Firecrawl API to help you easily turn websites into markdown."
+---
+
+## Installation
+
+To install the Firecrawl Java SDK, add the dependency to your project:
+
+<Tabs>
+  <Tab title="Gradle (Kotlin DSL)">
+    ```kotlin
+    implementation("com.firecrawl:firecrawl-java:1.0.0")
+    ```
+  </Tab>
+  <Tab title="Gradle (Groovy)">
+    ```groovy
+    implementation 'com.firecrawl:firecrawl-java:1.0.0'
+    ```
+  </Tab>
+  <Tab title="Maven">
+    ```xml
+    <dependency>
+        <groupId>com.firecrawl</groupId>
+        <artifactId>firecrawl-java</artifactId>
+        <version>1.0.0</version>
+    </dependency>
+    ```
+  </Tab>
+</Tabs>
+
+<Note>Requires Java 11 or later.</Note>
+
+## Usage
+
+1. Get an API key from [firecrawl.dev](https://firecrawl.dev)
+2. Set the API key as an environment variable named `FIRECRAWL_API_KEY` or pass it as a parameter to the `FirecrawlClient` builder.
+
+Here's an example of how to use the SDK with error handling:
+
+```java Java
+import com.firecrawl.client.FirecrawlClient;
+import com.firecrawl.models.*;
+import com.firecrawl.errors.*;
+import java.util.List;
+
+public class Example {
+    public static void main(String[] args) {
+        // Create client from environment variable
+        FirecrawlClient client = FirecrawlClient.fromEnv();
+
+        // Or with explicit API key
+        // FirecrawlClient client = FirecrawlClient.builder()
+        //     .apiKey("fc-your-api-key")
+        //     .build();
+
+        try {
+            // Scrape a URL
+            Document doc = client.scrape("https://firecrawl.dev",
+                ScrapeOptions.builder()
+                    .formats(List.of("markdown"))
+                    .build());
+            System.out.println(doc.getMarkdown());
+
+            // Crawl a website
+            CrawlJob job = client.crawl("https://firecrawl.dev",
+                CrawlOptions.builder()
+                    .limit(5)
+                    .build());
+
+            for (Document page : job.getData()) {
+                System.out.println(page.getMetadata().get("sourceURL"));
+            }
+        } catch (AuthenticationException e) {
+            System.err.println("Invalid API key: " + e.getMessage());
+        } catch (RateLimitException e) {
+            System.err.println("Rate limited: " + e.getMessage());
+        } catch (FirecrawlException e) {
+            System.err.println("Error " + e.getStatusCode() + ": " + e.getMessage());
+        }
+    }
+}
+```
+
+### Scraping a URL
+
+To scrape a single URL, use the `scrape` method. It takes the URL as a parameter and returns the scraped data as a `Document`.
+
+```java Java
+Document doc = client.scrape("https://firecrawl.dev",
+    ScrapeOptions.builder()
+        .formats(List.of("markdown", "html"))
+        .onlyMainContent(true)
+        .waitFor(5000)
+        .build());
+
+System.out.println(doc.getMarkdown());
+System.out.println(doc.getMetadata().get("title"));
+```
+
+#### JSON Extraction
+
+Extract structured data from a page using an LLM by specifying a JSON schema:
+
+```java Java
+import com.firecrawl.models.JsonFormat;
+import java.util.Map;
+
+JsonFormat jsonFmt = JsonFormat.builder()
+    .prompt("Extract the product name and price")
+    .schema(Map.of(
+        "type", "object",
+        "properties", Map.of(
+            "name", Map.of("type", "string"),
+            "price", Map.of("type", "number")
+        )
+    ))
+    .build();
+
+Document doc = client.scrape("https://example.com/product",
+    ScrapeOptions.builder()
+        .formats(List.of(jsonFmt))
+        .build());
+
+System.out.println(doc.getJson());
+```
+
+### Crawling a Website
+
+To crawl a website, use the `crawl` method. It takes the starting URL and optional parameters as arguments. The `crawl` method polls until the job is complete and returns all crawled documents with auto-pagination.
+
+```java Java
+CrawlJob job = client.crawl("https://example.com",
+    CrawlOptions.builder()
+        .limit(50)
+        .maxDiscoveryDepth(3)
+        .scrapeOptions(ScrapeOptions.builder()
+            .formats(List.of("markdown"))
+            .build())
+        .build());
+
+System.out.println("Status: " + job.getStatus());
+System.out.println("Pages crawled: " + job.getData().size());
+
+for (Document doc : job.getData()) {
+    System.out.println(doc.getMetadata().get("sourceURL"));
+}
+```
+
+### Start a Crawl
+
+Start a job without waiting using `startCrawl`. It returns a job ID you can use to check status. Use `crawl` when you want to block until completion.
+
+```java Java
+CrawlResponse start = client.startCrawl("https://example.com",
+    CrawlOptions.builder().limit(100).build());
+
+System.out.println("Job ID: " + start.getId());
+```
+
+### Checking Crawl Status
+
+To check the status of a crawl job, use the `getCrawlStatus` method. It takes the job ID as a parameter and returns the current status of the crawl job.
+
+```java Java
+CrawlJob status = client.getCrawlStatus(start.getId());
+System.out.println("Status: " + status.getStatus());
+System.out.println("Progress: " + status.getCompleted() + "/" + status.getTotal());
+```
+
+### Cancelling a Crawl
+
+To cancel a crawl job, use the `cancelCrawl` method. It takes the job ID as a parameter and returns the cancellation status.
+
+```java Java
+Map<String, Object> result = client.cancelCrawl(start.getId());
+System.out.println(result);
+```
+
+### Mapping a Website
+
+To map a website, use the `map` method. It takes the starting URL as a parameter and returns the discovered URLs.
+
+```java Java
+MapData data = client.map("https://example.com",
+    MapOptions.builder()
+        .limit(100)
+        .search("blog")
+        .build());
+
+for (Map<String, Object> link : data.getLinks()) {
+    System.out.println(link.get("url") + " - " + link.get("title"));
+}
+```
+
+### Searching the Web
+
+Search the web and optionally scrape results using the `search` method.
+
+```java Java
+SearchData results = client.search("firecrawl web scraping",
+    SearchOptions.builder()
+        .limit(10)
+        .build());
+
+if (results.getWeb() != null) {
+    for (Map<String, Object> result : results.getWeb()) {
+        System.out.println(result.get("title") + " — " + result.get("url"));
+    }
+}
+```
+
+### Batch Scraping
+
+Scrape multiple URLs in parallel using the `batchScrape` method.
+
+```java Java
+BatchScrapeJob job = client.batchScrape(
+    List.of("https://example.com", "https://example.org"),
+    BatchScrapeOptions.builder()
+        .options(ScrapeOptions.builder()
+            .formats(List.of("markdown"))
+            .build())
+        .build());
+
+for (Document doc : job.getData()) {
+    System.out.println(doc.getMarkdown());
+}
+```
+
+### Agent
+
+Run an AI-powered agent to research and extract data from the web.
+
+```java Java
+AgentStatusResponse result = client.agent(
+    AgentOptions.builder()
+        .prompt("Find the pricing plans for Firecrawl and compare them")
+        .build());
+
+System.out.println(result.getData());
+```
+
+With a JSON schema for structured output:
+
+```java Java
+AgentStatusResponse result = client.agent(
+    AgentOptions.builder()
+        .urls(List.of("https://firecrawl.dev"))
+        .prompt("Extract pricing plan details")
+        .schema(Map.of(
+            "type", "object",
+            "properties", Map.of(
+                "plans", Map.of(
+                    "type", "array",
+                    "items", Map.of(
+                        "type", "object",
+                        "properties", Map.of(
+                            "name", Map.of("type", "string"),
+                            "price", Map.of("type", "string")
+                        )
+                    )
+                )
+            )
+        ))
+        .build());
+
+System.out.println(result.getData());
+```
+
+### Usage & Metrics
+
+Check your concurrency and credit usage:
+
+```java Java
+ConcurrencyCheck conc = client.getConcurrency();
+System.out.println("Concurrency: " + conc.getConcurrency() + "/" + conc.getMaxConcurrency());
+
+CreditUsage credits = client.getCreditUsage();
+System.out.println("Remaining credits: " + credits.getRemainingCredits());
+```
+
+## Async Support
+
+All methods have async variants that return `CompletableFuture`. Use these for non-blocking operations:
+
+```java Java
+import java.util.concurrent.CompletableFuture;
+
+CompletableFuture<Document> future = client.scrapeAsync(
+    "https://example.com",
+    ScrapeOptions.builder().formats(List.of("markdown")).build());
+
+future.thenAccept(doc -> System.out.println(doc.getMarkdown()));
+```
+
+Async crawl example:
+
+```java Java
+CompletableFuture<CrawlJob> crawlFuture = client.crawlAsync(
+    "https://example.com",
+    CrawlOptions.builder().limit(10).build());
+
+crawlFuture.thenAccept(job -> {
+    System.out.println("Crawled " + job.getData().size() + " pages");
+    for (Document doc : job.getData()) {
+        System.out.println(doc.getMetadata().get("sourceURL"));
+    }
+});
+```
+
+## Browser
+
+Launch cloud browser sessions and execute code remotely.
+
+### Create a Session
+
+```java Java
+import com.firecrawl.client.FirecrawlClient;
+
+FirecrawlClient client = FirecrawlClient.builder()
+    .apiKey("fc-YOUR-API-KEY")
+    .build();
+
+BrowserCreateResponse session = client.browser();
+System.out.println(session.getId());          // session ID
+System.out.println(session.getCdpUrl());      // wss://cdp-proxy.firecrawl.dev/cdp/...
+System.out.println(session.getLiveViewUrl()); // https://liveview.firecrawl.dev/...
+```
+
+You can customize session parameters:
+
+```java Java
+BrowserCreateResponse session = client.browser(
+    300,   // ttl (seconds)
+    60,    // activityTtl (seconds)
+    true   // streamWebView
+);
+```
+
+### Execute Code
+
+```java Java
+BrowserExecuteResponse result = client.browserExecute(session.getId(),
+    "await page.goto(\"https://news.ycombinator.com\")\ntitle = await page.title()\nprint(title)");
+
+System.out.println(result.getResult()); // "Hacker News"
+```
+
+Execute JavaScript instead of Python:
+
+```java Java
+BrowserExecuteResponse result = client.browserExecute(session.getId(),
+    "await page.goto(\"https://example.com\"); const t = await page.title(); console.log(t);",
+    "node");
+```
+
+Execute bash with agent-browser:
+
+```java Java
+BrowserExecuteResponse result = client.browserExecute(session.getId(),
+    "agent-browser open https://example.com && agent-browser snapshot",
+    "bash");
+```
+
+### List & Close Sessions
+
+```java Java
+// List active sessions
+BrowserListResponse list = client.listBrowsers("active");
+for (BrowserSession s : list.getSessions()) {
+    System.out.println(s.getId() + " " + s.getStatus() + " " + s.getCreatedAt());
+}
+
+// Close a session
+client.deleteBrowser(session.getId());
+```
+
+## Configuration
+
+The `FirecrawlClient` builder supports the following options:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `apiKey` | `String` | `FIRECRAWL_API_KEY` env var | Your Firecrawl API key |
+| `apiUrl` | `String` | `https://api.firecrawl.dev` | API base URL (or `FIRECRAWL_API_URL` env var) |
+| `timeoutMs` | `int` | `300000` (5 min) | HTTP request timeout in milliseconds |
+| `maxRetries` | `int` | `3` | Number of retries for transient failures |
+| `backoffFactor` | `double` | `0.5` | Exponential backoff factor in seconds |
+| `asyncExecutor` | `ExecutorService` | Default executor | Custom executor for async methods |
+
+```java Java
+FirecrawlClient client = FirecrawlClient.builder()
+    .apiKey("fc-your-api-key")
+    .apiUrl("https://api.firecrawl.dev")
+    .timeoutMs(300_000)
+    .maxRetries(3)
+    .backoffFactor(0.5)
+    .build();
+```
+
+## Error Handling
+
+The SDK throws unchecked exceptions with a clear hierarchy:
+
+| Exception | HTTP Status | Description |
+|-----------|-------------|-------------|
+| `AuthenticationException` | 401 | Invalid or missing API key |
+| `RateLimitException` | 429 | Too many requests |
+| `JobTimeoutException` | — | Async job exceeded timeout |
+| `FirecrawlException` | Any | Base exception for all API errors |
+
+```java Java
+import com.firecrawl.errors.*;
+
+try {
+    Document doc = client.scrape("https://example.com");
+} catch (AuthenticationException e) {
+    // 401 — invalid API key
+    System.err.println("Auth failed: " + e.getMessage());
+} catch (RateLimitException e) {
+    // 429 — too many requests
+    System.err.println("Rate limited: " + e.getMessage());
+} catch (JobTimeoutException e) {
+    // Async job timed out
+    System.err.println("Job " + e.getJobId() + " timed out after " + e.getTimeoutSeconds() + "s");
+} catch (FirecrawlException e) {
+    // All other API errors
+    System.err.println("Error " + e.getStatusCode() + ": " + e.getMessage());
+}
+```
