@@ -1,8 +1,8 @@
 ---
 title: 'Batch Scrape'
-description: 'Batch scrape multiple URLs'
+description: 'Scrape multiple URLs in a single batch job'
 og:title: 'Batch Scrape | Firecrawl'
-og:description: 'Batch scrape multiple URLs'
+og:description: 'Scrape multiple URLs in a single batch job'
 ---
 
 import BatchScrapePython from '/snippets/v2/batch-scrape/base/python.mdx';
@@ -17,22 +17,23 @@ import BatchScrapeExtractOutput from '/snippets/v2/batch-scrape/json/output.mdx'
 import BatchScrapeExtractAsyncOutput from '/snippets/v2/batch-scrape/json/async-output.mdx';
 import BatchScrapeWebhookCURL from '/snippets/v1/batch-scrape-webhook/base/curl.mdx';
 
-## Batch scraping multiple URLs
+Batch scrape lets you scrape multiple URLs in a single job. Pass a list of URLs and optional parameters, and Firecrawl processes them concurrently and returns all results together.
 
-You can now batch scrape multiple URLs at the same time. It takes the starting URLs and optional parameters as arguments. The params argument allows you to specify additional options for the batch scrape job, such as the output formats.
+- Works like `/crawl` but for an explicit list of URLs
+- Synchronous and asynchronous modes
+- Supports all scrape options including structured extraction
+- Configurable concurrency per job
 
-### How it works
+## How it works
 
-It is very similar to how the `/crawl` endpoint works. You can either start the batch and wait for completion, or start it and handle completion yourself.
+You can run a batch scrape in two ways:
 
-- `batchScrape` (JS) / `batch_scrape` (Python): starts a batch job and waits for it to complete, returning the results.
-- `startBatchScrape` (JS) / `start_batch_scrape` (Python): starts a batch job and returns the job ID so you can poll or use webhooks.
+| Mode | SDK method (JS / Python) | Behavior |
+|------|--------------------------|----------|
+| Synchronous | `batchScrape` / `batch_scrape` | Starts the batch and waits for completion, returning all results |
+| Asynchronous | `startBatchScrape` / `start_batch_scrape` | Starts the batch and returns a job ID for polling or webhooks |
 
-### Concurrency
-
-By default, a batch scrape job uses your team's full concurrent browser limit (see [Rate Limits](/rate-limits)). You can lower this per job with the `maxConcurrency` parameter — for example, `maxConcurrency: 50` limits that job to 50 simultaneous scrapes. Setting this value too low on large batches will significantly slow down processing, so only reduce it if you need to leave capacity for other concurrent jobs.
-
-### Usage
+## Basic usage
 
 <CodeGroup>
 
@@ -44,19 +45,23 @@ By default, a batch scrape job uses your team's full concurrent browser limit (s
 
 ### Response
 
-Calling `batchScrape`/`batch_scrape` returns the full results when the batch completes.
+Calling `batchScrape` / `batch_scrape` returns the full results when the batch completes.
 
 <BatchScrapeOutput />
 
-Calling `startBatchScrape`/`start_batch_scrape` returns
-a job ID you can track via `getBatchScrapeStatus`/`get_batch_scrape_status`, using
-the API endpoint `/batch/scrape/{id}`, or webhooks. Job results are available via the API for 24 hours after completion. After this period, you can still view your batch scrape history and results in the [activity logs](https://www.firecrawl.dev/app/logs).
+Calling `startBatchScrape` / `start_batch_scrape` returns a job ID you can track via `getBatchScrapeStatus` / `get_batch_scrape_status`, the API endpoint `/batch/scrape/{id}`, or webhooks. Job results are available via the API for 24 hours after completion. After this period, you can still view your batch scrape history and results in the [activity logs](https://www.firecrawl.dev/app/logs).
 
 <BatchScrapeAsyncOutput />
 
-## Batch scrape with structured extraction
+## Concurrency
 
-You can also use the batch scrape endpoint to extract structured data from the pages. This is useful if you want to get the same structured data from a list of URLs.
+By default, a batch scrape job uses your team's full concurrent browser limit (see [Rate Limits](/rate-limits)). You can lower this per job with the `maxConcurrency` parameter.
+
+For example, `maxConcurrency: 50` limits that job to 50 simultaneous scrapes. Setting this value too low on large batches will significantly slow down processing, so only reduce it if you need to leave capacity for other concurrent jobs.
+
+## Structured extraction
+
+You can use batch scrape to extract structured data from every page in the batch. This is useful when you want the same schema applied to a list of URLs.
 
 <CodeGroup>
 
@@ -68,47 +73,47 @@ You can also use the batch scrape endpoint to extract structured data from the p
 
 ### Response
 
-`batchScrape`/`batch_scrape` returns full results:
+`batchScrape` / `batch_scrape` returns full results:
 
 <BatchScrapeExtractOutput />
 
-`startBatchScrape`/`start_batch_scrape` returns a job ID:
+`startBatchScrape` / `start_batch_scrape` returns a job ID:
 
 <BatchScrapeExtractAsyncOutput />
 
-## Batch scrape with webhooks
+## Webhooks
 
-You can configure webhooks to receive real-time notifications as each URL in your batch is scraped. This allows you to process results immediately instead of waiting for the entire batch to complete.
+You can configure webhooks to receive real-time notifications as each URL in your batch is scraped. This lets you process results immediately instead of waiting for the entire batch to complete.
 
 <BatchScrapeWebhookCURL />
 
-### Quick Reference
+### Event types
 
-**Event Types:**
+| Event | Description |
+|-------|-------------|
+| `batch_scrape.started` | The batch scrape job has begun |
+| `batch_scrape.page` | A single URL was successfully scraped |
+| `batch_scrape.completed` | All URLs have been processed |
+| `batch_scrape.failed` | The batch scrape encountered an error |
 
-- `batch_scrape.started` - When the batch scrape begins
-- `batch_scrape.page` - For each URL successfully scraped
-- `batch_scrape.completed` - When all URLs are processed
-- `batch_scrape.failed` - If the batch scrape encounters an error
+### Payload
 
-**Basic Payload:**
+Each webhook delivery includes a JSON body with the following structure:
 
 ```json
 {
   "success": true,
   "type": "batch_scrape.page",
   "id": "batch-job-id",
-  "data": [...], // Page data for 'page' events
-  "metadata": {}, // Your custom metadata
+  "data": [...],
+  "metadata": {},
   "error": null
 }
 ```
 
-### Security: Verifying Webhook Signatures
+### Verifying webhook signatures
 
-Every webhook request from Firecrawl includes an `X-Firecrawl-Signature` header containing an HMAC-SHA256 signature. **Always verify this signature** to ensure the webhook is authentic and hasn't been tampered with.
-
-**How it works:**
+Every webhook request from Firecrawl includes an `X-Firecrawl-Signature` header containing an HMAC-SHA256 signature. Always verify this signature to ensure the webhook is authentic and has not been tampered with.
 
 1. Get your webhook secret from the [Advanced tab](https://www.firecrawl.dev/app/settings?tab=advanced) of your account settings
 2. Extract the signature from the `X-Firecrawl-Signature` header
@@ -120,7 +125,5 @@ Every webhook request from Firecrawl includes an `X-Firecrawl-Signature` header 
 </Warning>
 
 For complete implementation examples in JavaScript and Python, see the [Webhook Security documentation](/webhooks/security).
-
-### Full Documentation
 
 For comprehensive webhook documentation including detailed event payloads, advanced configuration, and troubleshooting, see the [Webhooks documentation](/webhooks/overview).
