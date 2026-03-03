@@ -10,61 +10,84 @@ Vercel AI SDK 向け Firecrawl ツール。AI アプリケーション向けの 
 </div>
 
 ```bash
-npm install firecrawl-aisdk ai @ai-sdk/openai
+npm install firecrawl-aisdk ai
 ```
 
-環境変数の設定：
+環境変数を設定する：
 
 ```bash
-FIRECRAWL_API_KEY=fc-your-key
-OPENAI_API_KEY=sk-your-key
+FIRECRAWL_API_KEY=fc-your-key       # https://firecrawl.dev
+AI_GATEWAY_API_KEY=your-key         # https://vercel.com/ai-gateway
 ```
 
 <Note>
-  これらの例では OpenAI を使用していますが、Firecrawl のツールは Anthropic、Google、Mistral などを含む、すべての Vercel AI SDK プロバイダーで動作します。サポートされているプロバイダーの[完全な一覧](https://ai-sdk.dev/providers/ai-sdk-providers)を参照してください。
+  これらの例では [Vercel AI Gateway](https://vercel.com/ai-gateway) の string モデル形式を使用していますが、Firecrawl のツールはどの AI SDK プロバイダとも動作します。`openai('gpt-5-mini')`、`anthropic('claude-sonnet-4.5')`、または任意の [対応プロバイダ](https://ai-sdk.dev/providers/ai-sdk-providers) に差し替えて使用できます。
 </Note>
+
 
 <div id="quick-start">
   ## クイックスタート
 </div>
 
+これが最も手軽な始め方です。`FirecrawlTools()` を使うと、検索・スクレイピング・ブラウザ操作用のツールに加え、どのツールを使うべきかをモデルに指示する自動生成のシステムプロンプトをまとめて利用できます。
+
 ```typescript
-import { generateText } from 'ai';
-import { openai } from '@ai-sdk/openai';
-import { scrapeTool } from 'firecrawl-aisdk';
+import { generateText, stepCountIs } from 'ai';
+import { FirecrawlTools } from 'firecrawl-aisdk';
 
 const { text } = await generateText({
-  model: openai('gpt-5-mini'),
-  prompt: 'https://firecrawl.dev をスクレイピングして、その機能を要約してください',
-  tools: { scrape: scrapeTool },
+  model: 'anthropic/claude-sonnet-4.5',
+  prompt: 'Search for Firecrawl, scrape the top result, and summarize what it does',
+  tools: FirecrawlTools(),
+  stopWhen: stepCountIs(5),
+});
+```
+
+カスタムオプションを指定する場合:
+
+```typescript
+const tools = FirecrawlTools({
+  apiKey: 'fc-custom-key',                // 省略可能。デフォルトは環境変数
+  search: { limit: 3, country: 'US' },    // デフォルトの検索オプション
+  scrape: { onlyMainContent: true },       // デフォルトのスクレイプオプション
+  browser: {},                             // ブラウザツールを有効化
+});
+```
+
+任意のツールは `false` を渡すことで無効化できます:
+
+```typescript
+const tools = FirecrawlTools({
+  browser: false,   // 検索 + スクレイプのみ
 });
 ```
 
 
-<div id="available-tools">
-  ## 利用可能なツール
+<div id="individual-tools">
+  ## 個別ツール
 </div>
+
+各ツールは **2 通りの使い方** ができます。ツールとして直接利用することも（環境変数から `FIRECRAWL_API_KEY` を読み取ります）、カスタム設定用のファクトリ関数として呼び出すこともできます。
 
 ```typescript
-import {
-  scrapeTool,         // 単一URLをスクレイピング
-  searchTool,         // Web検索
-  browserTool,        // インタラクティブなブラウザセッション
-  agentTool,          // 自律型Webエージェント
-  mapTool,            // サイト上のURLを検出
-  crawlTool,          // 複数ページをクロール
-  batchScrapeTool,    // 複数URLをスクレイピング
-  extractTool,        // 構造化データを抽出
-  pollTool,           // 非同期ジョブをポーリング
-  statusTool,         // ジョブステータスを確認
-  cancelTool,         // ジョブをキャンセル
-} from 'firecrawl-aisdk';
+import { scrape, search } from 'firecrawl-aisdk';
+
+// 直接使用 - 環境変数からFIRECRAWL_API_KEYを読み込む
+const { text } = await generateText({
+  model: 'anthropic/claude-sonnet-4.5',
+  tools: { scrape, search },
+  prompt: '...',
+});
+
+// またはカスタム設定のファクトリとして呼び出す
+const customScrape = scrape({ apiKey: 'fc-custom-key' });
+const { text } = await generateText({
+  model: 'anthropic/claude-sonnet-4.5',
+  tools: { scrape: customScrape },
+  prompt: '...',
+});
 ```
 
-
-<div id="examples">
-  ## 使用例
-</div>
 
 <div id="scrape">
   ### スクレイピング
@@ -72,17 +95,15 @@ import {
 
 ```typescript
 import { generateText } from 'ai';
-import { openai } from '@ai-sdk/openai';
-import { scrapeTool } from 'firecrawl-aisdk';
+import { scrape } from 'firecrawl-aisdk';
 
 const { text } = await generateText({
-  model: openai('gpt-5-mini'),
-  prompt: 'https://firecrawl.dev をスクレイピングして、何をするものか要約してください',
-  tools: { scrape: scrapeTool },
+  model: 'anthropic/claude-sonnet-4.5',
+  prompt: 'https://firecrawl.dev をスクレイピングして、その機能を要約してください',
+  tools: { scrape },
 });
-
-console.log(text);
 ```
+
 
 <div id="search">
   ### 検索
@@ -90,98 +111,13 @@ console.log(text);
 
 ```typescript
 import { generateText } from 'ai';
-import { openai } from '@ai-sdk/openai';
-import { searchTool } from 'firecrawl-aisdk';
+import { search } from 'firecrawl-aisdk';
 
 const { text } = await generateText({
-  model: openai('gpt-5-mini'),
+  model: 'anthropic/claude-sonnet-4.5',
   prompt: 'Search for Firecrawl and summarize what you find',
-  tools: { search: searchTool },
+  tools: { search },
 });
-
-console.log(text);
-```
-
-
-<div id="map">
-  ### マップ
-</div>
-
-```typescript
-import { generateText } from 'ai';
-import { openai } from '@ai-sdk/openai';
-import { mapTool } from 'firecrawl-aisdk';
-
-const { text } = await generateText({
-  model: openai('gpt-5-mini'),
-  prompt: 'https://docs.firecrawl.dev をマップして主要なセクションをリストアップしてください',
-  tools: { map: mapTool },
-});
-
-console.log(text);
-```
-
-
-<div id="crawl">
-  ### Crawl
-</div>
-
-非同期処理です。ジョブのステータスを確認するには `pollTool` を含めてください。
-
-```typescript
-import { generateText } from 'ai';
-import { openai } from '@ai-sdk/openai';
-import { crawlTool, pollTool } from 'firecrawl-aisdk';
-
-const { text } = await generateText({
-  model: openai('gpt-5-mini'),
-  prompt: 'https://docs.firecrawl.dev をクロール(3ページまで)して要約',
-  tools: { crawl: crawlTool, poll: pollTool },
-});
-
-console.log(text);
-```
-
-
-<div id="batch-scrape">
-  ### バッチスクレイピング
-</div>
-
-非同期で実行されます。ジョブのステータスを確認するには `pollTool` を含めてください。
-
-```typescript
-import { generateText } from 'ai';
-import { openai } from '@ai-sdk/openai';
-import { batchScrapeTool, pollTool } from 'firecrawl-aisdk';
-
-const { text } = await generateText({
-  model: openai('gpt-5-mini'),
-  prompt: 'Scrape https://firecrawl.dev and https://docs.firecrawl.dev, then compare',
-  tools: { batchScrape: batchScrapeTool, poll: pollTool },
-});
-
-console.log(text);
-```
-
-
-<div id="extract">
-  ### 抽出
-</div>
-
-これは非同期処理です。ジョブのステータスを確認するには `pollTool` を指定してください。
-
-```typescript
-import { generateText } from 'ai';
-import { openai } from '@ai-sdk/openai';
-import { extractTool, pollTool } from 'firecrawl-aisdk';
-
-const { text } = await generateText({
-  model: openai('gpt-5-mini'),
-  prompt: 'https://firecrawl.dev から主な機能を抽出',
-  tools: { extract: extractTool, poll: pollTool },
-});
-
-console.log(text);
 ```
 
 
@@ -191,16 +127,29 @@ console.log(text);
 
 ```typescript
 import { generateText } from 'ai';
-import { openai } from '@ai-sdk/openai';
-import { searchTool, scrapeTool } from 'firecrawl-aisdk';
+import { search, scrape } from 'firecrawl-aisdk';
 
 const { text } = await generateText({
-  model: openai('gpt-5-mini'),
+  model: 'anthropic/claude-sonnet-4.5',
   prompt: 'Search for Firecrawl, scrape the top result, and explain what it does',
-  tools: { search: searchTool, scrape: scrapeTool },
+  tools: { search, scrape },
 });
+```
 
-console.log(text);
+
+<div id="map">
+  ### マップ
+</div>
+
+```typescript
+import { generateText } from 'ai';
+import { map } from 'firecrawl-aisdk';
+
+const { text } = await generateText({
+  model: 'anthropic/claude-sonnet-4.5',
+  prompt: 'https://docs.firecrawl.dev をマップして主要なセクションをリストアップしてください',
+  tools: { map },
+});
 ```
 
 
@@ -210,13 +159,12 @@ console.log(text);
 
 ```typescript
 import { streamText } from 'ai';
-import { openai } from '@ai-sdk/openai';
-import { scrapeTool } from 'firecrawl-aisdk';
+import { scrape } from 'firecrawl-aisdk';
 
 const result = streamText({
-  model: openai('gpt-5-mini'),
+  model: 'anthropic/claude-sonnet-4.5',
   prompt: 'https://firecrawl.dev をスクレイピングして、それが何をするものか説明してください',
-  tools: { scrape: scrapeTool },
+  tools: { scrape },
 });
 
 for await (const chunk of result.textStream) {
@@ -226,25 +174,37 @@ for await (const chunk of result.textStream) {
 
 
 <div id="browser">
-  ### ブラウザ
+  ## ブラウザ
 </div>
 
-インタラクティブな Web ブラウジングには、`browserTool` を `ToolLoopAgent` と組み合わせて使用します。エージェントはページ遷移、要素のクリック、フォームへの入力、データの抽出を行うことができます。
+`browser` ツールは、初回の利用時に自動的にクラウドセッションを作成し、プロセス終了時に自動でクリーンアップを行います。
 
 ```typescript
-import { ToolLoopAgent, stepCountIs } from 'ai';
-import { openai } from '@ai-sdk/openai';
-import { browserTool } from 'firecrawl-aisdk';
+import { generateText, stepCountIs } from 'ai';
+import { browser } from 'firecrawl-aisdk';
 
-const { text } = await new ToolLoopAgent({
-  model: openai('gpt-5-mini'),
+const { text } = await generateText({
+  model: 'anthropic/claude-sonnet-4.5',
+  tools: { browser: browser() },
+  stopWhen: stepCountIs(25),
+  prompt: 'Go to https://news.ycombinator.com and get the top 3 stories.',
+});
+```
+
+ブラウザをリアルタイムで観察できるライブビュー用URLを取得したり、セッションのライフサイクルを手動で制御したりするには、次のようにします：
+
+```typescript
+const browserTool = browser();
+console.log('Live view:', await browserTool.start());
+
+const { text } = await generateText({
+  model: 'anthropic/claude-sonnet-4.5',
   tools: { browserTool },
   stopWhen: stepCountIs(25),
-}).generate({
-  prompt: 'Go to https://news.ycombinator.com, get the top 3 stories with their titles, points, and links.',
+  prompt: 'Go to https://news.ycombinator.com and get the top 3 stories.',
 });
 
-console.log(text);
+await browserTool.close();
 ```
 
 
@@ -252,22 +212,54 @@ console.log(text);
   ### Browser + Search
 </div>
 
-検索を起点に、その後インタラクティブにブラウジングしていくワークフローには、`browserTool` と `searchTool` を組み合わせて使用します。
-
 ```typescript
-import { ToolLoopAgent, stepCountIs } from 'ai';
-import { openai } from '@ai-sdk/openai';
-import { browserTool, searchTool } from 'firecrawl-aisdk';
+import { generateText, stepCountIs } from 'ai';
+import { browser, search } from 'firecrawl-aisdk';
 
-const { text } = await new ToolLoopAgent({
-  model: openai('gpt-5-mini'),
-  tools: { browserTool, searchTool },
+const { text } = await generateText({
+  model: 'anthropic/claude-sonnet-4.5',
+  tools: { browser: browser(), search },
   stopWhen: stepCountIs(25),
-}).generate({
   prompt: '今週のトップAI論文を検索し、閲覧して、主要な知見を要約する。',
 });
+```
 
-console.log(text);
+
+<div id="async-tools">
+  ## 非同期ツール
+</div>
+
+Crawl、batch scrape、extract、agent はジョブ ID を返します。結果を取得するには `poll` と組み合わせて使用します：
+
+<div id="crawl">
+  ### Crawl
+</div>
+
+```typescript
+import { generateText } from 'ai';
+import { crawl, poll } from 'firecrawl-aisdk';
+
+const { text } = await generateText({
+  model: 'anthropic/claude-sonnet-4.5',
+  prompt: 'Crawl https://docs.firecrawl.dev (limit 3 pages) and summarize',
+  tools: { crawl, poll },
+});
+```
+
+
+<div id="batch-scrape">
+  ### バッチスクレイプ
+</div>
+
+```typescript
+import { generateText } from 'ai';
+import { batchScrape, poll } from 'firecrawl-aisdk';
+
+const { text } = await generateText({
+  model: 'anthropic/claude-sonnet-4.5',
+  prompt: 'Scrape https://firecrawl.dev and https://docs.firecrawl.dev, then compare',
+  tools: { batchScrape, poll },
+});
 ```
 
 
@@ -275,19 +267,49 @@ console.log(text);
   ### エージェント
 </div>
 
-自律的な Web データ収集には `agentTool` を使用します。エージェントが自動で検索・ページ遷移・データ抽出を行います。
+自律的な Web データ収集 — 自動で検索・ページ遷移・データ抽出を行います。
 
 ```typescript
 import { generateText, stepCountIs } from 'ai';
-import { openai } from '@ai-sdk/openai';
-import { agentTool, pollTool } from 'firecrawl-aisdk';
+import { agent, poll } from 'firecrawl-aisdk';
 
 const { text } = await generateText({
-  model: openai('gpt-5-mini'),
+  model: 'anthropic/claude-sonnet-4.5',
   prompt: 'Find the founders of Firecrawl, their roles, and their backgrounds',
-  tools: { agent: agentTool, poll: pollTool },
+  tools: { agent, poll },
   stopWhen: stepCountIs(10),
 });
+```
 
-console.log(text);
+
+<div id="all-exports">
+  ## エクスポート一覧
+</div>
+
+```typescript
+import {
+  // デュアルパーパスツール（直接使用またはファクトリーとして呼び出し可能）
+  scrape,             // 単一URLをスクレイプ
+  search,             // ウェブを検索
+  map,                // サイト上のURLを探索
+  crawl,              // 複数ページをクロール（非同期）
+  batchScrape,        // 複数URLをスクレイプ（非同期）
+  agent,              // 自律型ウェブエージェント（非同期）
+  extract,            // 構造化データを抽出（非同期）
+
+  // ジョブ管理
+  poll,               // 非同期ジョブの結果をポーリング
+  status,             // ジョブのステータスを確認
+  cancel,             // 実行中のジョブをキャンセル
+
+  // ブラウザ（ファクトリー専用）
+  browser,            // browser({ firecrawlApiKey: '...' })
+
+  // オールインワンバンドル
+  FirecrawlTools,     // FirecrawlTools({ apiKey, search, scrape, browser })
+
+  // ヘルパー
+  stepLogger,         // ツール呼び出しごとのトークン統計
+  logStep,            // シンプルな1行ロギング
+} from 'firecrawl-aisdk';
 ```
