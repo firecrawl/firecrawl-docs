@@ -1,8 +1,8 @@
 ---
 title: 'Crawl'
-description: 'Firecrawl can recursively search through a urls subdomains, and gather the content'
+description: 'Recursively crawl a website and extract content from every page'
 og:title: 'Crawl | Firecrawl'
-og:description: 'Firecrawl can recursively search through a urls subdomains, and gather the content'
+og:description: 'Recursively crawl a website and extract content from every page'
 icon: 'spider'
 ---
 
@@ -33,37 +33,15 @@ import StartCrawlCLI from '/snippets/v2/start-crawl/base/cli.mdx';
 import StartCrawlOutput from '/snippets/v2/start-crawl/base/output.mdx';
 import PlaygroundCTA from "/snippets/shared/playground-cta-crawl.mdx";
 
-Firecrawl efficiently crawls websites to extract comprehensive data while handling complex web infrastructure. The process:
+Crawl submits a URL to Firecrawl and recursively discovers and scrapes every reachable subpage. It handles sitemaps, JavaScript rendering, and rate limits automatically, returning clean markdown or structured data for each page.
 
-1. **URL Analysis:** Scans sitemap and crawls website to identify links
-2. **Traversal:** Recursively follows links to find all subpages
-3. **Scraping:** Extracts content from each page, handling JS and rate limits
-4. **Output:** Converts data to clean markdown or structured format
-
-This ensures thorough data collection from any starting URL.
+- Discovers pages via sitemap and recursive link traversal
+- Supports path filtering, depth limits, and subdomain/external link control
+- Returns results via polling, WebSocket, or webhook
 
 <PlaygroundCTA />
 
-## Crawling
-
-### /crawl endpoint
-
-Used to crawl a URL and all accessible subpages. This submits a crawl job and returns a job ID to check the status of the crawl.
-
-<Warning>
-  By default - Crawl will ignore sublinks of a page if they aren't children of
-  the url you provide. So, the website.com/other-parent/blog-1 wouldn't be
-  returned if you crawled website.com/blogs/. If you want
-  website.com/other-parent/blog-1, use the `crawlEntireDomain` parameter. To
-  crawl subdomains like blog.website.com when crawling website.com, use the
-  `allowSubdomains` parameter.
-</Warning>
-
-<Info>
-  By default, the crawler includes the website's sitemap to discover URLs (`sitemap: "include"`). If you set `sitemap: "skip"`, the crawler will only find pages reachable through HTML links starting from the root URL. Assets like PDFs or deeply nested pages that are listed in the sitemap but not directly linked from any HTML page will be missed. For maximum coverage, keep the default `sitemap: "include"` setting.
-</Info>
-
-### Installation
+## Installation
 
 <CodeGroup>
 
@@ -73,7 +51,9 @@ Used to crawl a URL and all accessible subpages. This submits a crawl job and re
 
 </CodeGroup>
 
-### Usage
+## Basic usage
+
+Submit a crawl job by calling `POST /v2/crawl` with a starting URL. The endpoint returns a job ID that you use to poll for results.
 
 <CodeGroup>
 
@@ -85,14 +65,34 @@ Used to crawl a URL and all accessible subpages. This submits a crawl job and re
 </CodeGroup>
 
 <Info>
-  Each page crawled consumes 1 credit. The default crawl `limit` is 10,000 pages — set a lower `limit` to control credit usage (e.g. `limit: 100`). Additional credits apply for certain options: JSON mode costs 4 additional credits per page, enhanced proxy costs 4 additional credits per page, and PDF parsing costs 1 credit per PDF page.
+  Each page crawled consumes 1 credit. The default crawl `limit` is 10,000 pages. Set a lower `limit` to control credit usage (e.g. `limit: 100`). Additional credits apply for certain options: JSON mode costs 4 additional credits per page, enhanced proxy costs 4 additional credits per page, and PDF parsing costs 1 credit per PDF page.
 </Info>
 
-### Scrape options in crawl
+### Scrape options
 
-All options from the Scrape endpoint are available in Crawl via `scrapeOptions` (JS) / `scrape_options` (Python). These apply to every page the crawler scrapes: formats, proxy, caching, actions, location, tags, etc. See the full list in the [Scrape API Reference](https://docs.firecrawl.dev/api-reference/endpoint/scrape).
+All options from the [Scrape endpoint](/api-reference/endpoint/scrape) are available in crawl via `scrapeOptions` (JS) / `scrape_options` (Python). These apply to every page the crawler scrapes, including formats, proxy, caching, actions, location, and tags.
 
 <CodeGroup>
+
+```python Python
+from firecrawl import Firecrawl
+
+firecrawl = Firecrawl(api_key='fc-YOUR_API_KEY')
+
+# Crawl with scrape options
+response = firecrawl.crawl('https://example.com',
+    limit=100,
+    scrape_options={
+        'formats': [
+            'markdown',
+            { 'type': 'json', 'schema': { 'type': 'object', 'properties': { 'title': { 'type': 'string' } } } }
+        ],
+        'proxy': 'auto',
+        'max_age': 600000,
+        'only_main_content': True
+    }
+)
+```
 
 ```js Node
 import Firecrawl from '@mendable/firecrawl-js';
@@ -117,49 +117,11 @@ const crawlResponse = await firecrawl.crawl('https://example.com', {
 });
 ```
 
-```python Python
-from firecrawl import Firecrawl
-
-firecrawl = Firecrawl(api_key='fc-YOUR_API_KEY')
-
-# Crawl with scrape options
-response = firecrawl.crawl('https://example.com',
-    limit=100,
-    scrape_options={
-        'formats': [
-            'markdown',
-            { 'type': 'json', 'schema': { 'type': 'object', 'properties': { 'title': { 'type': 'string' } } } }
-        ],
-        'proxy': 'auto',
-        'max_age': 600000,
-        'only_main_content': True
-    }
-)
-```
-
 </CodeGroup>
 
-### API Response
+## Checking crawl status
 
-If you're using cURL or the starter method, this will return an `ID` to check the status of the crawl.
-
-<Note>
-  If you're using the SDK, see methods below for waiter vs starter behavior.
-</Note>
-
-<StartCrawlOutput />
-
-### Check Crawl Job
-
-Used to check the status of a crawl job and get its result.
-
-<Note>
-  Job results are available via the API for 24 hours after completion. After this period, you can still view your crawl history and results in the [activity logs](https://www.firecrawl.dev/app/logs).
-</Note>
-
-<Note>
-  Pages in the crawl results `data` array are pages that Firecrawl successfully scraped — even if the target site returned an HTTP error like 404. The `metadata.statusCode` field shows the HTTP status code from the target site. To retrieve pages that Firecrawl itself failed to scrape (e.g. network errors, timeouts, or robots.txt blocks), use the dedicated [Get Crawl Errors](/api-reference/endpoint/crawl-get-errors) endpoint (`GET /crawl/{id}/errors`).
-</Note>
+Use the job ID to poll for the crawl status and retrieve results.
 
 <CodeGroup>
 
@@ -170,18 +132,22 @@ Used to check the status of a crawl job and get its result.
 
 </CodeGroup>
 
-#### Response Handling
+<Note>
+  Job results are available via the API for 24 hours after completion. After this period, you can still view your crawl history and results in the [activity logs](https://www.firecrawl.dev/app/logs).
+</Note>
 
-The response varies based on the crawl's status.
+<Note>
+  Pages in the crawl results `data` array are pages that Firecrawl successfully scraped, even if the target site returned an HTTP error like 404. The `metadata.statusCode` field shows the HTTP status code from the target site. To retrieve pages that Firecrawl itself failed to scrape (e.g. network errors, timeouts, or robots.txt blocks), use the dedicated [Get Crawl Errors](/api-reference/endpoint/crawl-get-errors) endpoint (`GET /crawl/{id}/errors`).
+</Note>
 
-For not completed or large responses exceeding 10MB, a `next` URL parameter is provided. You must request this URL to retrieve the next 10MB of data. If the `next` parameter is absent, it indicates the end of the crawl data.
+### Response handling
 
-The skip parameter sets the maximum number of results returned for each chunk of results returned.
+The response varies based on the crawl's status. For incomplete or large responses exceeding 10MB, a `next` URL parameter is provided. You must request this URL to retrieve the next 10MB of data. If the `next` parameter is absent, it indicates the end of the crawl data.
 
 <Info>
-  The skip and next parameter are only relavent when hitting the api directly.
-  If you're using the SDK, we handle this for you and will return all the
-  results at once.
+  The `skip` and `next` parameters are only relevant when hitting the API directly.
+  If you're using the SDK, pagination is handled automatically and all
+  results are returned at once.
 </Info>
 
 <CodeGroup>
@@ -189,14 +155,13 @@ The skip parameter sets the maximum number of results returned for each chunk of
   <CheckCrawlJobOutputCompleted />
 </CodeGroup>
 
-### SDK methods
+## SDK methods
 
-There are two ways to use the SDK:
+There are two ways to use crawl with the SDK.
 
-1. **Crawl then wait** (`crawl`):
-   - Waits for the crawl to complete and returns the full response
-   - Handles pagination automatically
-   - Recommended for most use cases
+### Crawl and wait
+
+The `crawl` method waits for the crawl to complete and returns the full response. It handles pagination automatically. This is recommended for most use cases.
 
 <CodeGroup>
   <PythonCrawlExample />
@@ -210,10 +175,9 @@ The response includes the crawl status and all scraped data:
   <NodeCrawlExampleResponse />
 </CodeGroup>
 
-2. **Start then check status** (`startCrawl`/`start_crawl`):
-   - Returns immediately with a crawl ID
-   - Allows manual status checking
-   - Useful for long-running crawls or custom polling logic
+### Start and check later
+
+The `startCrawl` / `start_crawl` method returns immediately with a crawl ID. You then poll for status manually. This is useful for long-running crawls or custom polling logic.
 
 <CodeGroup>
   <StartCrawlPython />
@@ -222,31 +186,35 @@ The response includes the crawl status and all scraped data:
   <StartCrawlCLI />
 </CodeGroup>
 
-## Crawl WebSocket
+The initial response returns the job ID:
 
-Firecrawl's WebSocket-based method, `Crawl URL and Watch`, enables real-time data extraction and monitoring. Start a crawl with a URL and customize it with options like page limits, allowed domains, and output formats, ideal for immediate data processing needs.
+<StartCrawlOutput />
+
+## Real-time results with WebSocket
+
+The watcher method provides real-time updates as pages are crawled. Start a crawl, then subscribe to events for immediate data processing.
 
 <CodeGroup>
   <CrawlWebSocketPython />
   <CrawlWebSocketNode />
 </CodeGroup>
 
-## Crawl Webhook
+## Webhooks
 
-You can configure webhooks to receive real-time notifications as your crawl progresses. This allows you to process pages as they're scraped instead of waiting for the entire crawl to complete.
+You can configure webhooks to receive real-time notifications as your crawl progresses. This allows you to process pages as they are scraped instead of waiting for the entire crawl to complete.
 
 <CrawlWebhookCURL />
 
-### Quick Reference
+### Event types
 
-**Event Types:**
+| Event | Description |
+|-------|-------------|
+| `crawl.started` | Fires when the crawl begins |
+| `crawl.page` | Fires for each page successfully scraped |
+| `crawl.completed` | Fires when the crawl finishes |
+| `crawl.failed` | Fires if the crawl encounters an error |
 
-- `crawl.started` - When the crawl begins
-- `crawl.page` - For each page successfully scraped
-- `crawl.completed` - When the crawl finishes
-- `crawl.failed` - If the crawl encounters an error
-
-**Basic Payload:**
+### Payload
 
 ```json
 {
@@ -259,11 +227,9 @@ You can configure webhooks to receive real-time notifications as your crawl prog
 }
 ```
 
-### Security: Verifying Webhook Signatures
+### Verifying webhook signatures
 
-Every webhook request from Firecrawl includes an `X-Firecrawl-Signature` header containing an HMAC-SHA256 signature. **Always verify this signature** to ensure the webhook is authentic and hasn't been tampered with.
-
-**How it works:**
+Every webhook request from Firecrawl includes an `X-Firecrawl-Signature` header containing an HMAC-SHA256 signature. Always verify this signature to ensure the webhook is authentic and has not been tampered with.
 
 1. Get your webhook secret from the [Advanced tab](https://www.firecrawl.dev/app/settings?tab=advanced) of your account settings
 2. Extract the signature from the `X-Firecrawl-Signature` header
@@ -274,8 +240,38 @@ Every webhook request from Firecrawl includes an `X-Firecrawl-Signature` header 
   Never process a webhook without verifying its signature first. The `X-Firecrawl-Signature` header contains the signature in the format: `sha256=abc123def456...`
 </Warning>
 
-For complete implementation examples in JavaScript and Python, see the [Webhook Security documentation](/webhooks/security).
+For complete implementation examples in JavaScript and Python, see the [Webhook Security documentation](/webhooks/security). For comprehensive webhook documentation including detailed event payloads, payload structure, advanced configuration, and troubleshooting, see the [Webhooks documentation](/webhooks/overview).
 
-### Full Documentation
+## Configuration reference
 
-For comprehensive webhook documentation including detailed event payloads, payload structure, advanced configuration, and troubleshooting, see the [Webhooks documentation](/webhooks/overview).
+The full set of parameters available when submitting a crawl job:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `url` | `string` | (required) | The starting URL to crawl from |
+| `limit` | `integer` | `10000` | Maximum number of pages to crawl |
+| `maxDiscoveryDepth` | `integer` | (none) | Maximum depth from the root URL based on discovery order. The root site and sitemapped pages have a discovery depth of 0. |
+| `includePaths` | `string[]` | (none) | URL pathname regex patterns to include. Only matching paths are crawled. |
+| `excludePaths` | `string[]` | (none) | URL pathname regex patterns to exclude from the crawl |
+| `regexOnFullURL` | `boolean` | `false` | Match `includePaths`/`excludePaths` against the full URL (including query parameters) instead of just the pathname |
+| `crawlEntireDomain` | `boolean` | `false` | Follow internal links to sibling or parent URLs, not just child paths |
+| `allowSubdomains` | `boolean` | `false` | Follow links to subdomains of the main domain |
+| `allowExternalLinks` | `boolean` | `false` | Follow links to external websites |
+| `sitemap` | `string` | `"include"` | Sitemap handling: `"include"` (default), `"skip"`, or `"only"` |
+| `ignoreQueryParameters` | `boolean` | `false` | Avoid re-scraping the same path with different query parameters |
+| `delay` | `number` | (none) | Delay in seconds between scrapes to respect rate limits |
+| `maxConcurrency` | `integer` | (none) | Maximum concurrent scrapes. Defaults to your team's concurrency limit. |
+| `scrapeOptions` | `object` | (none) | Options applied to every scraped page (formats, proxy, caching, actions, etc.) |
+| `webhook` | `object` | (none) | Webhook configuration for real-time notifications |
+| `prompt` | `string` | (none) | Natural language prompt to generate crawl options. Explicitly set parameters override generated equivalents. |
+
+## Important details
+
+<Warning>
+  By default, crawl ignores sublinks that are not children of the URL you provide. For example, `website.com/other-parent/blog-1` would not be returned if you crawled `website.com/blogs/`. Use the `crawlEntireDomain` parameter to include sibling and parent paths. To crawl subdomains like `blog.website.com` when crawling `website.com`, use the `allowSubdomains` parameter.
+</Warning>
+
+- **Sitemap discovery**: By default, the crawler includes the website's sitemap to discover URLs (`sitemap: "include"`). If you set `sitemap: "skip"`, only pages reachable through HTML links from the root URL are found. Assets like PDFs or deeply nested pages listed in the sitemap but not directly linked from HTML will be missed. For maximum coverage, keep the default setting.
+- **Credit usage**: Each page crawled costs 1 credit. JSON mode adds 4 credits per page, enhanced proxy adds 4 credits per page, and PDF parsing costs 1 credit per PDF page.
+- **Result expiration**: Job results are available via the API for 24 hours after completion. After that, view results in the [activity logs](https://www.firecrawl.dev/app/logs).
+- **Crawl errors**: The `data` array contains pages Firecrawl successfully scraped. Use the [Get Crawl Errors](/api-reference/endpoint/crawl-get-errors) endpoint to retrieve pages that failed due to network errors, timeouts, or robots.txt blocks.
