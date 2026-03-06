@@ -1,0 +1,518 @@
+---
+title: 'Java'
+description: 'Firecrawl Java SDK 是对 Firecrawl API 的封装，帮助你轻松将网站转换为 Markdown。'
+icon: 'java'
+og:title: "Java SDK | Firecrawl"
+og:description: "Firecrawl Java SDK 是对 Firecrawl API 的封装，帮助你轻松将网站转换为 Markdown。"
+---
+
+<div id="installation">
+  ## 安装
+</div>
+
+要安装 Firecrawl Java SDK，请将以下依赖添加到项目中：
+
+<Tabs>
+  <Tab title="Gradle（Kotlin DSL）">
+    ```kotlin
+    repositories {
+        mavenCentral()
+        maven { url = uri("https://jitpack.io") }
+    }
+
+    dependencies {
+        implementation("com.github.firecrawl:firecrawl-java-sdk:2.0")
+    }
+    ```
+  </Tab>
+
+  <Tab title="Gradle（Groovy）">
+    ```groovy
+    repositories {
+        mavenCentral()
+        maven { url 'https://jitpack.io' }
+    }
+
+    dependencies {
+        implementation 'com.github.firecrawl:firecrawl-java-sdk:2.0'
+    }
+    ```
+  </Tab>
+
+  <Tab title="Maven">
+    ```xml
+    <repositories>
+        <repository>
+            <id>jitpack.io</id>
+            <url>https://jitpack.io</url>
+        </repository>
+    </repositories>
+
+    <dependency>
+        <groupId>com.github.firecrawl</groupId>
+        <artifactId>firecrawl-java-sdk</artifactId>
+        <version>2.0</version>
+    </dependency>
+    ```
+  </Tab>
+</Tabs>
+
+<Note>需要 Java 17 或更高版本。</Note>
+
+<div id="usage">
+  ## 用法
+</div>
+
+1. 从 [firecrawl.dev](https://firecrawl.dev) 获取 API 密钥
+2. 将 API 密钥设置为名为 `FIRECRAWL_API_KEY` 的环境变量，或将其传入 `FirecrawlClient` 构造函数。
+
+以下是一个使用 SDK 并进行错误处理的示例：
+
+```java Java
+import dev.firecrawl.client.FirecrawlClient;
+import dev.firecrawl.exception.ApiException;
+import dev.firecrawl.exception.FirecrawlException;
+import dev.firecrawl.model.*;
+import java.io.IOException;
+import java.time.Duration;
+import java.util.UUID;
+
+public class Example {
+    public static void main(String[] args) {
+        FirecrawlClient client = new FirecrawlClient(
+            System.getenv("FIRECRAWL_API_KEY"),
+            null,
+            Duration.ofSeconds(60)
+        );
+
+        try {
+            // 抓取一个 URL
+            ScrapeParams scrapeParams = new ScrapeParams();
+            scrapeParams.setFormats(new String[]{"markdown"});
+            FirecrawlDocument doc = client.scrapeURL("https://firecrawl.dev", scrapeParams);
+            System.out.println(doc.getMarkdown());
+
+            // 爬取一个网站
+            CrawlParams crawlParams = new CrawlParams();
+            crawlParams.setLimit(5);
+            CrawlStatusResponse job = client.crawlURL(
+                "https://firecrawl.dev",
+                crawlParams,
+                UUID.randomUUID().toString(),
+                5
+            );
+
+            if ("completed".equalsIgnoreCase(job.getStatus()) && job.getData() != null) {
+                for (FirecrawlDocument page : job.getData()) {
+                    System.out.println(page.getMetadata().get("sourceURL"));
+                }
+            }
+        } catch (ApiException e) {
+            System.err.println("API error " + e.getStatusCode() + ": " + e.getResponseBody());
+        } catch (FirecrawlException e) {
+            System.err.println("Firecrawl error: " + e.getMessage());
+        } catch (IOException e) {
+            System.err.println("Network error: " + e.getMessage());
+        }
+    }
+}
+```
+
+
+<div id="scraping-a-url">
+  ### 抓取 URL
+</div>
+
+要抓取单个 URL，请使用 `scrapeURL` 方法。该方法接收 URL 作为参数，并返回一个 `FirecrawlDocument` 类型的抓取结果。
+
+```java Java
+ScrapeParams params = new ScrapeParams();
+params.setFormats(new String[]{"markdown", "html"});
+params.setOnlyMainContent(true);
+params.setWaitFor(5000);
+
+FirecrawlDocument doc = client.scrapeURL("https://firecrawl.dev", params);
+
+System.out.println(doc.getMarkdown());
+System.out.println(doc.getMetadata().get("title"));
+```
+
+
+<div id="json-extraction">
+  #### JSON 提取
+</div>
+
+通过指定 JSON Schema 和提示词，使用 Extract 端点提取结构化数据：
+
+```java Java
+import dev.firecrawl.model.ExtractParams;
+import dev.firecrawl.model.ExtractResponse;
+import dev.firecrawl.model.ExtractStatusResponse;
+import java.util.Map;
+
+ExtractParams extractParams = new ExtractParams(new String[]{"https://firecrawl.dev"});
+extractParams.setPrompt("Extract the product name and price");
+extractParams.setSchema(Map.of(
+    "type", "object",
+    "properties", Map.of(
+        "name", Map.of("type", "string"),
+        "price", Map.of("type", "number")
+    )
+));
+
+ExtractResponse start = client.extract(extractParams);
+ExtractStatusResponse result = client.getExtractStatus(start.getId());
+
+System.out.println(result.getData());
+```
+
+
+<div id="crawling-a-website">
+  ### 抓取网站
+</div>
+
+要抓取一个网站，请使用 `crawlURL` 方法。该方法接受起始 URL 和可选参数。`crawlURL` 方法可以通过轮询返回抓取到的文档。
+
+```java Java
+CrawlParams crawlParams = new CrawlParams();
+crawlParams.setLimit(50);
+crawlParams.setMaxDiscoveryDepth(3);
+
+ScrapeParams scrapeParams = new ScrapeParams();
+scrapeParams.setFormats(new String[]{"markdown"});
+
+crawlParams.setScrapeOptions(scrapeParams);
+
+CrawlStatusResponse job = client.crawlURL(
+    "https://firecrawl.dev",
+    crawlParams,
+    UUID.randomUUID().toString(),
+    10
+);
+
+System.out.println("Status: " + job.getStatus());
+System.out.println("Pages crawled: " + (job.getData() != null ? job.getData().length : 0));
+
+if (job.getData() != null) {
+    for (FirecrawlDocument doc : job.getData()) {
+        System.out.println(doc.getMetadata().get("sourceURL"));
+    }
+}
+```
+
+
+<div id="start-a-crawl">
+  ### 开始抓取
+</div>
+
+使用 `startCrawl` 可直接启动任务，无需等待完成。它会返回一个任务 ID，你可以用它来检查状态。
+
+```java Java
+CrawlParams crawlParams = new CrawlParams();
+crawlParams.setLimit(100);
+
+CrawlResponse start = client.startCrawl("https://firecrawl.dev", crawlParams);
+
+System.out.println("Job ID: " + start.getId());
+```
+
+
+<div id="checking-crawl-status">
+  ### 检查爬取状态
+</div>
+
+要检查爬取任务的状态，请使用 `getCrawlStatus` 方法。该方法接受任务 ID 作为参数，并返回该爬取任务的当前状态。
+
+```java Java
+CrawlStatusResponse status = client.getCrawlStatus(start.getId());
+System.out.println("Status: " + status.getStatus());
+System.out.println("Progress: " + status.getCompleted() + "/" + status.getTotal());
+```
+
+
+<div id="cancelling-a-crawl">
+  ### 取消爬取任务
+</div>
+
+要取消爬取任务，请使用 `cancelCrawlJob` 方法。该方法接收任务 ID 作为参数，并返回取消状态。
+
+```java Java
+CancelCrawlJobResponse result = client.cancelCrawlJob(start.getId());
+System.out.println(result);
+```
+
+
+<div id="mapping-a-website">
+  ### 映射网站
+</div>
+
+要对网站进行映射，请使用 `mapURL` 方法。该方法接受起始 URL 作为参数，并返回发现的 URL 列表。
+
+```java Java
+MapParams mapParams = new MapParams();
+mapParams.setLimit(100);
+mapParams.setSearch("blog");
+
+MapResponse data = client.mapURL("https://firecrawl.dev", mapParams);
+
+if (data.getLinks() != null) {
+    for (String link : data.getLinks()) {
+        System.out.println(link);
+    }
+}
+```
+
+
+<div id="searching-the-web">
+  ### 搜索 Web
+</div>
+
+使用 `search` 方法搜索 Web，并可选择抓取搜索结果。
+
+```java Java
+SearchParams searchParams = new SearchParams("firecrawl web scraping");
+searchParams.setLimit(10);
+
+SearchResponse results = client.search(searchParams);
+
+if (results.getResults() != null) {
+    for (SearchResult result : results.getResults()) {
+        System.out.println(result.getTitle() + " — " + result.getUrl());
+    }
+}
+```
+
+
+<div id="batch-scraping">
+  ### 批量抓取
+</div>
+
+使用 `batchScrape` 方法并行抓取多个 URL。
+
+```java Java
+BatchScrapeParams batchParams = new BatchScrapeParams(new String[]{
+    "https://firecrawl.dev",
+    "https://firecrawl.dev/blog"
+});
+
+ScrapeParams batchScrapeOptions = new ScrapeParams();
+batchScrapeOptions.setFormats(new String[]{"markdown"});
+
+batchParams.setScrapeOptions(batchScrapeOptions);
+
+BatchScrapeResponse start = client.batchScrape(batchParams);
+BatchScrapeStatusResponse status = client.getBatchScrapeStatus(start.getId());
+
+if (status.getData() != null) {
+    for (FirecrawlDocument doc : status.getData()) {
+        System.out.println(doc.getMarkdown());
+    }
+}
+```
+
+
+<div id="agent">
+  ### Agent
+</div>
+
+运行一个由 AI 驱动的智能体，对网页进行调研并提取数据。
+
+```java Java
+AgentParams params = new AgentParams("Find the pricing plans for Firecrawl and compare them");
+
+AgentResponse start = client.createAgent(params);
+AgentStatusResponse result = client.getAgentStatus(start.getId());
+
+System.out.println(result.getData());
+```
+
+通过 JSON Schema 进行结构化输出：
+
+```java Java
+AgentParams params = new AgentParams("Extract pricing plan details");
+params.setUrls(new String[]{"https://firecrawl.dev"});
+params.setSchema(Map.of(
+    "type", "object",
+    "properties", Map.of(
+        "plans", Map.of(
+            "type", "array",
+            "items", Map.of(
+                "type", "object",
+                "properties", Map.of(
+                    "name", Map.of("type", "string"),
+                    "price", Map.of("type", "string")
+                )
+            )
+        )
+    )
+));
+
+AgentResponse start = client.createAgent(params);
+AgentStatusResponse result = client.getAgentStatus(start.getId());
+
+System.out.println(result.getData());
+```
+
+
+<div id="usage-metrics">
+  ### 使用情况与指标
+</div>
+
+查看你的额度和 Token 用量：
+
+```java Java
+AccountCreditUsageResponse credits = client.getCreditUsage();
+System.out.println("Remaining credits: " + credits.getData().getRemainingCredits());
+
+AccountTokenUsageResponse tokens = client.getTokenUsage();
+System.out.println("Remaining tokens: " + tokens.getData().getRemainingTokens());
+```
+
+
+<div id="async-support">
+  ## 异步支持
+</div>
+
+Java SDK 提供的是同步方法。如果你需要非阻塞执行，可将调用封装到 `CompletableFuture` 中，或使用你自己的执行器：
+
+```java Java
+import java.util.concurrent.CompletableFuture;
+
+CompletableFuture<FirecrawlDocument> future = CompletableFuture.supplyAsync(() -> {
+    try {
+        ScrapeParams params = new ScrapeParams();
+        params.setFormats(new String[]{"markdown"});
+        return client.scrapeURL("https://firecrawl.dev", params);
+    } catch (Exception e) {
+        throw new RuntimeException(e);
+    }
+});
+
+future.thenAccept(doc -> System.out.println(doc.getMarkdown()));
+```
+
+
+<div id="browser">
+  ## Browser
+</div>
+
+可通过 REST API 使用 Browser Sandbox。在 Java 中，你可以使用标准的 `HttpClient` 直接调用浏览器端点。
+
+<div id="create-a-session">
+  ### 创建会话
+</div>
+
+```java Java
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+
+HttpClient http = HttpClient.newHttpClient();
+
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.firecrawl.dev/v2/browser"))
+    .header("Authorization", "Bearer " + System.getenv("FIRECRAWL_API_KEY"))
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("{\"ttl\":120,\"activityTtl\":60}"))
+    .build();
+
+HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+System.out.println(response.body()); // 包含 session id、cdpUrl、liveViewUrl
+```
+
+
+<div id="execute-code">
+  ### 执行代码
+</div>
+
+```java Java
+String sessionId = "YOUR_SESSION_ID";
+
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.firecrawl.dev/v2/browser/" + sessionId + "/execute"))
+    .header("Authorization", "Bearer " + System.getenv("FIRECRAWL_API_KEY"))
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString(
+        "{\"code\":\"await page.goto(\\\\\"https://example.com\\\\\"); const t = await page.title(); console.log(t);\",\"language\":\"node\"}"
+    ))
+    .build();
+
+HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+System.out.println(response.body());
+```
+
+
+<div id="list-close-sessions">
+  ### 列出并关闭会话
+</div>
+
+```java Java
+// 列出活跃会话
+HttpRequest list = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.firecrawl.dev/v2/browser?status=active"))
+    .header("Authorization", "Bearer " + System.getenv("FIRECRAWL_API_KEY"))
+    .GET()
+    .build();
+
+HttpResponse<String> listResponse = http.send(list, HttpResponse.BodyHandlers.ofString());
+System.out.println(listResponse.body());
+
+// 关闭会话
+HttpRequest close = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.firecrawl.dev/v2/browser"))
+    .header("Authorization", "Bearer " + System.getenv("FIRECRAWL_API_KEY"))
+    .header("Content-Type", "application/json")
+    .method("DELETE", HttpRequest.BodyPublishers.ofString("{\"id\":\"" + sessionId + "\"}"))
+    .build();
+
+HttpResponse<String> closeResponse = http.send(close, HttpResponse.BodyHandlers.ofString());
+System.out.println(closeResponse.body());
+```
+
+
+<div id="configuration">
+  ## 配置
+</div>
+
+`FirecrawlClient` 构造函数支持以下选项：
+
+| 选项        | 类型         | 默认值                         | 说明                                       |
+| --------- | ---------- | --------------------------- | ---------------------------------------- |
+| `apiKey`  | `String`   | `FIRECRAWL_API_KEY` 环境变量    | 你的 Firecrawl API 密钥                      |
+| `apiUrl`  | `String`   | `https://api.firecrawl.dev` | API 基础 URL (或 `FIRECRAWL_API_URL` 环境变量)  |
+| `timeout` | `Duration` | `null`                      | HTTP 请求超时时间                              |
+
+```java Java
+import java.time.Duration;
+
+FirecrawlClient client = new FirecrawlClient(
+    System.getenv("FIRECRAWL_API_KEY"),
+    "https://api.firecrawl.dev",
+    Duration.ofSeconds(300)
+);
+```
+
+
+<div id="error-handling">
+  ## 错误处理
+</div>
+
+对于 HTTP 错误，SDK 会抛出 `ApiException`；对于其他 SDK 错误，会抛出 `FirecrawlException`。
+
+```java Java
+import dev.firecrawl.exception.ApiException;
+import dev.firecrawl.exception.FirecrawlException;
+
+try {
+    ScrapeParams params = new ScrapeParams();
+    params.setFormats(new String[]{"markdown"});
+    FirecrawlDocument doc = client.scrapeURL("https://firecrawl.dev", params);
+} catch (ApiException e) {
+    System.err.println("API error " + e.getStatusCode() + ": " + e.getResponseBody());
+} catch (FirecrawlException e) {
+    System.err.println("Firecrawl error: " + e.getMessage());
+} catch (IOException e) {
+    System.err.println("Network error: " + e.getMessage());
+}
+```
