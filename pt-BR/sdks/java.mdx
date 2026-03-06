@@ -1,0 +1,518 @@
+---
+title: 'Java'
+description: 'O SDK Java do Firecrawl é um wrapper da API do Firecrawl para ajudar você a transformar sites em markdown com facilidade.'
+icon: 'java'
+og:title: "SDK Java | Firecrawl"
+og:description: "O SDK Java do Firecrawl é um wrapper da API do Firecrawl para ajudar você a transformar sites em markdown com facilidade."
+---
+
+<div id="installation">
+  ## Instalação
+</div>
+
+Para instalar o SDK Java do Firecrawl, adicione a dependência ao seu projeto:
+
+<Tabs>
+  <Tab title="Gradle (DSL do Kotlin)">
+    ```kotlin
+    repositories {
+        mavenCentral()
+        maven { url = uri("https://jitpack.io") }
+    }
+
+    dependencies {
+        implementation("com.github.firecrawl:firecrawl-java-sdk:2.0")
+    }
+    ```
+  </Tab>
+
+  <Tab title="Gradle (Groovy)">
+    ```groovy
+    repositories {
+        mavenCentral()
+        maven { url 'https://jitpack.io' }
+    }
+
+    dependencies {
+        implementation 'com.github.firecrawl:firecrawl-java-sdk:2.0'
+    }
+    ```
+  </Tab>
+
+  <Tab title="Maven">
+    ```xml
+    <repositories>
+        <repository>
+            <id>jitpack.io</id>
+            <url>https://jitpack.io</url>
+        </repository>
+    </repositories>
+
+    <dependency>
+        <groupId>com.github.firecrawl</groupId>
+        <artifactId>firecrawl-java-sdk</artifactId>
+        <version>2.0</version>
+    </dependency>
+    ```
+  </Tab>
+</Tabs>
+
+<Note>Requer Java 17 ou superior.</Note>
+
+<div id="usage">
+  ## Uso
+</div>
+
+1. Obtenha uma chave de API no [firecrawl.dev](https://firecrawl.dev)
+2. Defina a chave de API como uma variável de ambiente chamada `FIRECRAWL_API_KEY` ou passe-a para o construtor `FirecrawlClient`.
+
+Aqui está um exemplo de como usar o SDK com tratamento de erros:
+
+```java Java
+import dev.firecrawl.client.FirecrawlClient;
+import dev.firecrawl.exception.ApiException;
+import dev.firecrawl.exception.FirecrawlException;
+import dev.firecrawl.model.*;
+import java.io.IOException;
+import java.time.Duration;
+import java.util.UUID;
+
+public class Example {
+    public static void main(String[] args) {
+        FirecrawlClient client = new FirecrawlClient(
+            System.getenv("FIRECRAWL_API_KEY"),
+            null,
+            Duration.ofSeconds(60)
+        );
+
+        try {
+            // Fazer scrape de uma URL
+            ScrapeParams scrapeParams = new ScrapeParams();
+            scrapeParams.setFormats(new String[]{"markdown"});
+            FirecrawlDocument doc = client.scrapeURL("https://firecrawl.dev", scrapeParams);
+            System.out.println(doc.getMarkdown());
+
+            // Fazer crawl de um site
+            CrawlParams crawlParams = new CrawlParams();
+            crawlParams.setLimit(5);
+            CrawlStatusResponse job = client.crawlURL(
+                "https://firecrawl.dev",
+                crawlParams,
+                UUID.randomUUID().toString(),
+                5
+            );
+
+            if ("completed".equalsIgnoreCase(job.getStatus()) && job.getData() != null) {
+                for (FirecrawlDocument page : job.getData()) {
+                    System.out.println(page.getMetadata().get("sourceURL"));
+                }
+            }
+        } catch (ApiException e) {
+            System.err.println("API error " + e.getStatusCode() + ": " + e.getResponseBody());
+        } catch (FirecrawlException e) {
+            System.err.println("Firecrawl error: " + e.getMessage());
+        } catch (IOException e) {
+            System.err.println("Network error: " + e.getMessage());
+        }
+    }
+}
+```
+
+
+<div id="scraping-a-url">
+  ### Fazendo scraping de uma URL
+</div>
+
+Para fazer scraping de uma única URL, use o método `scrapeURL`. Ele recebe a URL como parâmetro e retorna os dados extraídos como um `FirecrawlDocument`.
+
+```java Java
+ScrapeParams params = new ScrapeParams();
+params.setFormats(new String[]{"markdown", "html"});
+params.setOnlyMainContent(true);
+params.setWaitFor(5000);
+
+FirecrawlDocument doc = client.scrapeURL("https://firecrawl.dev", params);
+
+System.out.println(doc.getMarkdown());
+System.out.println(doc.getMetadata().get("title"));
+```
+
+
+<div id="json-extraction">
+  #### Extração de JSON
+</div>
+
+Extraia dados estruturados usando o endpoint Extract, especificando um esquema JSON e um prompt:
+
+```java Java
+import dev.firecrawl.model.ExtractParams;
+import dev.firecrawl.model.ExtractResponse;
+import dev.firecrawl.model.ExtractStatusResponse;
+import java.util.Map;
+
+ExtractParams extractParams = new ExtractParams(new String[]{"https://firecrawl.dev"});
+extractParams.setPrompt("Extract the product name and price");
+extractParams.setSchema(Map.of(
+    "type", "object",
+    "properties", Map.of(
+        "name", Map.of("type", "string"),
+        "price", Map.of("type", "number")
+    )
+));
+
+ExtractResponse start = client.extract(extractParams);
+ExtractStatusResponse result = client.getExtractStatus(start.getId());
+
+System.out.println(result.getData());
+```
+
+
+<div id="crawling-a-website">
+  ### Rastreando um site
+</div>
+
+Para rastrear um site, use o método `crawlURL`. Ele recebe a URL inicial e parâmetros opcionais como argumentos. O método `crawlURL` pode fazer polling e retornar os documentos rastreados.
+
+```java Java
+CrawlParams crawlParams = new CrawlParams();
+crawlParams.setLimit(50);
+crawlParams.setMaxDiscoveryDepth(3);
+
+ScrapeParams scrapeParams = new ScrapeParams();
+scrapeParams.setFormats(new String[]{"markdown"});
+
+crawlParams.setScrapeOptions(scrapeParams);
+
+CrawlStatusResponse job = client.crawlURL(
+    "https://firecrawl.dev",
+    crawlParams,
+    UUID.randomUUID().toString(),
+    10
+);
+
+System.out.println("Status: " + job.getStatus());
+System.out.println("Pages crawled: " + (job.getData() != null ? job.getData().length : 0));
+
+if (job.getData() != null) {
+    for (FirecrawlDocument doc : job.getData()) {
+        System.out.println(doc.getMetadata().get("sourceURL"));
+    }
+}
+```
+
+
+<div id="start-a-crawl">
+  ### Iniciar um crawl
+</div>
+
+Inicie uma tarefa sem esperar usando `startCrawl`. Ele retorna um ID da tarefa que você pode usar para verificar o status.
+
+```java Java
+CrawlParams crawlParams = new CrawlParams();
+crawlParams.setLimit(100);
+
+CrawlResponse start = client.startCrawl("https://firecrawl.dev", crawlParams);
+
+System.out.println("Job ID: " + start.getId());
+```
+
+
+<div id="checking-crawl-status">
+  ### Verificando o status do crawl
+</div>
+
+Para verificar o status de um job de crawl, use o método `getCrawlStatus`. Ele recebe o ID do job como parâmetro e retorna o status atual do crawl.
+
+```java Java
+CrawlStatusResponse status = client.getCrawlStatus(start.getId());
+System.out.println("Status: " + status.getStatus());
+System.out.println("Progress: " + status.getCompleted() + "/" + status.getTotal());
+```
+
+
+<div id="cancelling-a-crawl">
+  ### Cancelando um crawl
+</div>
+
+Para cancelar um job de crawl, use o método `cancelCrawlJob`. Ele recebe o ID do job como parâmetro e retorna o status do cancelamento.
+
+```java Java
+CancelCrawlJobResponse result = client.cancelCrawlJob(start.getId());
+System.out.println(result);
+```
+
+
+<div id="mapping-a-website">
+  ### Mapeando um site
+</div>
+
+Para mapear um site, use o método `mapURL`. Ele recebe a URL inicial como parâmetro e retorna as URLs encontradas.
+
+```java Java
+MapParams mapParams = new MapParams();
+mapParams.setLimit(100);
+mapParams.setSearch("blog");
+
+MapResponse data = client.mapURL("https://firecrawl.dev", mapParams);
+
+if (data.getLinks() != null) {
+    for (String link : data.getLinks()) {
+        System.out.println(link);
+    }
+}
+```
+
+
+<div id="searching-the-web">
+  ### Pesquisando na web
+</div>
+
+Pesquise na web e, opcionalmente, extraia os resultados usando o método `search`.
+
+```java Java
+SearchParams searchParams = new SearchParams("firecrawl web scraping");
+searchParams.setLimit(10);
+
+SearchResponse results = client.search(searchParams);
+
+if (results.getResults() != null) {
+    for (SearchResult result : results.getResults()) {
+        System.out.println(result.getTitle() + " — " + result.getUrl());
+    }
+}
+```
+
+
+<div id="batch-scraping">
+  ### Raspagem em lote
+</div>
+
+Faça a raspagem de várias URLs em paralelo usando o método `batchScrape`.
+
+```java Java
+BatchScrapeParams batchParams = new BatchScrapeParams(new String[]{
+    "https://firecrawl.dev",
+    "https://firecrawl.dev/blog"
+});
+
+ScrapeParams batchScrapeOptions = new ScrapeParams();
+batchScrapeOptions.setFormats(new String[]{"markdown"});
+
+batchParams.setScrapeOptions(batchScrapeOptions);
+
+BatchScrapeResponse start = client.batchScrape(batchParams);
+BatchScrapeStatusResponse status = client.getBatchScrapeStatus(start.getId());
+
+if (status.getData() != null) {
+    for (FirecrawlDocument doc : status.getData()) {
+        System.out.println(doc.getMarkdown());
+    }
+}
+```
+
+
+<div id="agent">
+  ### Agente
+</div>
+
+Execute um agente com IA para pesquisar e extrair dados da web.
+
+```java Java
+AgentParams params = new AgentParams("Find the pricing plans for Firecrawl and compare them");
+
+AgentResponse start = client.createAgent(params);
+AgentStatusResponse result = client.getAgentStatus(start.getId());
+
+System.out.println(result.getData());
+```
+
+Com um esquema JSON para saída estruturada:
+
+```java Java
+AgentParams params = new AgentParams("Extract pricing plan details");
+params.setUrls(new String[]{"https://firecrawl.dev"});
+params.setSchema(Map.of(
+    "type", "object",
+    "properties", Map.of(
+        "plans", Map.of(
+            "type", "array",
+            "items", Map.of(
+                "type", "object",
+                "properties", Map.of(
+                    "name", Map.of("type", "string"),
+                    "price", Map.of("type", "string")
+                )
+            )
+        )
+    )
+));
+
+AgentResponse start = client.createAgent(params);
+AgentStatusResponse result = client.getAgentStatus(start.getId());
+
+System.out.println(result.getData());
+```
+
+
+<div id="usage-metrics">
+  ### Uso &amp; métricas
+</div>
+
+Verifique o uso de créditos e tokens:
+
+```java Java
+AccountCreditUsageResponse credits = client.getCreditUsage();
+System.out.println("Remaining credits: " + credits.getData().getRemainingCredits());
+
+AccountTokenUsageResponse tokens = client.getTokenUsage();
+System.out.println("Remaining tokens: " + tokens.getData().getRemainingTokens());
+```
+
+
+<div id="async-support">
+  ## Suporte assíncrono
+</div>
+
+O SDK Java fornece métodos síncronos. Se você precisar de execução sem bloqueio, encapsule as chamadas em `CompletableFuture` ou use seu próprio executor:
+
+```java Java
+import java.util.concurrent.CompletableFuture;
+
+CompletableFuture<FirecrawlDocument> future = CompletableFuture.supplyAsync(() -> {
+    try {
+        ScrapeParams params = new ScrapeParams();
+        params.setFormats(new String[]{"markdown"});
+        return client.scrapeURL("https://firecrawl.dev", params);
+    } catch (Exception e) {
+        throw new RuntimeException(e);
+    }
+});
+
+future.thenAccept(doc -> System.out.println(doc.getMarkdown()));
+```
+
+
+<div id="browser">
+  ## Browser
+</div>
+
+O Browser Sandbox está disponível pela API REST. Em Java, você pode chamar os endpoints do navegador diretamente usando o `HttpClient` padrão.
+
+<div id="create-a-session">
+  ### Criar uma sessão
+</div>
+
+```java Java
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+
+HttpClient http = HttpClient.newHttpClient();
+
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.firecrawl.dev/v2/browser"))
+    .header("Authorization", "Bearer " + System.getenv("FIRECRAWL_API_KEY"))
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("{\"ttl\":120,\"activityTtl\":60}"))
+    .build();
+
+HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+System.out.println(response.body()); // contém session id, cdpUrl, liveViewUrl
+```
+
+
+<div id="execute-code">
+  ### Executar código
+</div>
+
+```java Java
+String sessionId = "YOUR_SESSION_ID";
+
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.firecrawl.dev/v2/browser/" + sessionId + "/execute"))
+    .header("Authorization", "Bearer " + System.getenv("FIRECRAWL_API_KEY"))
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString(
+        "{\"code\":\"await page.goto(\\\\\"https://example.com\\\\\"); const t = await page.title(); console.log(t);\",\"language\":\"node\"}"
+    ))
+    .build();
+
+HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+System.out.println(response.body());
+```
+
+
+<div id="list-close-sessions">
+  ### Listar &amp; Encerrar Sessões
+</div>
+
+```java Java
+// Listar sessões ativas
+HttpRequest list = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.firecrawl.dev/v2/browser?status=active"))
+    .header("Authorization", "Bearer " + System.getenv("FIRECRAWL_API_KEY"))
+    .GET()
+    .build();
+
+HttpResponse<String> listResponse = http.send(list, HttpResponse.BodyHandlers.ofString());
+System.out.println(listResponse.body());
+
+// Encerrar uma sessão
+HttpRequest close = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.firecrawl.dev/v2/browser"))
+    .header("Authorization", "Bearer " + System.getenv("FIRECRAWL_API_KEY"))
+    .header("Content-Type", "application/json")
+    .method("DELETE", HttpRequest.BodyPublishers.ofString("{\"id\":\"" + sessionId + "\"}"))
+    .build();
+
+HttpResponse<String> closeResponse = http.send(close, HttpResponse.BodyHandlers.ofString());
+System.out.println(closeResponse.body());
+```
+
+
+<div id="configuration">
+  ## Configuração
+</div>
+
+O construtor `FirecrawlClient` oferece suporte às seguintes opções:
+
+| Opção     | Tipo       | Padrão                                   | Descrição                                                       |
+| --------- | ---------- | ---------------------------------------- | --------------------------------------------------------------- |
+| `apiKey`  | `String`   | variável de ambiente `FIRECRAWL_API_KEY` | Sua chave de API da Firecrawl                                   |
+| `apiUrl`  | `String`   | `https://api.firecrawl.dev`              | URL base da API (ou a variável de ambiente `FIRECRAWL_API_URL`) |
+| `timeout` | `Duration` | `null`                                   | Tempo limite da solicitação HTTP                                |
+
+```java Java
+import java.time.Duration;
+
+FirecrawlClient client = new FirecrawlClient(
+    System.getenv("FIRECRAWL_API_KEY"),
+    "https://api.firecrawl.dev",
+    Duration.ofSeconds(300)
+);
+```
+
+
+<div id="error-handling">
+  ## Tratamento de erros
+</div>
+
+O SDK lança `ApiException` para erros HTTP e `FirecrawlException` para outros erros do SDK.
+
+```java Java
+import dev.firecrawl.exception.ApiException;
+import dev.firecrawl.exception.FirecrawlException;
+
+try {
+    ScrapeParams params = new ScrapeParams();
+    params.setFormats(new String[]{"markdown"});
+    FirecrawlDocument doc = client.scrapeURL("https://firecrawl.dev", params);
+} catch (ApiException e) {
+    System.err.println("API error " + e.getStatusCode() + ": " + e.getResponseBody());
+} catch (FirecrawlException e) {
+    System.err.println("Firecrawl error: " + e.getMessage());
+} catch (IOException e) {
+    System.err.println("Network error: " + e.getMessage());
+}
+```

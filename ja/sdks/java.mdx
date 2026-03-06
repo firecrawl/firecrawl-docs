@@ -1,0 +1,518 @@
+---
+title: 'Java'
+description: 'Firecrawl Java SDK は、Web サイトを簡単に Markdown に変換するための Firecrawl API のラッパーです。'
+icon: 'java'
+og:title: "Java SDK | Firecrawl"
+og:description: "Firecrawl Java SDK は、Web サイトを簡単に Markdown に変換するための Firecrawl API のラッパーです。"
+---
+
+<div id="installation">
+  ## インストール
+</div>
+
+Firecrawl Java SDK をインストールするには、プロジェクトに以下の依存関係を追加します。
+
+<Tabs>
+  <Tab title="Gradle (Kotlin DSL)">
+    ```kotlin
+    repositories {
+        mavenCentral()
+        maven { url = uri("https://jitpack.io") }
+    }
+
+    dependencies {
+        implementation("com.github.firecrawl:firecrawl-java-sdk:2.0")
+    }
+    ```
+  </Tab>
+
+  <Tab title="Gradle (Groovy)">
+    ```groovy
+    repositories {
+        mavenCentral()
+        maven { url 'https://jitpack.io' }
+    }
+
+    dependencies {
+        implementation 'com.github.firecrawl:firecrawl-java-sdk:2.0'
+    }
+    ```
+  </Tab>
+
+  <Tab title="Maven">
+    ```xml
+    <repositories>
+        <repository>
+            <id>jitpack.io</id>
+            <url>https://jitpack.io</url>
+        </repository>
+    </repositories>
+
+    <dependency>
+        <groupId>com.github.firecrawl</groupId>
+        <artifactId>firecrawl-java-sdk</artifactId>
+        <version>2.0</version>
+    </dependency>
+    ```
+  </Tab>
+</Tabs>
+
+<Note>Java 17 以降が必要です。</Note>
+
+<div id="usage">
+  ## 使用方法
+</div>
+
+1. [firecrawl.dev](https://firecrawl.dev) で API キーを取得します
+2. API キーを `FIRECRAWL_API_KEY` という名前の環境変数に設定するか、`FirecrawlClient` コンストラクタに渡します。
+
+以下は、エラーハンドリングを含めた SDK の使用例です。
+
+```java Java
+import dev.firecrawl.client.FirecrawlClient;
+import dev.firecrawl.exception.ApiException;
+import dev.firecrawl.exception.FirecrawlException;
+import dev.firecrawl.model.*;
+import java.io.IOException;
+import java.time.Duration;
+import java.util.UUID;
+
+public class Example {
+    public static void main(String[] args) {
+        FirecrawlClient client = new FirecrawlClient(
+            System.getenv("FIRECRAWL_API_KEY"),
+            null,
+            Duration.ofSeconds(60)
+        );
+
+        try {
+            // URLをスクレイプする
+            ScrapeParams scrapeParams = new ScrapeParams();
+            scrapeParams.setFormats(new String[]{"markdown"});
+            FirecrawlDocument doc = client.scrapeURL("https://firecrawl.dev", scrapeParams);
+            System.out.println(doc.getMarkdown());
+
+            // ウェブサイトをクロールする
+            CrawlParams crawlParams = new CrawlParams();
+            crawlParams.setLimit(5);
+            CrawlStatusResponse job = client.crawlURL(
+                "https://firecrawl.dev",
+                crawlParams,
+                UUID.randomUUID().toString(),
+                5
+            );
+
+            if ("completed".equalsIgnoreCase(job.getStatus()) && job.getData() != null) {
+                for (FirecrawlDocument page : job.getData()) {
+                    System.out.println(page.getMetadata().get("sourceURL"));
+                }
+            }
+        } catch (ApiException e) {
+            System.err.println("API error " + e.getStatusCode() + ": " + e.getResponseBody());
+        } catch (FirecrawlException e) {
+            System.err.println("Firecrawl error: " + e.getMessage());
+        } catch (IOException e) {
+            System.err.println("Network error: " + e.getMessage());
+        }
+    }
+}
+```
+
+
+<div id="scraping-a-url">
+  ### URL のスクレイピング
+</div>
+
+単一の URL をスクレイピングするには、`scrapeURL` メソッドを使用します。このメソッドは URL をパラメータとして受け取り、スクレイピングしたデータを `FirecrawlDocument` として返します。
+
+```java Java
+ScrapeParams params = new ScrapeParams();
+params.setFormats(new String[]{"markdown", "html"});
+params.setOnlyMainContent(true);
+params.setWaitFor(5000);
+
+FirecrawlDocument doc = client.scrapeURL("https://firecrawl.dev", params);
+
+System.out.println(doc.getMarkdown());
+System.out.println(doc.getMetadata().get("title"));
+```
+
+
+<div id="json-extraction">
+  #### JSON 抽出
+</div>
+
+JSON スキーマとプロンプトを指定して、Extract エンドポイントで構造化データを抽出します。
+
+```java Java
+import dev.firecrawl.model.ExtractParams;
+import dev.firecrawl.model.ExtractResponse;
+import dev.firecrawl.model.ExtractStatusResponse;
+import java.util.Map;
+
+ExtractParams extractParams = new ExtractParams(new String[]{"https://firecrawl.dev"});
+extractParams.setPrompt("Extract the product name and price");
+extractParams.setSchema(Map.of(
+    "type", "object",
+    "properties", Map.of(
+        "name", Map.of("type", "string"),
+        "price", Map.of("type", "number")
+    )
+));
+
+ExtractResponse start = client.extract(extractParams);
+ExtractStatusResponse result = client.getExtractStatus(start.getId());
+
+System.out.println(result.getData());
+```
+
+
+<div id="crawling-a-website">
+  ### ウェブサイトのクロール
+</div>
+
+ウェブサイトをクロールするには、`crawlURL` メソッドを使用します。このメソッドは、開始URLと任意のパラメータを引数として受け取ります。`crawlURL` メソッドは、ポーリングによってクロール済みのドキュメントを返すこともできます。
+
+```java Java
+CrawlParams crawlParams = new CrawlParams();
+crawlParams.setLimit(50);
+crawlParams.setMaxDiscoveryDepth(3);
+
+ScrapeParams scrapeParams = new ScrapeParams();
+scrapeParams.setFormats(new String[]{"markdown"});
+
+crawlParams.setScrapeOptions(scrapeParams);
+
+CrawlStatusResponse job = client.crawlURL(
+    "https://firecrawl.dev",
+    crawlParams,
+    UUID.randomUUID().toString(),
+    10
+);
+
+System.out.println("Status: " + job.getStatus());
+System.out.println("Pages crawled: " + (job.getData() != null ? job.getData().length : 0));
+
+if (job.getData() != null) {
+    for (FirecrawlDocument doc : job.getData()) {
+        System.out.println(doc.getMetadata().get("sourceURL"));
+    }
+}
+```
+
+
+<div id="start-a-crawl">
+  ### クロールを開始する
+</div>
+
+`startCrawl` を使うと、待機せずにジョブを開始できます。返されるジョブ ID を使ってステータスを確認できます。
+
+```java Java
+CrawlParams crawlParams = new CrawlParams();
+crawlParams.setLimit(100);
+
+CrawlResponse start = client.startCrawl("https://firecrawl.dev", crawlParams);
+
+System.out.println("Job ID: " + start.getId());
+```
+
+
+<div id="checking-crawl-status">
+  ### クロールステータスの確認
+</div>
+
+クロールジョブのステータスを確認するには、`getCrawlStatus` メソッドを使用します。このメソッドはジョブ ID をパラメータとして受け取り、クロールジョブの現在のステータスを返します。
+
+```java Java
+CrawlStatusResponse status = client.getCrawlStatus(start.getId());
+System.out.println("Status: " + status.getStatus());
+System.out.println("Progress: " + status.getCompleted() + "/" + status.getTotal());
+```
+
+
+<div id="cancelling-a-crawl">
+  ### クロールのキャンセル
+</div>
+
+クロールジョブをキャンセルするには、`cancelCrawlJob` メソッドを使用します。このメソッドはジョブ ID をパラメータとして受け取り、キャンセルのステータスを返します。
+
+```java Java
+CancelCrawlJobResponse result = client.cancelCrawlJob(start.getId());
+System.out.println(result);
+```
+
+
+<div id="mapping-a-website">
+  ### ウェブサイトのマッピング
+</div>
+
+ウェブサイトをマッピングするには、`mapURL` メソッドを使用します。このメソッドは起点となる URL をパラメータとして受け取り、見つかった URL を返します。
+
+```java Java
+MapParams mapParams = new MapParams();
+mapParams.setLimit(100);
+mapParams.setSearch("blog");
+
+MapResponse data = client.mapURL("https://firecrawl.dev", mapParams);
+
+if (data.getLinks() != null) {
+    for (String link : data.getLinks()) {
+        System.out.println(link);
+    }
+}
+```
+
+
+<div id="searching-the-web">
+  ### Web 検索
+</div>
+
+`search` メソッドを使用して Web を検索し、必要に応じて検索結果をスクレイピングします。
+
+```java Java
+SearchParams searchParams = new SearchParams("firecrawl web scraping");
+searchParams.setLimit(10);
+
+SearchResponse results = client.search(searchParams);
+
+if (results.getResults() != null) {
+    for (SearchResult result : results.getResults()) {
+        System.out.println(result.getTitle() + " — " + result.getUrl());
+    }
+}
+```
+
+
+<div id="batch-scraping">
+  ### バッチスクレイピング
+</div>
+
+`batchScrape` メソッドを使用すると、複数のURLを並列でスクレイピングできます。
+
+```java Java
+BatchScrapeParams batchParams = new BatchScrapeParams(new String[]{
+    "https://firecrawl.dev",
+    "https://firecrawl.dev/blog"
+});
+
+ScrapeParams batchScrapeOptions = new ScrapeParams();
+batchScrapeOptions.setFormats(new String[]{"markdown"});
+
+batchParams.setScrapeOptions(batchScrapeOptions);
+
+BatchScrapeResponse start = client.batchScrape(batchParams);
+BatchScrapeStatusResponse status = client.getBatchScrapeStatus(start.getId());
+
+if (status.getData() != null) {
+    for (FirecrawlDocument doc : status.getData()) {
+        System.out.println(doc.getMarkdown());
+    }
+}
+```
+
+
+<div id="agent">
+  ### エージェント
+</div>
+
+AI エージェントを実行して、Web を調査し、データを抽出します。
+
+```java Java
+AgentParams params = new AgentParams("Find the pricing plans for Firecrawl and compare them");
+
+AgentResponse start = client.createAgent(params);
+AgentStatusResponse result = client.getAgentStatus(start.getId());
+
+System.out.println(result.getData());
+```
+
+構造化出力用のJSONスキーマを使用する場合：
+
+```java Java
+AgentParams params = new AgentParams("Extract pricing plan details");
+params.setUrls(new String[]{"https://firecrawl.dev"});
+params.setSchema(Map.of(
+    "type", "object",
+    "properties", Map.of(
+        "plans", Map.of(
+            "type", "array",
+            "items", Map.of(
+                "type", "object",
+                "properties", Map.of(
+                    "name", Map.of("type", "string"),
+                    "price", Map.of("type", "string")
+                )
+            )
+        )
+    )
+));
+
+AgentResponse start = client.createAgent(params);
+AgentStatusResponse result = client.getAgentStatus(start.getId());
+
+System.out.println(result.getData());
+```
+
+
+<div id="usage-metrics">
+  ### 使用状況とメトリクス
+</div>
+
+クレジットとトークンの使用状況を確認できます。
+
+```java Java
+AccountCreditUsageResponse credits = client.getCreditUsage();
+System.out.println("Remaining credits: " + credits.getData().getRemainingCredits());
+
+AccountTokenUsageResponse tokens = client.getTokenUsage();
+System.out.println("Remaining tokens: " + tokens.getData().getRemainingTokens());
+```
+
+
+<div id="async-support">
+  ## 非同期サポート
+</div>
+
+Java SDK は同期メソッドを提供します。ノンブロッキングな動作が必要な場合は、呼び出しを `CompletableFuture` でラップするか、独自の Executor を使用してください。
+
+```java Java
+import java.util.concurrent.CompletableFuture;
+
+CompletableFuture<FirecrawlDocument> future = CompletableFuture.supplyAsync(() -> {
+    try {
+        ScrapeParams params = new ScrapeParams();
+        params.setFormats(new String[]{"markdown"});
+        return client.scrapeURL("https://firecrawl.dev", params);
+    } catch (Exception e) {
+        throw new RuntimeException(e);
+    }
+});
+
+future.thenAccept(doc -> System.out.println(doc.getMarkdown()));
+```
+
+
+<div id="browser">
+  ## Browser
+</div>
+
+Browser Sandbox は REST API 経由で利用できます。Java では、標準の `HttpClient` を使用して Browser のエンドポイントを直接呼び出せます。
+
+<div id="create-a-session">
+  ### セッションを作成
+</div>
+
+```java Java
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+
+HttpClient http = HttpClient.newHttpClient();
+
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.firecrawl.dev/v2/browser"))
+    .header("Authorization", "Bearer " + System.getenv("FIRECRAWL_API_KEY"))
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString("{\"ttl\":120,\"activityTtl\":60}"))
+    .build();
+
+HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+System.out.println(response.body()); // セッションID、cdpUrl、liveViewUrlを含む
+```
+
+
+<div id="execute-code">
+  ### コードを実行
+</div>
+
+```java Java
+String sessionId = "YOUR_SESSION_ID";
+
+HttpRequest request = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.firecrawl.dev/v2/browser/" + sessionId + "/execute"))
+    .header("Authorization", "Bearer " + System.getenv("FIRECRAWL_API_KEY"))
+    .header("Content-Type", "application/json")
+    .POST(HttpRequest.BodyPublishers.ofString(
+        "{\"code\":\"await page.goto(\\\\\"https://example.com\\\\\"); const t = await page.title(); console.log(t);\",\"language\":\"node\"}"
+    ))
+    .build();
+
+HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+System.out.println(response.body());
+```
+
+
+<div id="list-close-sessions">
+  ### セッションの一覧表示と終了
+</div>
+
+```java Java
+// アクティブなセッションを一覧表示
+HttpRequest list = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.firecrawl.dev/v2/browser?status=active"))
+    .header("Authorization", "Bearer " + System.getenv("FIRECRAWL_API_KEY"))
+    .GET()
+    .build();
+
+HttpResponse<String> listResponse = http.send(list, HttpResponse.BodyHandlers.ofString());
+System.out.println(listResponse.body());
+
+// セッションを閉じる
+HttpRequest close = HttpRequest.newBuilder()
+    .uri(URI.create("https://api.firecrawl.dev/v2/browser"))
+    .header("Authorization", "Bearer " + System.getenv("FIRECRAWL_API_KEY"))
+    .header("Content-Type", "application/json")
+    .method("DELETE", HttpRequest.BodyPublishers.ofString("{\"id\":\"" + sessionId + "\"}"))
+    .build();
+
+HttpResponse<String> closeResponse = http.send(close, HttpResponse.BodyHandlers.ofString());
+System.out.println(closeResponse.body());
+```
+
+
+<div id="configuration">
+  ## 設定
+</div>
+
+`FirecrawlClient` のコンストラクタは、以下のオプションに対応しています。
+
+| オプション     | 型          | デフォルト                       | 説明                                              |
+| --------- | ---------- | --------------------------- | ----------------------------------------------- |
+| `apiKey`  | `String`   | `FIRECRAWL_API_KEY` env var | Firecrawl の API キー                              |
+| `apiUrl`  | `String`   | `https://api.firecrawl.dev` | API のベース URL (または `FIRECRAWL_API_URL` env var)  |
+| `timeout` | `Duration` | `null`                      | HTTP リクエストのタイムアウト                               |
+
+```java Java
+import java.time.Duration;
+
+FirecrawlClient client = new FirecrawlClient(
+    System.getenv("FIRECRAWL_API_KEY"),
+    "https://api.firecrawl.dev",
+    Duration.ofSeconds(300)
+);
+```
+
+
+<div id="error-handling">
+  ## エラーハンドリング
+</div>
+
+SDK は、HTTP エラーの場合は `ApiException` を、その他の SDK エラーの場合は `FirecrawlException` をスローします。
+
+```java Java
+import dev.firecrawl.exception.ApiException;
+import dev.firecrawl.exception.FirecrawlException;
+
+try {
+    ScrapeParams params = new ScrapeParams();
+    params.setFormats(new String[]{"markdown"});
+    FirecrawlDocument doc = client.scrapeURL("https://firecrawl.dev", params);
+} catch (ApiException e) {
+    System.err.println("API error " + e.getStatusCode() + ": " + e.getResponseBody());
+} catch (FirecrawlException e) {
+    System.err.println("Firecrawl error: " + e.getMessage());
+} catch (IOException e) {
+    System.err.println("Network error: " + e.getMessage());
+}
+```
