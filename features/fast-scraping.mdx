@@ -5,87 +5,250 @@ og:title: "Faster Scraping | Firecrawl"
 og:description: "Speed up your scrapes by 500% with the maxAge parameter"
 ---
 
-import FastScrapePython from "/snippets/v2/scrape/fast/python.mdx";
-import FastScrapeNode from "/snippets/v2/scrape/fast/js.mdx";
-import FastScrapeCURL from "/snippets/v2/scrape/fast/curl.mdx";
-import FastCrawlPython from "/snippets/v2/crawl/fast/python.mdx";
-import FastCrawlNode from "/snippets/v2/crawl/fast/js.mdx";
-import FastCrawlCURL from "/snippets/v2/crawl/fast/curl.mdx";
+Firecrawl caches previously scraped pages and returns a recent copy when one is available. Set the `maxAge` parameter to control how fresh a cached result must be, and get results up to 500% faster when you don't need real-time content.
 
-## How It Works
+- Works with `/scrape`, `/crawl`, and `/batch/scrape`
+- Returns cached results in milliseconds instead of seconds
+- Defaults to a 2-day freshness window (`172800000` ms)
 
-Firecrawl caches previously scraped pages and, by default, returns a recent copy when available.
+## How it works
 
-- **Default freshness**: `maxAge = 172800000` ms (2 days). If the cached copy is newer than this, it’s returned instantly; otherwise, Firecrawl scrapes fresh and updates the cache.
-- **Force fresh**: Set `maxAge: 0` to always scrape. Be aware this bypasses the cache entirely, meaning every request goes through the full scraping pipeline, meaning that the request will take longer to complete and is more likely to fail. Use a non-zero `maxAge` if you don't need real-time content on every request.
-- **Skip caching**: Set `storeInCache: false` if you don’t want to store results for a request.
+Every scrape stores the result in a cache keyed by URL. On subsequent requests, Firecrawl checks whether a cached copy exists that is newer than your `maxAge` value. If it does, the cached copy is returned instantly. If not, Firecrawl scrapes fresh, updates the cache, and returns the new result.
 
-Get your results **up to 500% faster** when you don’t need the absolute freshest data. Control freshness via `maxAge`:
+| Scenario | What happens |
+|----------|-------------|
+| Cached copy is newer than `maxAge` | Cached result returned instantly |
+| Cached copy is older than `maxAge` | Fresh scrape performed, cache updated |
+| No cached copy exists | Fresh scrape performed, result cached |
+| `maxAge` set to `0` | Cache bypassed, always scrapes fresh |
 
-1. **Return instantly** if we have a recent version of the page
-2. **Scrape fresh** only if our version is older than your specified age
-3. **Save you time** - results come back in milliseconds instead of seconds
+## Basic usage
 
-## When to Use This
-
-**Great for:**
-- Documentation, articles, product pages
-- Bulk processing jobs
-- Development and testing
-- Building knowledge bases
-
-**Skip for:**
-- Real-time data (stock prices, live scores, breaking news)
-- Frequently updated content
-- Time-sensitive applications
-
-## Usage
-
-Add `maxAge` to your scrape request. Values are in milliseconds (e.g., `3600000` = 1 hour).
+Add `maxAge` to your scrape request. The value is in milliseconds (for example, `3600000` = 1 hour).
 
 <CodeGroup>
 
-<FastScrapePython />
+```python Python
+from firecrawl import Firecrawl
 
-<FastScrapeNode />
+firecrawl = Firecrawl(api_key="fc-YOUR-API-KEY")
+
+result = firecrawl.scrape(
+    "https://example.com/pricing",
+    formats=["markdown"],
+    max_age=3600000  # 1 hour in milliseconds
+)
+
+print(result.markdown)
+```
+
+```js Node
+import Firecrawl from '@mendable/firecrawl-js';
+
+const firecrawl = new Firecrawl({ apiKey: "fc-YOUR-API-KEY" });
+
+const result = await firecrawl.scrape('https://example.com/pricing', {
+  formats: ['markdown'],
+  maxAge: 3600000 // 1 hour in milliseconds
+});
+
+console.log(result.markdown);
+```
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/scrape \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer fc-YOUR-API-KEY" \
+  -d '{
+    "url": "https://example.com/pricing",
+    "formats": ["markdown"],
+    "maxAge": 3600000
+  }'
+```
 
 </CodeGroup>
+
+### Response
+
+The response is identical to a standard scrape. The only difference is speed: cached results return in milliseconds.
+
+```json
+{
+  "success": true,
+  "data": {
+    "markdown": "# Pricing\n\nStarter: $9/mo\nPro: $29/mo...",
+    "metadata": {
+      "title": "Pricing",
+      "url": "https://example.com/pricing",
+      "statusCode": 200
+    }
+  }
+}
+```
+
+## When to use caching
+
+**Good candidates:**
+- Documentation, articles, and product pages
+- Bulk processing jobs where content doesn't change between runs
+- Development and testing workflows
+- Building knowledge bases from relatively static content
+
+**Skip caching for:**
+- Real-time data (stock prices, live scores, breaking news)
+- Frequently updated content where freshness is critical
+- Time-sensitive applications
 
 ## Common maxAge values
 
-Here are some helpful reference values:
+| Duration | Value (ms) | Use case |
+|----------|-----------|----------|
+| 5 minutes | `300000` | Semi-dynamic content |
+| 1 hour | `3600000` | Content that updates hourly |
+| 1 day | `86400000` | Daily-updated content |
+| 2 days | `172800000` | Default value |
+| 1 week | `604800000` | Relatively static content |
 
-- **5 minutes**: `300000` - For semi-dynamic content
-- **1 hour**: `3600000` - For content that updates hourly
-- **1 day**: `86400000` - For daily-updated content
-- **1 week**: `604800000` - For relatively static content
+## Force a fresh scrape
 
-## Performance impact
-
-With `maxAge` enabled:
-
-- **500% faster response times** for recent content
-- **Instant results** instead of waiting for fresh scrapes
-
-## Important notes
-
-- **Default**: `maxAge` is `172800000` (2 days)
-- **Fresh when needed**: If our data is older than `maxAge`, we scrape fresh automatically
-- **No stale data**: You'll never get data older than your specified `maxAge`
-- **Credits**: Cached results still cost 1 credit per page. Caching improves speed and latency, not credit usage.
-
-## Faster crawling
-
-The same speed benefits apply when crawling multiple pages. Use `maxAge` within `scrapeOptions` to get cached results for pages we’ve seen recently.
+Set `maxAge: 0` to bypass the cache entirely and always scrape fresh. This sends every request through the full scraping pipeline, so requests will take longer and are more likely to fail. Use a non-zero `maxAge` if you don't need real-time content on every request.
 
 <CodeGroup>
 
-<FastCrawlPython />
-<FastCrawlNode />
-<FastCrawlCURL />
+```python Python
+result = firecrawl.scrape(
+    "https://example.com/pricing",
+    formats=["markdown"],
+    max_age=0  # Always scrape fresh
+)
+```
+
+```js Node
+const result = await firecrawl.scrape('https://example.com/pricing', {
+  formats: ['markdown'],
+  maxAge: 0 // Always scrape fresh
+});
+```
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/scrape \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer fc-YOUR-API-KEY" \
+  -d '{
+    "url": "https://example.com/pricing",
+    "formats": ["markdown"],
+    "maxAge": 0
+  }'
+```
 
 </CodeGroup>
 
-When crawling with `maxAge`, each page in your crawl will benefit from the 500% speed improvement if we have recent cached data for that page.
+## Skip storing in cache
 
-Start using `maxAge` today for dramatically faster scrapes and crawls!
+Set `storeInCache: false` if you don't want to store the result for a request. This scrapes the page without updating the cache, so future requests will still use the previously cached version.
+
+<CodeGroup>
+
+```python Python
+result = firecrawl.scrape(
+    "https://example.com/pricing",
+    formats=["markdown"],
+    store_in_cache=False
+)
+```
+
+```js Node
+const result = await firecrawl.scrape('https://example.com/pricing', {
+  formats: ['markdown'],
+  storeInCache: false
+});
+```
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/scrape \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer fc-YOUR-API-KEY" \
+  -d '{
+    "url": "https://example.com/pricing",
+    "formats": ["markdown"],
+    "storeInCache": false
+  }'
+```
+
+</CodeGroup>
+
+## Crawl with caching
+
+The same caching benefits apply when crawling multiple pages. Pass `maxAge` inside `scrapeOptions` to return cached results for pages that have been scraped recently.
+
+<CodeGroup>
+
+```python Python
+from firecrawl import Firecrawl
+from firecrawl.v2.types import ScrapeOptions
+
+firecrawl = Firecrawl(api_key="fc-YOUR-API-KEY")
+
+result = firecrawl.crawl(
+    "https://example.com",
+    limit=100,
+    scrape_options=ScrapeOptions(
+        formats=["markdown"],
+        max_age=3600000  # Use cached data if less than 1 hour old
+    )
+)
+
+for page in result.data:
+    print(f"URL: {page.metadata.source_url}")
+    print(f"Content: {page.markdown[:200]}...")
+```
+
+```js Node
+import Firecrawl from '@mendable/firecrawl-js';
+
+const firecrawl = new Firecrawl({ apiKey: "fc-YOUR-API-KEY" });
+
+const result = await firecrawl.crawl('https://example.com', {
+  limit: 100,
+  scrapeOptions: {
+    formats: ['markdown'],
+    maxAge: 3600000 // Use cached data if less than 1 hour old
+  }
+});
+
+result.data.forEach(page => {
+  console.log(`URL: ${page.metadata.sourceURL}`);
+  console.log(`Content: ${page.markdown.substring(0, 200)}...`);
+});
+```
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/crawl \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer fc-YOUR-API-KEY" \
+  -d '{
+    "url": "https://example.com",
+    "limit": 100,
+    "scrapeOptions": {
+      "formats": ["markdown"],
+      "maxAge": 3600000
+    }
+  }'
+```
+
+</CodeGroup>
+
+Each page in the crawl benefits from cached results individually. Pages with a recent cache entry return instantly, while pages without one are scraped fresh.
+
+## Configuration reference
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `maxAge` | `number` | `172800000` (2 days) | Maximum age of cached content in milliseconds. Set to `0` to always scrape fresh. |
+| `storeInCache` | `boolean` | `true` | Whether to store the scrape result in the cache for future requests. |
+
+## Important details
+
+- **Credits**: Cached results still cost 1 credit per page. Caching improves speed and latency, not credit usage.
+- **Freshness guarantee**: You will never receive data older than your specified `maxAge`. If no cached copy meets the freshness requirement, Firecrawl scrapes fresh automatically.
+- **Cache scope**: The cache is shared across your team. If a teammate recently scraped the same URL, your request can benefit from their cached result.
