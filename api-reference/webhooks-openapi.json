@@ -1,0 +1,693 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Firecrawl Webhooks",
+    "version": "v2",
+    "description": "Webhook event payloads delivered by the Firecrawl API."
+  },
+  "webhooks": {
+    "createWebhook": {
+      "post": {
+        "summary": "Create a webhook",
+        "description": "Firecrawl webhooks are configured inline when you create a job — there is no separate CRUD endpoint.\n\nPass a `webhook` object in the request body of any supported endpoint:\n\n- `POST /crawl`\n- `POST /batch/scrape`\n- `POST /agent`\n\nThe webhook is active for the lifetime of that job and cannot be modified after creation.",
+        "operationId": "createWebhook",
+        "tags": ["Webhooks"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["webhook"],
+                "properties": {
+                  "webhook": {
+                    "type": "object",
+                    "required": ["url"],
+                    "description": "Webhook configuration object. Include this in your crawl, batch scrape, or agent request body.",
+                    "properties": {
+                      "url": {
+                        "type": "string",
+                        "format": "uri",
+                        "description": "The HTTPS URL that will receive webhook `POST` requests. Must be publicly accessible."
+                      },
+                      "events": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Array of event types to subscribe to. If omitted, all events for the job type are delivered.\n\n**Crawl events:** `crawl.started`, `crawl.page`, `crawl.completed`\n\n**Batch Scrape events:** `batch_scrape.started`, `batch_scrape.page`, `batch_scrape.completed`\n\n**Agent events:** `agent.started`, `agent.action`, `agent.completed`, `agent.failed`, `agent.cancelled`"
+                      },
+                      "headers": {
+                        "type": "object",
+                        "additionalProperties": { "type": "string" },
+                        "description": "Custom HTTP headers sent with every webhook delivery. Useful for authentication tokens. The header name `x-firecrawl-signature` is reserved and will be rejected."
+                      },
+                      "metadata": {
+                        "type": "object",
+                        "additionalProperties": { "type": "string" },
+                        "description": "Arbitrary key-value pairs echoed back in every webhook payload. Use this to correlate deliveries with your internal records."
+                      }
+                    }
+                  }
+                }
+              },
+              "example": {
+                "url": "https://example.com/crawl",
+                "webhook": {
+                  "url": "https://your-server.com/webhooks/firecrawl",
+                  "events": ["crawl.page", "crawl.completed"],
+                  "headers": {
+                    "Authorization": "Bearer your-token"
+                  },
+                  "metadata": {
+                    "internalJobId": "job-123"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The job is created with the webhook attached. The response matches the standard endpoint response (`id`, `success`, etc.)."
+          }
+        }
+      }
+    },
+    "deleteWebhook": {
+      "post": {
+        "summary": "Delete a webhook",
+        "description": "Webhooks are tied to the lifecycle of a job — there is no separate delete endpoint.\n\nA webhook is automatically removed when its parent job reaches a terminal state (`completed`, `failed`, or `cancelled`). You can also stop receiving webhooks early by cancelling the job:\n\n- **Crawl:** `DELETE /crawl/{id}`\n- **Agent:** `DELETE /agent/{id}`\n\nBatch scrape jobs cannot be cancelled; the webhook remains active until the job completes.\n\nAll pending webhook deliveries for a cancelled job are discarded.",
+        "operationId": "deleteWebhook",
+        "tags": ["Webhooks"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              },
+              "example": {}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The job is cancelled and no further webhook deliveries will be sent."
+          }
+        }
+      }
+    },
+    "crawlStarted": {
+      "post": {
+        "summary": "Crawl Started",
+        "description": "Fired when a crawl job begins processing. Configure by passing a `webhook` object in your `POST /crawl` request.",
+        "operationId": "crawlStarted",
+        "tags": ["Crawl"],
+        "parameters": [
+          { "$ref": "#/components/parameters/FirecrawlSignature" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["success", "type", "id", "webhookId", "data"],
+                "properties": {
+                  "success": { "type": "boolean", "description": "Always `true` for this event.", "const": true },
+                  "type": { "type": "string", "description": "The event type.", "const": "crawl.started" },
+                  "id": { "type": "string", "format": "uuid", "description": "The crawl job ID, matching the `id` returned by `POST /crawl`." },
+                  "webhookId": { "type": "string", "format": "uuid", "description": "Unique identifier for this webhook delivery. Use for deduplication — the same value is sent on retries." },
+                  "data": { "type": "array", "items": {}, "description": "Empty array for this event.", "default": [] },
+                  "metadata": { "$ref": "#/components/schemas/WebhookMetadata" }
+                }
+              },
+              "example": {
+                "success": true,
+                "type": "crawl.started",
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "webhookId": "a1b2c3d4-0001-0000-0000-000000000000",
+                "data": [],
+                "metadata": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Return any `2xx` status code to acknowledge receipt." }
+        }
+      }
+    },
+    "crawlPage": {
+      "post": {
+        "summary": "Crawl Page",
+        "description": "Fired each time a single page is scraped during a crawl. The `data` array contains the scraped document.",
+        "operationId": "crawlPage",
+        "tags": ["Crawl"],
+        "parameters": [
+          { "$ref": "#/components/parameters/FirecrawlSignature" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["success", "type", "id", "webhookId", "data"],
+                "properties": {
+                  "success": { "type": "boolean", "description": "`true` if the page was scraped successfully, `false` otherwise." },
+                  "type": { "type": "string", "description": "The event type.", "const": "crawl.page" },
+                  "id": { "type": "string", "format": "uuid", "description": "The crawl job ID." },
+                  "webhookId": { "type": "string", "format": "uuid", "description": "Unique identifier for this webhook delivery." },
+                  "data": {
+                    "type": "array",
+                    "description": "Array containing the scraped page document. Same shape as the `data` field in the `GET /scrape` response.",
+                    "items": { "$ref": "#/components/schemas/ScrapeDocument" }
+                  },
+                  "error": { "type": "string", "description": "Error message if the page failed to scrape." },
+                  "metadata": { "$ref": "#/components/schemas/WebhookMetadata" }
+                }
+              },
+              "example": {
+                "success": true,
+                "type": "crawl.page",
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "webhookId": "a1b2c3d4-0002-0000-0000-000000000000",
+                "data": [
+                  {
+                    "markdown": "# Example Page\n\nThis is the page content.",
+                    "metadata": {
+                      "title": "Example Page",
+                      "description": "An example page.",
+                      "sourceURL": "https://example.com/page",
+                      "statusCode": 200
+                    }
+                  }
+                ],
+                "metadata": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Return any `2xx` status code to acknowledge receipt." }
+        }
+      }
+    },
+    "crawlCompleted": {
+      "post": {
+        "summary": "Crawl Completed",
+        "description": "Fired when all pages in a crawl have been processed. Use `GET /crawl/{id}` to retrieve the full results.",
+        "operationId": "crawlCompleted",
+        "tags": ["Crawl"],
+        "parameters": [
+          { "$ref": "#/components/parameters/FirecrawlSignature" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["success", "type", "id", "webhookId", "data"],
+                "properties": {
+                  "success": { "type": "boolean", "description": "Always `true` for this event.", "const": true },
+                  "type": { "type": "string", "description": "The event type.", "const": "crawl.completed" },
+                  "id": { "type": "string", "format": "uuid", "description": "The crawl job ID." },
+                  "webhookId": { "type": "string", "format": "uuid", "description": "Unique identifier for this webhook delivery." },
+                  "data": { "type": "array", "items": {}, "description": "Empty array. Retrieve results via `GET /crawl/{id}`.", "default": [] },
+                  "metadata": { "$ref": "#/components/schemas/WebhookMetadata" }
+                }
+              },
+              "example": {
+                "success": true,
+                "type": "crawl.completed",
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "webhookId": "a1b2c3d4-0003-0000-0000-000000000000",
+                "data": [],
+                "metadata": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Return any `2xx` status code to acknowledge receipt." }
+        }
+      }
+    },
+    "batchScrapeStarted": {
+      "post": {
+        "summary": "Batch Scrape Started",
+        "description": "Fired when a batch scrape job begins processing. Configure by passing a `webhook` object in your `POST /batch/scrape` request.",
+        "operationId": "batchScrapeStarted",
+        "tags": ["Batch Scrape"],
+        "parameters": [
+          { "$ref": "#/components/parameters/FirecrawlSignature" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["success", "type", "id", "webhookId", "data"],
+                "properties": {
+                  "success": { "type": "boolean", "const": true },
+                  "type": { "type": "string", "const": "batch_scrape.started" },
+                  "id": { "type": "string", "format": "uuid", "description": "The batch scrape job ID, matching the `id` returned by `POST /batch/scrape`." },
+                  "webhookId": { "type": "string", "format": "uuid", "description": "Unique identifier for this webhook delivery." },
+                  "data": { "type": "array", "items": {}, "default": [] },
+                  "metadata": { "$ref": "#/components/schemas/WebhookMetadata" }
+                }
+              },
+              "example": {
+                "success": true,
+                "type": "batch_scrape.started",
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "webhookId": "b2c3d4e5-0001-0000-0000-000000000000",
+                "data": [],
+                "metadata": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Return any `2xx` status code to acknowledge receipt." }
+        }
+      }
+    },
+    "batchScrapePage": {
+      "post": {
+        "summary": "Batch Scrape Page",
+        "description": "Fired each time a URL is scraped in a batch scrape job. The `data` array contains the scraped document.",
+        "operationId": "batchScrapePage",
+        "tags": ["Batch Scrape"],
+        "parameters": [
+          { "$ref": "#/components/parameters/FirecrawlSignature" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["success", "type", "id", "webhookId", "data"],
+                "properties": {
+                  "success": { "type": "boolean", "description": "`true` if the page was scraped successfully, `false` otherwise." },
+                  "type": { "type": "string", "const": "batch_scrape.page" },
+                  "id": { "type": "string", "format": "uuid", "description": "The batch scrape job ID." },
+                  "webhookId": { "type": "string", "format": "uuid", "description": "Unique identifier for this webhook delivery." },
+                  "data": {
+                    "type": "array",
+                    "description": "Array containing the scraped page document.",
+                    "items": { "$ref": "#/components/schemas/ScrapeDocument" }
+                  },
+                  "error": { "type": "string", "description": "Error message if the page failed to scrape." },
+                  "metadata": { "$ref": "#/components/schemas/WebhookMetadata" }
+                }
+              },
+              "example": {
+                "success": true,
+                "type": "batch_scrape.page",
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "webhookId": "b2c3d4e5-0002-0000-0000-000000000000",
+                "data": [
+                  {
+                    "markdown": "# Example Page\n\nThis is the page content.",
+                    "metadata": {
+                      "title": "Example Page",
+                      "description": "An example page.",
+                      "sourceURL": "https://example.com",
+                      "statusCode": 200
+                    }
+                  }
+                ],
+                "metadata": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Return any `2xx` status code to acknowledge receipt." }
+        }
+      }
+    },
+    "batchScrapeCompleted": {
+      "post": {
+        "summary": "Batch Scrape Completed",
+        "description": "Fired when all URLs in a batch scrape have been processed. Use `GET /batch/scrape/{id}` to retrieve the full results.",
+        "operationId": "batchScrapeCompleted",
+        "tags": ["Batch Scrape"],
+        "parameters": [
+          { "$ref": "#/components/parameters/FirecrawlSignature" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["success", "type", "id", "webhookId", "data"],
+                "properties": {
+                  "success": { "type": "boolean", "const": true },
+                  "type": { "type": "string", "const": "batch_scrape.completed" },
+                  "id": { "type": "string", "format": "uuid", "description": "The batch scrape job ID." },
+                  "webhookId": { "type": "string", "format": "uuid", "description": "Unique identifier for this webhook delivery." },
+                  "data": { "type": "array", "items": {}, "description": "Empty array. Retrieve results via `GET /batch/scrape/{id}`.", "default": [] },
+                  "metadata": { "$ref": "#/components/schemas/WebhookMetadata" }
+                }
+              },
+              "example": {
+                "success": true,
+                "type": "batch_scrape.completed",
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "webhookId": "b2c3d4e5-0003-0000-0000-000000000000",
+                "data": [],
+                "metadata": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Return any `2xx` status code to acknowledge receipt." }
+        }
+      }
+    },
+    "agentStarted": {
+      "post": {
+        "summary": "Agent Started",
+        "description": "Fired when an agent job begins processing. Configure by passing a `webhook` object in your `POST /agent` request.",
+        "operationId": "agentStarted",
+        "tags": ["Agent"],
+        "parameters": [
+          { "$ref": "#/components/parameters/FirecrawlSignature" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["success", "type", "id", "webhookId", "data"],
+                "properties": {
+                  "success": { "type": "boolean", "const": true },
+                  "type": { "type": "string", "const": "agent.started" },
+                  "id": { "type": "string", "format": "uuid", "description": "The agent job ID, matching the `id` returned by `POST /agent`." },
+                  "webhookId": { "type": "string", "format": "uuid", "description": "Unique identifier for this webhook delivery." },
+                  "data": { "type": "array", "items": {}, "default": [] },
+                  "metadata": { "$ref": "#/components/schemas/WebhookMetadata" }
+                }
+              },
+              "example": {
+                "success": true,
+                "type": "agent.started",
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "webhookId": "d4e5f6a7-0001-0000-0000-000000000000",
+                "data": [],
+                "metadata": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Return any `2xx` status code to acknowledge receipt." }
+        }
+      }
+    },
+    "agentAction": {
+      "post": {
+        "summary": "Agent Action",
+        "description": "Fired after each tool execution (scrape, search, extract, etc.) during an agent run.",
+        "operationId": "agentAction",
+        "tags": ["Agent"],
+        "parameters": [
+          { "$ref": "#/components/parameters/FirecrawlSignature" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["success", "type", "id", "webhookId", "data"],
+                "properties": {
+                  "success": { "type": "boolean", "const": true },
+                  "type": { "type": "string", "const": "agent.action" },
+                  "id": { "type": "string", "format": "uuid", "description": "The agent job ID." },
+                  "webhookId": { "type": "string", "format": "uuid", "description": "Unique identifier for this webhook delivery." },
+                  "data": {
+                    "type": "array",
+                    "description": "Array with a single object describing the action taken.",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "creditsUsed": { "type": "number", "description": "Estimated credits consumed so far. The final count is only available in the terminal event (`completed`, `failed`, or `cancelled`)." },
+                        "action": { "type": "string", "description": "The tool that was executed, e.g. `scrape`, `search`, `extract`." },
+                        "input": { "type": "object", "description": "The input parameters passed to the tool.", "additionalProperties": true }
+                      }
+                    }
+                  },
+                  "metadata": { "$ref": "#/components/schemas/WebhookMetadata" }
+                }
+              },
+              "example": {
+                "success": true,
+                "type": "agent.action",
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "webhookId": "d4e5f6a7-0002-0000-0000-000000000000",
+                "data": [
+                  {
+                    "creditsUsed": 5,
+                    "action": "scrape",
+                    "input": { "url": "https://example.com" }
+                  }
+                ],
+                "metadata": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Return any `2xx` status code to acknowledge receipt." }
+        }
+      }
+    },
+    "agentCompleted": {
+      "post": {
+        "summary": "Agent Completed",
+        "description": "Fired when the agent finishes successfully. The `data` array contains the final result and credit usage.",
+        "operationId": "agentCompleted",
+        "tags": ["Agent"],
+        "parameters": [
+          { "$ref": "#/components/parameters/FirecrawlSignature" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["success", "type", "id", "webhookId", "data"],
+                "properties": {
+                  "success": { "type": "boolean", "const": true },
+                  "type": { "type": "string", "const": "agent.completed" },
+                  "id": { "type": "string", "format": "uuid", "description": "The agent job ID." },
+                  "webhookId": { "type": "string", "format": "uuid", "description": "Unique identifier for this webhook delivery." },
+                  "data": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "creditsUsed": { "type": "number", "description": "Total credits consumed by the agent run." },
+                        "data": { "type": "object", "description": "The structured data extracted by the agent, matching your schema if one was provided.", "additionalProperties": true }
+                      }
+                    }
+                  },
+                  "metadata": { "$ref": "#/components/schemas/WebhookMetadata" }
+                }
+              },
+              "example": {
+                "success": true,
+                "type": "agent.completed",
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "webhookId": "d4e5f6a7-0003-0000-0000-000000000000",
+                "data": [
+                  {
+                    "creditsUsed": 15,
+                    "data": {
+                      "company": "Example Corp",
+                      "industry": "Technology",
+                      "founded": 2020
+                    }
+                  }
+                ],
+                "metadata": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Return any `2xx` status code to acknowledge receipt." }
+        }
+      }
+    },
+    "agentFailed": {
+      "post": {
+        "summary": "Agent Failed",
+        "description": "Fired when the agent encounters an unrecoverable error.",
+        "operationId": "agentFailed",
+        "tags": ["Agent"],
+        "parameters": [
+          { "$ref": "#/components/parameters/FirecrawlSignature" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["success", "type", "id", "webhookId", "data", "error"],
+                "properties": {
+                  "success": { "type": "boolean", "description": "Always `false` for this event.", "const": false },
+                  "type": { "type": "string", "const": "agent.failed" },
+                  "id": { "type": "string", "format": "uuid", "description": "The agent job ID." },
+                  "webhookId": { "type": "string", "format": "uuid", "description": "Unique identifier for this webhook delivery." },
+                  "data": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "creditsUsed": { "type": "number", "description": "Total credits consumed before the failure." }
+                      }
+                    }
+                  },
+                  "error": { "type": "string", "description": "Human-readable error message describing the failure." },
+                  "metadata": { "$ref": "#/components/schemas/WebhookMetadata" }
+                }
+              },
+              "example": {
+                "success": false,
+                "type": "agent.failed",
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "webhookId": "d4e5f6a7-0004-0000-0000-000000000000",
+                "data": [{ "creditsUsed": 8 }],
+                "error": "Max credits exceeded",
+                "metadata": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Return any `2xx` status code to acknowledge receipt." }
+        }
+      }
+    },
+    "agentCancelled": {
+      "post": {
+        "summary": "Agent Cancelled",
+        "description": "Fired when an agent job is cancelled via `DELETE /agent/{id}`.",
+        "operationId": "agentCancelled",
+        "tags": ["Agent"],
+        "parameters": [
+          { "$ref": "#/components/parameters/FirecrawlSignature" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["success", "type", "id", "webhookId", "data"],
+                "properties": {
+                  "success": { "type": "boolean", "description": "Always `false` for this event.", "const": false },
+                  "type": { "type": "string", "const": "agent.cancelled" },
+                  "id": { "type": "string", "format": "uuid", "description": "The agent job ID." },
+                  "webhookId": { "type": "string", "format": "uuid", "description": "Unique identifier for this webhook delivery." },
+                  "data": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "creditsUsed": { "type": "number", "description": "Total credits consumed before cancellation." }
+                      }
+                    }
+                  },
+                  "metadata": { "$ref": "#/components/schemas/WebhookMetadata" }
+                }
+              },
+              "example": {
+                "success": false,
+                "type": "agent.cancelled",
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "webhookId": "d4e5f6a7-0005-0000-0000-000000000000",
+                "data": [{ "creditsUsed": 3 }],
+                "metadata": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Return any `2xx` status code to acknowledge receipt." }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "FirecrawlSignature": {
+        "name": "X-Firecrawl-Signature",
+        "in": "header",
+        "required": false,
+        "description": "HMAC-SHA256 signature of the raw request body, formatted as `sha256=<hex>`. Present when an HMAC secret is configured in your [account settings](https://www.firecrawl.dev/app/settings?tab=advanced). See [Webhook Security](/webhooks/security) for verification details.",
+        "schema": {
+          "type": "string",
+          "example": "sha256=abc123def456789..."
+        }
+      }
+    },
+    "schemas": {
+      "WebhookMetadata": {
+        "type": "object",
+        "description": "The custom metadata object you provided in the webhook configuration. Echoed back in every delivery.",
+        "additionalProperties": { "type": "string" }
+      },
+      "ScrapeDocument": {
+        "type": "object",
+        "description": "A scraped page document. Same shape as the `data` object in scrape responses.",
+        "properties": {
+          "markdown": {
+            "type": "string",
+            "description": "The page content converted to Markdown."
+          },
+          "html": {
+            "type": "string",
+            "description": "Cleaned HTML content of the page."
+          },
+          "rawHtml": {
+            "type": "string",
+            "description": "Original HTML before any processing."
+          },
+          "links": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Outbound links discovered on the page."
+          },
+          "screenshot": {
+            "type": "string",
+            "description": "Base64-encoded screenshot, if the `screenshot` format was requested."
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Page metadata.",
+            "properties": {
+              "title": { "type": "string", "description": "The page `<title>`." },
+              "description": { "type": "string", "description": "The meta description." },
+              "sourceURL": { "type": "string", "description": "The URL that was scraped." },
+              "statusCode": { "type": "integer", "description": "HTTP status code of the response." }
+            }
+          }
+        }
+      }
+    }
+  }
+}
