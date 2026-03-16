@@ -1,8 +1,8 @@
 ---
 title: "浏览器沙盒"
-description: "通过 agent-browser、API、CLI、SDK 与 MCP 启动浏览器沙盒会话，并远程执行 Python、JavaScript 或 bash。"
+description: "供智能体与 Web 交互的安全浏览器沙盒。"
 og:title: "浏览器 | Firecrawl"
-og:description: "启动云端浏览器会话并远程执行代码。将 agent-browser CLI 与 bash 搭配使用，实现最简单的智能体集成方式。"
+og:description: "供智能体与 Web 交互的安全浏览器沙盒。"
 icon: "browser"
 sidebarTitle: "浏览器沙盒"
 ---
@@ -38,21 +38,18 @@ import ExecutePython from "/snippets/zh/v2/browser/execute/python.mdx";
 import ListPython from "/snippets/zh/v2/browser/list/python.mdx";
 import ClosePython from "/snippets/zh/v2/browser/close/python.mdx";
 
-Firecrawl Browser Sandbox 为你的智能体提供一个安全、全托管的浏览器运行环境。无需本地配置、无需安装 Chromium，也不存在驱动兼容性问题。环境中已预装 agent-browser 和 Playwright。每个会话都在隔离的一次性沙箱中运行，并且可以自动扩缩容，无需自行管理基础设施。
+Firecrawl Browser Sandbox 为你的智能体提供一个安全的浏览器环境，使智能体能够与 Web 交互。可以填写表单、点击按钮、进行身份验证等。
+无需本地配置、无需安装 Chromium，也不存在驱动兼容性问题。环境中已预装 agent-browser 和 Playwright。
 
-可通过 [API](/zh/api-reference/endpoint/browser-create)、[CLI](/zh/sdks/cli#browser)（Bash / agent-browser、Python、Node）、[Node SDK](/zh/sdks/node#browser)、[Python SDK](/zh/sdks/python#browser)、[Vercel AI SDK](/zh/developer-guides/llm-sdks-and-frameworks/vercel-ai-sdk) 和 [MCP Server](/zh/mcp-server) 使用。
+可通过 [API](/zh/api-reference/endpoint/browser-create)、[CLI](/zh/sdks/cli#browser) (Bash / agent-browser、Python、Node)、[Node SDK](/zh/sdks/node#browser)、[Python SDK](/zh/sdks/python#browser)、[Vercel AI SDK](/zh/developer-guides/llm-sdks-and-frameworks/vercel-ai-sdk) 和 [MCP Server](/zh/mcp-server) 使用。
 
-要为 AI 代码智能体（Claude Code、Codex、Open Code、Cursor 等）添加浏览器支持，请安装 Firecrawl 技能：
+要为 AI 代码智能体 (Claude Code、Codex、Open Code、Cursor 等) 添加浏览器支持，请安装 Firecrawl 技能：
 
 ```bash
 npx -y firecrawl-cli@latest init --all --browser
 ```
 
-你也可以手动安装 Firecrawl CLI，或者按照上面的步骤让 agent 替你安装：
-
-```bash
-npm install -g firecrawl-cli
-```
+每个会话都在隔离的一次性或持久化沙箱中运行，并且可在无需管理基础设施的情况下进行扩展。
 
 <div id="quick-start">
   ## 快速开始
@@ -112,8 +109,56 @@ npm install -g firecrawl-cli
 
 <ExecuteOutput />
 
+<div id="handling-file-downloads">
+  ### 处理文件下载
+</div>
+
+在会话中下载的文件可以捕获并以 base64 形式返回。可通过 execute 端点使用 Playwright 的下载 API：
+
+<CodeGroup>
+  ```python Python
+  import base64
+
+  async with page.expect_download() as download_info:
+      await page.click('a#download-link')  # 点击触发下载的元素
+
+  download = download_info.value
+  path = await download.path()
+
+  # 可选：保存到指定路径
+  # await download.save_as('/tmp/myfile.pdf')
+
+  # 读取文件内容并以 base64 输出
+  with open(path, "rb") as f:
+      content = base64.b64encode(f.read()).decode()
+      print(content)
+  ```
+
+  ```javascript Node
+  // 从链接元素获取下载 URL
+  const href = await page.getAttribute('a#download-link', 'href');
+
+  // 在浏览器上下文中获取文件并转换为 base64
+  const b64 = await page.evaluate(async (url) => {
+    const resp = await fetch(url);
+    const blob = await resp.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result.split(',')[1]);
+      reader.readAsDataURL(blob);
+    });
+  }, href);
+
+  process.stdout.write(b64);
+  ```
+</CodeGroup>
+
+<Note>
+  沙箱文件系统是临时的——会话结束后，已下载的文件就会丢失。若要持久保存文件，请在会话期间读取其内容并保存到你自己的存储中。持久化配置文件会保留浏览器状态 (cookies、localStorage) ，但不会保留磁盘上的文件。
+</Note>
+
 <div id="agent-browser-bash-mode">
-  ## agent-browser（Bash 模式）
+  ## agent-browser (Bash 模式)
 </div>
 
 [agent-browser](https://github.com/vercel-labs/agent-browser) 是一个无头浏览器 CLI，已预装在每个沙箱中。智能体无需编写 Playwright 代码，只需发送简单的 bash 命令。CLI 会自动注入 `--cdp`，使 agent-browser 自动连接到你的当前会话。
@@ -187,12 +232,12 @@ firecrawl browser "click @e5"
 </div>
 
 <div id="persistent-sessions">
-  ### 持久会话
+  ### 持久化会话
 </div>
 
 默认情况下，每个浏览器会话都会从全新环境开始。通过 `profile`，你可以在会话之间保存并复用浏览器状态。这对于保持登录状态和保留偏好设置非常有用。
 
-若要保存或选择某个配置文件，请在创建会话时使用 `profile` 参数。
+若要保存或选择某个持久化配置文件，请在创建会话时使用 `profile` 参数。
 
 <CodeGroup>
   <PersistentJS />
@@ -213,7 +258,7 @@ firecrawl browser "click @e5"
   同一时间只有一个会话可以向某个配置文件保存数据。如果已有其他会话在保存，你会收到 `409` 错误。你仍然可以以 `saveChanges: false` 的方式打开同一配置文件，或者稍后重试。
 </Note>
 
-浏览器会话状态只有在会话关闭时才会保存。因此，我们建议在使用完成后关闭浏览器会话，以便后续复用。要保存并关闭会话：
+浏览器会话状态只有在会话关闭时才会保存。因此，我们建议在使用完成后关闭浏览器会话，以便后续复用。会话一旦关闭，其会话 ID 将不再有效——你无法再次使用它。请改为使用相同的配置文件名称创建一个新会话，并使用响应中返回的新会话 ID。要保存并关闭会话：
 
 <CodeGroup>
   <CloseJS />
@@ -249,8 +294,8 @@ firecrawl browser "click @e5"
 
 | 参数 | 默认值 | 描述 |
 |-----------|---------|-------------|
-| `ttl` | 600s（10 分钟） | 会话的最长存续时间（30-3600s） |
-| `activityTtl` | 300s（5 分钟） | 会话空闲达到该时长后自动关闭（10-3600s） |
+| `ttl` | 600s (10 分钟)  | 会话的最长存续时间 (30-3600s)  |
+| `activityTtl` | 300s (5 分钟)  | 会话空闲达到该时长后自动关闭 (10-3600s)  |
 
 <div id="close-a-session">
   ### 结束会话
@@ -315,16 +360,16 @@ firecrawl browser "click @e5"
 </CodeGroup>
 
 <div id="when-to-use-browser">
-  ## 何时使用 Browser
+  ## 何时使用浏览器
 </div>
 
 | 使用场景 | 合适工具 |
 |----------|-----------|
 | 从已知 URL 提取内容 | [Scrape](/zh/features/scrape) |
 | 在网上搜索并获取结果 | [Search](/zh/features/search) |
-| 执行分页导航、填写表单、点击操作 | **Browser** |
-| 包含交互的多步工作流 | **Browser** |
-| 在多个网站上并行浏览 | **Browser**（每个会话彼此隔离） |
+| 执行分页导航、填写表单、点击操作流程 | **浏览器** |
+| 包含交互的多步工作流 | **浏览器** |
+| 在多个网站上并行浏览 | **浏览器** (每个会话彼此隔离)  |
 
 <div id="use-cases">
   ## 使用场景
@@ -357,4 +402,4 @@ firecrawl browser "click @e5"
 
 ***
 
-有反馈或需要帮助？请发送邮件至 [help@firecrawl.com](mailto:help@firecrawl.com) 或在 [Discord](https://discord.gg/gSmWdAkdwd) 上联系我们。
+有反馈或需要帮助？请发送邮件至 [help@firecrawl.com](mailto:help@firecrawl.com) 或在 [Discord](https://discord.gg/firecrawl) 上联系我们。
