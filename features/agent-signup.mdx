@@ -1,0 +1,105 @@
+---
+title: "Agent Signup"
+description: "Let AI agents programmatically create Firecrawl API keys on behalf of a human sponsor."
+og:title: "Agent Signup | Firecrawl"
+og:description: "Let AI agents create Firecrawl API keys on behalf of a human sponsor, with built-in verification and abuse protection."
+sidebarTitle: "Agent Signup"
+---
+
+Agent Signup lets AI agents create Firecrawl API keys programmatically — no browser, no OAuth, no human in the loop at creation time. The agent provides a human's email, and Firecrawl provisions a sandboxed API key that works immediately with a 50-credit limit. The human receives an email to confirm or block the key.
+
+<Info>
+**No authentication required.** The `/agent-signup` endpoint is public. Agents do not need an existing API key to call it.
+</Info>
+
+## How It Works
+
+1. **Agent calls `POST /v2/agent-signup`** with the user's email, the agent's name, and `accept_terms: true`.
+2. **Firecrawl returns an API key** immediately. The key is sandboxed with **50 credits** and limited to index-only scraping until the sponsor confirms.
+3. **The human receives an email** with two links: **Confirm & Link Key** or **Block this key**.
+4. **On confirmation**, the sandboxed key is merged into the human's existing Firecrawl account (or a new account is created). The key inherits the full plan limits.
+5. **On block**, the key is disabled and the email is protected from future unauthorized signups.
+
+```
+Agent                    Firecrawl                  Human
+  │                         │                         │
+  │── POST /agent-signup ──▶│                         │
+  │◀── API key (sandboxed) ─│── verification email ──▶│
+  │                         │                         │
+  │   uses key (50 credits) │                         │
+  │                         │                         │
+  │                         │◀── confirm or block ────│
+  │                         │                         │
+  │   key upgraded to full  │                         │
+  │   plan (if confirmed)   │                         │
+```
+
+## For Agents
+
+### Creating a Key
+
+```bash
+curl -X POST "https://api.firecrawl.dev/v2/agent-signup" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@company.com",
+    "agent_name": "Research Assistant",
+    "accept_terms": true
+  }'
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "api_key": "fc-...",
+  "sponsor_status": "pending",
+  "credit_limit": 50,
+  "credits_remaining": 50,
+  "verification_deadline_at": "2026-03-23T12:00:00.000Z",
+  "tos_url": "https://firecrawl.dev/terms-of-service"
+}
+```
+
+Use the returned `api_key` immediately for scraping, searching, and other Firecrawl operations. The key works right away, but is capped at 50 credits until the human confirms.
+
+### Handling the Sandbox Limits
+
+While `sponsor_status` is `"pending"`:
+
+- The key has a hard **50-credit cap**. Once exhausted, requests return `402` with `error: "unverified_credit_limit_reached"`.
+- All scrape requests are limited to **index-only mode** (no full browser rendering).
+- The key expires if not confirmed within **5 days**.
+
+Once the human confirms, the key is upgraded to their full plan with no credit cap or mode restrictions.
+
+### Error Handling
+
+| Status | Error | Meaning |
+|--------|-------|---------|
+| `402` | `unverified_credit_limit_reached` | 50-credit sandbox exhausted. Ask the human to confirm. |
+| `403` | `sponsor_verification_expired` | 5-day deadline passed without confirmation. |
+| `403` | `This API key has been blocked` | The human blocked the key. Stop using it. |
+| `409` | `A pending agent signup confirmation has already been sent` | A key is already pending for this email. |
+
+## For Humans
+
+When an agent creates a key under your email, you receive an email with two options:
+
+- **Confirm & Link Key** — Merges the agent's key into your Firecrawl account. If you don't have an account, one is created for you. The key inherits your plan limits.
+- **Block this key** — Disables the key immediately and prevents future agent signups from that email.
+
+You can also manage agent keys from the [Firecrawl dashboard](https://firecrawl.dev/signin). If you have an existing account, you'll also see an in-app notification.
+
+<Warning>
+If you did not authorize the agent, click **Block this key** immediately. This revokes the key and prevents further use.
+</Warning>
+
+## API Reference
+
+| Endpoint | Description |
+|----------|-------------|
+| [`POST /v2/agent-signup`](/api-reference/endpoint/agent-signup) | Create a sandboxed API key |
+| [`POST /v2/agent-signup/confirm`](/api-reference/endpoint/agent-signup-confirm) | Confirm and link a key to an account |
+| [`POST /v2/agent-signup/block`](/api-reference/endpoint/agent-signup-block) | Block and disable a key |
