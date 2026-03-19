@@ -1,0 +1,119 @@
+---
+title: "Cadastro de agente"
+description: "Permite que agentes de IA criem chaves de API do Firecrawl programaticamente em nome de um patrocinador humano."
+og:title: "Cadastro de agente | Firecrawl"
+og:description: "Permite que agentes de IA criem chaves de API do Firecrawl em nome de um patrocinador humano, com verificação integrada e proteção contra abusos."
+sidebarTitle: "Cadastro de agente"
+---
+
+O Cadastro de agente permite que agentes de IA criem chaves de API do Firecrawl programaticamente — sem navegador, sem OAuth e sem humano no momento da criação. O agente fornece o email de um humano, e o Firecrawl provisiona uma chave de API em sandbox que funciona imediatamente, com um limite de 50 créditos. O humano recebe um email para confirmar ou bloquear a chave.
+
+<Info>
+  **Não é necessária autenticação.** O endpoint `/agent-signup` é público. Os agentes não precisam de uma chave de API existente para chamá-lo.
+</Info>
+
+<div id="how-it-works">
+  ## Como funciona
+</div>
+
+1. **O agente faz a chamada `POST /v2/agent-signup`** com o email do usuário, o nome do agente e `accept_terms: true`.
+2. **O Firecrawl retorna uma API key** imediatamente. A chave fica em sandbox com **50 credits** e limitada a scraping apenas de indexação até que o patrocinador confirme.
+3. **A pessoa recebe um email** com dois links: **Confirmar &amp; Vincular chave** ou **Bloquear esta chave**.
+4. **Após a confirmação**, a chave em sandbox é mesclada à conta existente da pessoa no Firecrawl (ou uma nova conta é criada). A chave herda os limites completos do plano.
+5. **Em caso de bloqueio**, a chave é desativada e o email fica protegido contra futuros cadastros não autorizados.
+
+```
+Agent                    Firecrawl                  Human
+  │                         │                         │
+  │── POST /agent-signup ──▶│                         │
+  │◀── API key (sandboxed) ─│── verification email ──▶│
+  │                         │                         │
+  │   uses key (50 credits) │                         │
+  │                         │                         │
+  │                         │◀── confirm or block ────│
+  │                         │                         │
+  │   key upgraded to full  │                         │
+  │   plan (if confirmed)   │                         │
+```
+
+<div id="for-agents">
+  ## Para agentes
+</div>
+
+<div id="creating-a-key">
+  ### Criar uma chave
+</div>
+
+```bash
+curl -X POST "https://api.firecrawl.dev/v2/agent-signup" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@company.com",
+    "agent_name": "Research Assistant",
+    "accept_terms": true
+  }'
+```
+
+Resposta:
+
+```json
+{
+  "success": true,
+  "api_key": "fc-...",
+  "sponsor_status": "pending",
+  "credit_limit": 50,
+  "credits_remaining": 50,
+  "verification_deadline_at": "2026-03-23T12:00:00.000Z",
+  "tos_url": "https://firecrawl.dev/terms-of-service"
+}
+```
+
+Use a `api_key` retornada imediatamente para scraping, busca e outras operações do Firecrawl. A chave funciona imediatamente, mas fica limitada a 50 credits até a confirmação humana.
+
+<div id="handling-the-sandbox-limits">
+  ### Lidando com os limites do Sandbox
+</div>
+
+Enquanto `sponsor_status` estiver `"pending"`:
+
+* A chave tem um **limite rígido de 50 créditos**. Quando esse limite se esgota, as requisições retornam `402` com `error: "unverified_credit_limit_reached"`.
+* Todas as requisições de scraping ficam limitadas ao **modo somente índice** (sem renderização completa no navegador).
+* A chave expira se não for confirmada em até **5 dias**.
+
+Assim que o humano confirmar, a chave é atualizada para o plano completo, sem limite de créditos nem restrições de modo.
+
+<div id="error-handling">
+  ### Tratamento de erros
+</div>
+
+| Status | Erro | Significado |
+|--------|-------|---------|
+| `402` | `unverified_credit_limit_reached` | Sandbox de 50 créditos esgotado. Peça ao humano para confirmar. |
+| `403` | `sponsor_verification_expired` | O prazo de 5 dias expirou sem confirmação. |
+| `403` | `This API key has been blocked` | O humano bloqueou a chave de API. Pare de usá-la. |
+| `409` | `A pending agent signup confirmation has already been sent` | Já existe uma chave pendente para este email. |
+
+<div id="for-humans">
+  ## Para humanos
+</div>
+
+Quando um agente cria uma chave com o seu email, você recebe um email com duas opções:
+
+* **Confirmar e vincular a chave** — Mescla a chave do agente à sua conta do Firecrawl. Se você não tiver uma conta, uma será criada para você. A chave herda os limites do seu plano.
+* **Bloquear esta chave** — Desativa a chave imediatamente e impede futuros cadastros de agentes com esse email.
+
+Você também pode gerenciar chaves de agentes no [painel do Firecrawl](https://firecrawl.dev/signin). Se você já tiver uma conta, também verá uma notificação no app.
+
+<Warning>
+  Se você não autorizou o agente, clique em **Bloquear esta chave** imediatamente. Isso revoga a chave e impede seu uso posterior.
+</Warning>
+
+<div id="api-reference">
+  ## Referência da API
+</div>
+
+| Endpoint | Descrição |
+|----------|-------------|
+| [`POST /v2/agent-signup`](/pt-BR/api-reference/endpoint/agent-signup) | Criar uma chave de API em sandbox |
+| [`POST /v2/agent-signup/confirm`](/pt-BR/api-reference/endpoint/agent-signup-confirm) | Confirmar e vincular uma chave a uma conta |
+| [`POST /v2/agent-signup/block`](/pt-BR/api-reference/endpoint/agent-signup-block) | Bloquear e desativar uma chave |
