@@ -1,0 +1,119 @@
+---
+title: "Agent Signup"
+description: "AI Agentが人間のスポンサーに代わって、プログラムからFirecrawl APIキーを作成できるようにします。"
+og:title: "Agent Signup | Firecrawl"
+og:description: "AI Agentが人間のスポンサーに代わって、組み込みの検証機能と不正利用防止機能付きでFirecrawl APIキーを作成できるようにします。"
+sidebarTitle: "Agent Signup"
+---
+
+Agent Signupを使うと、AI AgentがプログラムからFirecrawl APIキーを作成できます。ブラウザ不要、OAuth不要、作成時に人が介在する必要もありません。Agentは人間のメールアドレスを指定し、Firecrawlはすぐに使える、50クレジット上限のサンドボックス化されたAPIキーを発行します。人間には、そのキーを確認またはブロックするためのメールが届きます。
+
+<Info>
+  **認証は不要です。** `/agent-signup` endpoint は公開されています。Agentは、これを呼び出すための既存のAPIキーを必要としません。
+</Info>
+
+<div id="how-it-works">
+  ## 仕組み
+</div>
+
+1. **Agent が `POST /v2/agent-signup` を呼び出し**、ユーザーの email、agent の名前、`accept_terms: true` を送信します。
+2. **Firecrawl は API key を即座に返します**。この key には **50 credits** のサンドボックス制限が適用され、スポンサーが確認するまではインデックス専用の scraping のみ実行できます。
+3. **人間のユーザーには email が届き**、2 つのリンクが含まれます: **Confirm &amp; Link Key** または **Block this key**。
+4. **確認されると**、サンドボックス化された key はその人間の既存の Firecrawl account に統合されます (既存の account がない場合は新規作成されます) 。この key には完全な plan の制限が適用されます。
+5. **ブロックされると**、その key は無効になり、その email は今後の不正な signup から保護されます。
+
+```
+Agent                    Firecrawl                  Human
+  │                         │                         │
+  │── POST /agent-signup ──▶│                         │
+  │◀── API key (sandboxed) ─│── verification email ──▶│
+  │                         │                         │
+  │   uses key (50 credits) │                         │
+  │                         │                         │
+  │                         │◀── confirm or block ────│
+  │                         │                         │
+  │   key upgraded to full  │                         │
+  │   plan (if confirmed)   │                         │
+```
+
+<div id="for-agents">
+  ## Agent向け
+</div>
+
+<div id="creating-a-key">
+  ### キーの作成
+</div>
+
+```bash
+curl -X POST "https://api.firecrawl.dev/v2/agent-signup" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@company.com",
+    "agent_name": "Research Assistant",
+    "accept_terms": true
+  }'
+```
+
+レスポンス:
+
+```json
+{
+  "success": true,
+  "api_key": "fc-...",
+  "sponsor_status": "pending",
+  "credit_limit": 50,
+  "credits_remaining": 50,
+  "verification_deadline_at": "2026-03-23T12:00:00.000Z",
+  "tos_url": "https://firecrawl.dev/terms-of-service"
+}
+```
+
+返された`api_key`は、スクレイピング、検索、その他のFirecrawlオペレーションにすぐ使用できます。キーはすぐに有効になりますが、人間が確認するまでは50クレジットに制限されます。
+
+<div id="handling-the-sandbox-limits">
+  ### Sandbox の制限事項への対応
+</div>
+
+`sponsor_status` が `"pending"` の間:
+
+* キーには厳格な **50クレジットの上限** があります。使い切ると、リクエストは `402` と `error: "unverified_credit_limit_reached"` を返します。
+* すべてのスクレイピングリクエストは **index-only mode** に制限されます (完全なブラウザレンダリングは行われません) 。
+* **5日以内** に確認されない場合、キーは失効します。
+
+人間が確認すると、キーはクレジット上限やモード制限のない本来のプランにアップグレードされます。
+
+<div id="error-handling">
+  ### エラーハンドリング
+</div>
+
+| ステータス | エラー | 意味 |
+|--------|-------|---------|
+| `402` | `unverified_credit_limit_reached` | 50クレジットのサンドボックスを使い切りました。人間に確認を依頼してください。 |
+| `403` | `sponsor_verification_expired` | 確認されないまま、5日間の期限を過ぎました。 |
+| `403` | `This API key has been blocked` | 人間がこのAPIキーをブロックしました。使用を停止してください。 |
+| `409` | `A pending agent signup confirmation has already been sent` | このメールアドレスでは、すでにagent登録の確認が送信されており、キーが確認待ちになっています。 |
+
+<div id="for-humans">
+  ## 人間向け
+</div>
+
+agent があなたのメールアドレスでキーを作成すると、2 つの選択肢が記載されたメールが届きます。
+
+* **Confirm &amp; Link Key** — agent のキーをあなたの Firecrawl アカウントに紐付けます。アカウントがない場合は、自動的に作成されます。このキーには、あなたのプランの制限が適用されます。
+* **Block this key** — このキーを即座に無効化し、そのメールアドレスから今後 agent が signup できないようにします。
+
+agent キーは [Firecrawl dashboard](https://firecrawl.dev/signin) から管理することもできます。既存のアカウントがある場合は、アプリ内通知も表示されます。
+
+<Warning>
+  その agent を承認していない場合は、すぐに **Block this key** をクリックしてください。これによりキーが取り消され、以後使用できなくなります。
+</Warning>
+
+<div id="api-reference">
+  ## API リファレンス
+</div>
+
+| Endpoint | 説明 |
+|----------|-------------|
+| [`POST /v2/agent-signup`](/ja/api-reference/endpoint/agent-signup) | サンドボックス化されたAPIキーを作成します |
+| [`POST /v2/agent-signup/confirm`](/ja/api-reference/endpoint/agent-signup-confirm) | キーを確認し、アカウントに関連付けます |
+| [`POST /v2/agent-signup/block`](/ja/api-reference/endpoint/agent-signup-block) | キーをブロックして無効にします |
