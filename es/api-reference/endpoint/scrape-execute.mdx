@@ -1,0 +1,134 @@
+---
+title: "Interactuar con la página"
+description: "Ejecuta código o un `prompt` de IA en la sesión del navegador
+  asociada a un trabajo de scrape."
+openapi: '/es/api-reference/v2-openapi.json POST /scrape/{jobId}/interact'
+---
+
+Usa este endpoint para seguir interactuando con el mismo estado del navegador inicializado a partir de un scrape anterior. Debes proporcionar `code` o `prompt`, pero no ambos.
+
+`POST /v2/scrape/{jobId}/interact` gestiona el ciclo de vida completo:
+
+1. Si todavía no existe una sesión del navegador para este trabajo de scrape, Firecrawl crea una con el mismo estado de la página que el scrape original.
+2. Cuando se proporciona `code`, Firecrawl lo ejecuta en el sandbox del navegador. Cuando se proporciona `prompt`, un agente de IA automatiza la tarea al utilizar lenguaje natural.
+3. Las llamadas posteriores a `POST /interact` con el mismo `jobId` reutilizan el mismo estado activo del navegador.
+
+Cuando hayas terminado, llama a `DELETE /v2/scrape/{jobId}/interact` para detener la sesión.
+
+<div id="path-parameters">
+  ## Parámetros de ruta
+</div>
+
+| Parámetro | Tipo          | Obligatorio | Descripción                                                                       |
+| --------- | ------------- | ----------- | --------------------------------------------------------------------------------- |
+| `jobId`   | string (UUID) | Sí          | El ID del trabajo de scrape de `data.metadata.scrapeId` en la respuesta de scrape |
+
+<div id="request-body">
+  ## Request Body
+</div>
+
+| parámetro | tipo | Required | Default | descripción |
+|-----------|------|----------|---------|-------------|
+| `code` | string | No | — | Código que se ejecutará en el sandbox del navegador (1–100,000 caracteres). Obligatorio si no se establece `prompt`. |
+| `prompt` | string | No | — | Tarea en lenguaje natural para el agente de IA (1–10,000 caracteres). Obligatorio si no se establece `code`. |
+| `language` | string | No | `"node"` | Uno de `"python"`, `"node"` o `"bash"`. Solo se usa con `code`. |
+| `timeout` | number | No | `30` | Tiempo de espera de ejecución en segundos (1–300). |
+| `origin` | string | No | — | Etiqueta de origen opcional que se usa para telemetría. |
+
+<div id="response">
+  ## respuesta
+</div>
+
+| Field | tipo | descripción |
+|-------|------|-------------|
+| `success` | boolean | Si la ejecución se completó sin errores |
+| `liveViewUrl` | string | URL de vista en vivo de solo lectura para la sesión del navegador |
+| `interactiveLiveViewUrl` | string | URL de vista en vivo interactiva (los espectadores pueden controlar el navegador) |
+| `output` | string | Respuesta final del agente de IA (solo presente al utilizar `prompt`) |
+| `stdout` | string | Salida estándar de la ejecución del código |
+| `result` | string | Valor de retorno — valor de la última expresión para Node.js, instantánea final de la página para `prompt` |
+| `stderr` | string | Salida de error estándar |
+| `exitCode` | number | Código de salida de la ejecución (`0` = éxito) |
+| `killed` | boolean | Si la ejecución se terminó debido al tiempo de espera |
+| `error` | string | Mensaje de error (solo presente en caso de fallo) |
+
+<div id="example-request-code">
+  ### solicitud de ejemplo (Code)
+</div>
+
+```bash
+curl -X POST "https://api.firecrawl.dev/v2/scrape/550e8400-e29b-41d4-a716-446655440000/interact" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "const title = await page.title(); JSON.stringify({ title });",
+    "language": "node",
+    "timeout": 30
+  }'
+```
+
+<div id="example-response-code">
+  ### Respuesta de ejemplo (código)
+</div>
+
+```json
+{
+  "success": true,
+  "liveViewUrl": "https://liveview.firecrawl.dev/...",
+  "interactiveLiveViewUrl": "https://liveview.firecrawl.dev/...",
+  "stdout": "",
+  "result": "{\"title\":\"Example Domain\"}",
+  "stderr": "",
+  "exitCode": 0,
+  "killed": false
+}
+```
+
+<div id="example-request-prompt">
+  ### Solicitud de ejemplo (Prompt)
+</div>
+
+```bash
+curl -X POST "https://api.firecrawl.dev/v2/scrape/550e8400-e29b-41d4-a716-446655440000/interact" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Find the pricing section and tell me the price of the Pro plan",
+    "timeout": 60
+  }'
+```
+
+<div id="example-response-prompt">
+  ### respuesta de ejemplo (Prompt)
+</div>
+
+```json
+{
+  "success": true,
+  "liveViewUrl": "https://liveview.firecrawl.dev/...",
+  "interactiveLiveViewUrl": "https://liveview.firecrawl.dev/...",
+  "output": "The Pro plan costs $49/month and includes unlimited scrapes, priority support, and custom integrations.",
+  "stdout": "...",
+  "result": "...",
+  "stderr": "",
+  "exitCode": 0,
+  "killed": false
+}
+```
+
+<div id="error-codes">
+  ### Códigos de error
+</div>
+
+| Status | descripción |
+|--------|-------------|
+| `402` | Créditos insuficientes para una sesión del navegador |
+| `403` | El trabajo de scrape pertenece a otro equipo |
+| `404` | No se encontró el trabajo de scrape |
+| `409` | Contexto de repetición no disponible — vuelve a ejecutar el scrape e inténtalo de nuevo |
+| `410` | La sesión del navegador ya ha sido destruida |
+| `429` | Se alcanzó el número máximo de sesiones simultáneas del navegador |
+| `502` | Falló el servicio del navegador o la ejecución del agente de IA |
+| `503` | La función del navegador no está configurada (solo autogestionado) |
+
+Para obtener información detallada sobre el uso con ejemplos, consulta la [guía de la función Interact](/es/features/interact).

@@ -1,0 +1,133 @@
+---
+title: "ページを操作する"
+description: "スクレイプジョブに紐付けられたブラウザセッションで、コードまたは AI プロンプトを実行します。"
+openapi: '/ja/api-reference/v2-openapi.json POST /scrape/{jobId}/interact'
+---
+
+このエンドポイントを使用すると、以前のスクレイプから初期化されたのと同じブラウザ状態で、引き続き操作できます。`code` または `prompt` のいずれか一方を指定する必要があります。両方は指定できません。
+
+`POST /v2/scrape/{jobId}/interact` はライフサイクル全体を処理します。
+
+1. このスクレイプジョブ用のブラウザセッションがまだ存在しない場合、Firecrawl は元のスクレイプと同じページ状態でブラウザセッションを作成します。
+2. `code` が指定されている場合、Firecrawl はそれをブラウザサンドボックスで実行します。`prompt` が指定されている場合は、AI エージェントが自然言語を使ってタスクを自動化します。
+3. 同じ `jobId` に対する後続の `POST /interact` 呼び出しでは、同じライブのブラウザ状態が再利用されます。
+
+完了したら、`DELETE /v2/scrape/{jobId}/interact` を呼び出してセッションを停止します。
+
+<div id="path-parameters">
+  ## パスパラメータ
+</div>
+
+| パラメータ   | 型             | 必須 | 説明                                                          |
+| ------- | ------------- | -- | ----------------------------------------------------------- |
+| `jobId` | string (UUID) | はい | スクレイピングのレスポンス内の `data.metadata.scrapeId` に含まれるスクレイピングジョブ ID |
+
+<div id="request-body">
+  ## リクエストボディ
+</div>
+
+| パラメータ      | 型      | 必須  | デフォルト    | 説明                                                           |
+| ---------- | ------ | --- | -------- | ------------------------------------------------------------ |
+| `code`     | string | いいえ | —        | ブラウザサンドボックスで実行するコード (1～100,000文字) 。`prompt`が設定されていない場合は必須です。 |
+| `prompt`   | string | いいえ | —        | AIエージェント向けの自然言語タスク (1～10,000文字) 。`code`が設定されていない場合は必須です。     |
+| `language` | string | いいえ | `"node"` | `"python"`、`"node"`、`"bash"` のいずれか。`code`を使用する場合にのみ使われます。    |
+| `timeout`  | number | いいえ | `30`     | 実行タイムアウト (秒)  (1～300) 。                                      |
+| `origin`   | string | いいえ | —        | テレメトリに使用される任意のオリジンラベル。                                       |
+
+<div id="response">
+  ## レスポンス
+</div>
+
+| フィールド                    | 型       | 説明                                               |
+| ------------------------ | ------- | ------------------------------------------------ |
+| `success`                | boolean | 実行がエラーなく完了したかどうか                                 |
+| `liveViewUrl`            | string  | ブラウザセッション用の読み取り専用ライブビューURL                       |
+| `interactiveLiveViewUrl` | string  | インタラクティブ ライブビューURL (閲覧者がブラウザを操作可能)               |
+| `output`                 | string  | AIエージェントの最終レスポンス (`prompt` を使用した場合のみ存在)          |
+| `stdout`                 | string  | コード実行の標準出力                                       |
+| `result`                 | string  | 戻り値 — Node.js では最後の式の値、`prompt` では最終ページのスナップショット |
+| `stderr`                 | string  | 標準エラー出力                                          |
+| `exitCode`               | number  | 実行の終了コード (`0` = 成功)                              |
+| `killed`                 | boolean | タイムアウトにより実行が終了したかどうか                             |
+| `error`                  | string  | エラーメッセージ (失敗時のみ存在)                               |
+
+<div id="example-request-code">
+  ### リクエスト例 (コード)
+</div>
+
+```bash
+curl -X POST "https://api.firecrawl.dev/v2/scrape/550e8400-e29b-41d4-a716-446655440000/interact" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "const title = await page.title(); JSON.stringify({ title });",
+    "language": "node",
+    "timeout": 30
+  }'
+```
+
+<div id="example-response-code">
+  ### レスポンス例 (コード)
+</div>
+
+```json
+{
+  "success": true,
+  "liveViewUrl": "https://liveview.firecrawl.dev/...",
+  "interactiveLiveViewUrl": "https://liveview.firecrawl.dev/...",
+  "stdout": "",
+  "result": "{\"title\":\"Example Domain\"}",
+  "stderr": "",
+  "exitCode": 0,
+  "killed": false
+}
+```
+
+<div id="example-request-prompt">
+  ### リクエスト例 (Prompt)
+</div>
+
+```bash
+curl -X POST "https://api.firecrawl.dev/v2/scrape/550e8400-e29b-41d4-a716-446655440000/interact" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Find the pricing section and tell me the price of the Pro plan",
+    "timeout": 60
+  }'
+```
+
+<div id="example-response-prompt">
+  ### レスポンス例 (Prompt)
+</div>
+
+```json
+{
+  "success": true,
+  "liveViewUrl": "https://liveview.firecrawl.dev/...",
+  "interactiveLiveViewUrl": "https://liveview.firecrawl.dev/...",
+  "output": "The Pro plan costs $49/month and includes unlimited scrapes, priority support, and custom integrations.",
+  "stdout": "...",
+  "result": "...",
+  "stderr": "",
+  "exitCode": 0,
+  "killed": false
+}
+```
+
+<div id="error-codes">
+  ### エラーコード
+</div>
+
+| ステータス | 説明                                            |
+| ----- | --------------------------------------------- |
+| `402` | ブラウザセッションのクレジットが不足しています                       |
+| `403` | スクレイピングジョブは別のチームに属しています                       |
+| `404` | スクレイピングジョブが見つかりません                            |
+| `409` | リプレイコンテキストを利用できません — スクレイピングを再実行してもう一度お試しください |
+| `410` | ブラウザセッションはすでに破棄されています                         |
+| `429` | 同時ブラウザセッション数の上限に達しました                         |
+| `502` | ブラウザサービスまたはAIエージェントの実行に失敗しました                 |
+| `503` | ブラウザ機能が設定されていません (セルフホスト環境のみ)                 |
+
+詳細な使用方法と例については、[Interact機能ガイド](/ja/features/interact)を参照してください。

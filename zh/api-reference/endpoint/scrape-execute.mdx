@@ -1,0 +1,133 @@
+---
+title: "与页面交互"
+description: "在绑定到抓取任务的浏览器会话中执行代码或 AI prompt。"
+openapi: '/zh/api-reference/v2-openapi.json POST /scrape/{jobId}/interact'
+---
+
+使用此端点可继续与由先前抓取初始化的同一浏览器状态进行交互。必须提供 `code` 或 `prompt` 之一，不能同时提供两者。
+
+`POST /v2/scrape/{jobId}/interact` 负责整个生命周期：
+
+1. 如果此抓取任务尚未存在浏览器会话，Firecrawl 会在与原始抓取相同的页面状态下创建一个会话。
+2. 提供 `code` 时，Firecrawl 会在浏览器沙箱中运行它；提供 `prompt` 时，AI 代理会使用自然语言自动完成该任务。
+3. 后续在同一 `jobId` 上调用 `POST /interact` 时，会复用同一个实时浏览器状态。
+
+完成后，调用 `DELETE /v2/scrape/{jobId}/interact` 以停止该会话。
+
+<div id="path-parameters">
+  ## 路径参数
+</div>
+
+| 参数      | 类型            | 必填 | 描述                                         |
+| ------- | ------------- | -- | ------------------------------------------ |
+| `jobId` | string (UUID) | 是  | 抓取响应中的 `data.metadata.scrapeId` 对应的抓取任务 ID |
+
+<div id="request-body">
+  ## 请求体
+</div>
+
+| 参数 | 类型 | 必填 | 默认值 | 描述 |
+|-----------|------|----------|---------|-------------|
+| `code` | string | 否 | — | 在浏览器沙箱中执行的代码 (1–100,000 个字符) 。如果未设置 `prompt`，则为必填。 |
+| `prompt` | string | 否 | — | 提供给 AI 代理的自然语言任务 (1–10,000 个字符) 。如果未设置 `code`，则为必填。 |
+| `language` | string | 否 | `"node"` | `"python"`、`"node"` 或 `"bash"` 之一。仅在使用 `code` 时生效。 |
+| `timeout` | number | 否 | `30` | 执行超时时间 (秒)  (1–300) 。 |
+| `origin` | string | 否 | — | 用于遥测的可选来源标识。 |
+
+<div id="response">
+  ## 响应
+</div>
+
+| 字段                       | 类型      | 描述                                               |
+| ------------------------ | ------- | ------------------------------------------------ |
+| `success`                | boolean | 执行是否在无错误的情况下完成                                   |
+| `liveViewUrl`            | string  | 浏览器会话的只读实时视图 URL                                 |
+| `interactiveLiveViewUrl` | string  | 交互式实时视图 URL (查看者可控制浏览器)                          |
+| `output`                 | string  | AI 代理的最终响应 (仅在使用 `prompt` 时返回)                   |
+| `stdout`                 | string  | 代码执行的标准输出                                        |
+| `result`                 | string  | 返回值——对 Node.js 而言是最后一个表达式的值，对 `prompt` 而言是最终页面快照 |
+| `stderr`                 | string  | 标准错误输出                                           |
+| `exitCode`               | number  | 执行退出码 (`0` = 成功)                                 |
+| `killed`                 | boolean | 执行是否因超时而终止                                       |
+| `error`                  | string  | 错误信息 (仅在失败时返回)                                   |
+
+<div id="example-request-code">
+  ### 示例请求 (代码)
+</div>
+
+```bash
+curl -X POST "https://api.firecrawl.dev/v2/scrape/550e8400-e29b-41d4-a716-446655440000/interact" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "const title = await page.title(); JSON.stringify({ title });",
+    "language": "node",
+    "timeout": 30
+  }'
+```
+
+<div id="example-response-code">
+  ### 示例响应 (代码)
+</div>
+
+```json
+{
+  "success": true,
+  "liveViewUrl": "https://liveview.firecrawl.dev/...",
+  "interactiveLiveViewUrl": "https://liveview.firecrawl.dev/...",
+  "stdout": "",
+  "result": "{\"title\":\"Example Domain\"}",
+  "stderr": "",
+  "exitCode": 0,
+  "killed": false
+}
+```
+
+<div id="example-request-prompt">
+  ### 示例请求 (Prompt)
+</div>
+
+```bash
+curl -X POST "https://api.firecrawl.dev/v2/scrape/550e8400-e29b-41d4-a716-446655440000/interact" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Find the pricing section and tell me the price of the Pro plan",
+    "timeout": 60
+  }'
+```
+
+<div id="example-response-prompt">
+  ### 示例响应 (Prompt)
+</div>
+
+```json
+{
+  "success": true,
+  "liveViewUrl": "https://liveview.firecrawl.dev/...",
+  "interactiveLiveViewUrl": "https://liveview.firecrawl.dev/...",
+  "output": "The Pro plan costs $49/month and includes unlimited scrapes, priority support, and custom integrations.",
+  "stdout": "...",
+  "result": "...",
+  "stderr": "",
+  "exitCode": 0,
+  "killed": false
+}
+```
+
+<div id="error-codes">
+  ### 错误代码
+</div>
+
+| 状态    | 描述                   |
+| ----- | -------------------- |
+| `402` | 浏览器会话额度不足            |
+| `403` | 抓取任务属于其他团队           |
+| `404` | 未找到抓取任务              |
+| `409` | 回放上下文不可用——请重新运行抓取后重试 |
+| `410` | 浏览器会话已被销毁            |
+| `429` | 已达到浏览器会话的最大并发数       |
+| `502` | 浏览器服务或 AI 代理执行失败     |
+| `503` | 浏览器功能未配置 (仅限自托管)     |
+
+有关详细使用方式和示例，请参见 [Interact 功能指南](/zh/features/interact)。
