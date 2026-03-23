@@ -1,0 +1,134 @@
+---
+title: "Interagir avec la page"
+description: "Exécutez du code ou un prompt d’IA dans la session de navigateur
+  associée à une tâche de scrape."
+openapi: '/fr/api-reference/v2-openapi.json POST /scrape/{jobId}/interact'
+---
+
+Utilisez ce point de terminaison pour continuer à interagir avec le même état de navigateur initialisé à partir d’un scrape précédent. Vous devez fournir soit `code`, soit `prompt` — pas les deux.
+
+`POST /v2/scrape/{jobId}/interact` gère l’ensemble du cycle de vie :
+
+1. Si aucune session de navigateur n’existe encore pour cette tâche de scrape, Firecrawl en crée une dans le même état de page que le scrape d’origine.
+2. Lorsque `code` est fourni, Firecrawl l’exécute dans le sandbox du navigateur. Lorsque `prompt` est fourni, un agent IA automatise la tâche en langage naturel.
+3. Les appels ultérieurs à `POST /interact` sur le même `jobId` réutilisent le même état actif du navigateur.
+
+Lorsque vous avez terminé, appelez `DELETE /v2/scrape/{jobId}/interact` pour arrêter la session.
+
+<div id="path-parameters">
+  ## Paramètres de chemin
+</div>
+
+| Paramètre | Type          | Requis | Description                                                                        |
+| --------- | ------------- | ------ | ---------------------------------------------------------------------------------- |
+| `jobId`   | string (UUID) | Oui    | L’ID de tâche de scrape issu de `data.metadata.scrapeId` dans la réponse de scrape |
+
+<div id="request-body">
+  ## Corps de la requête
+</div>
+
+| Paramètre  | Type   | Obligatoire | Défaut   | Description                                                                                                     |
+| ---------- | ------ | ----------- | -------- | --------------------------------------------------------------------------------------------------------------- |
+| `code`     | string | Non         | —        | Code à exécuter dans le sandbox du navigateur (1–100 000 caractères). Obligatoire si `prompt` n’est pas défini. |
+| `prompt`   | string | Non         | —        | Tâche en langage naturel pour l’agent IA (1–10 000 caractères). Obligatoire si `code` n’est pas défini.         |
+| `language` | string | Non         | `"node"` | L’une des valeurs suivantes : `"python"`, `"node"` ou `"bash"`. Utilisé uniquement avec `code`.                 |
+| `timeout`  | number | Non         | `30`     | Délai d’expiration de l’exécution, en secondes (1–300).                                                         |
+| `origin`   | string | Non         | —        | Libellé d’origine facultatif utilisé pour la télémétrie.                                                        |
+
+<div id="response">
+  ## Réponse
+</div>
+
+| Champ | Type | Description |
+|-------|------|-------------|
+| `success` | boolean | Indique si l’exécution s’est terminée sans erreur |
+| `liveViewUrl` | string | URL de la vue en direct en lecture seule pour la session de navigateur |
+| `interactiveLiveViewUrl` | string | URL de la vue en direct interactive (les utilisateurs peuvent contrôler le navigateur) |
+| `output` | string | Réponse finale de l’agent IA (présente uniquement lors de l’utilisation de `prompt`) |
+| `stdout` | string | Sortie standard de l’exécution du code |
+| `result` | string | Valeur de retour — valeur de la dernière expression pour Node.js, instantané final de la page pour `prompt` |
+| `stderr` | string | Sortie d’erreur standard |
+| `exitCode` | number | Code de sortie de l’exécution (`0` = succès) |
+| `killed` | boolean | Indique si l’exécution a été interrompue en raison d’un délai d’expiration |
+| `error` | string | Message d’erreur (présent uniquement en cas d’échec) |
+
+<div id="example-request-code">
+  ### Exemple de requête (Code)
+</div>
+
+```bash
+curl -X POST "https://api.firecrawl.dev/v2/scrape/550e8400-e29b-41d4-a716-446655440000/interact" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "const title = await page.title(); JSON.stringify({ title });",
+    "language": "node",
+    "timeout": 30
+  }'
+```
+
+<div id="example-response-code">
+  ### Exemple de réponse (code)
+</div>
+
+```json
+{
+  "success": true,
+  "liveViewUrl": "https://liveview.firecrawl.dev/...",
+  "interactiveLiveViewUrl": "https://liveview.firecrawl.dev/...",
+  "stdout": "",
+  "result": "{\"title\":\"Example Domain\"}",
+  "stderr": "",
+  "exitCode": 0,
+  "killed": false
+}
+```
+
+<div id="example-request-prompt">
+  ### Exemple de requête (Prompt)
+</div>
+
+```bash
+curl -X POST "https://api.firecrawl.dev/v2/scrape/550e8400-e29b-41d4-a716-446655440000/interact" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Find the pricing section and tell me the price of the Pro plan",
+    "timeout": 60
+  }'
+```
+
+<div id="example-response-prompt">
+  ### Exemple de réponse (Prompt)
+</div>
+
+```json
+{
+  "success": true,
+  "liveViewUrl": "https://liveview.firecrawl.dev/...",
+  "interactiveLiveViewUrl": "https://liveview.firecrawl.dev/...",
+  "output": "The Pro plan costs $49/month and includes unlimited scrapes, priority support, and custom integrations.",
+  "stdout": "...",
+  "result": "...",
+  "stderr": "",
+  "exitCode": 0,
+  "killed": false
+}
+```
+
+<div id="error-codes">
+  ### Codes d’erreur
+</div>
+
+| État  | Description                                                            |
+| ----- | ---------------------------------------------------------------------- |
+| `402` | Crédits insuffisants pour une session de navigateur                    |
+| `403` | La tâche de scraping appartient à une autre équipe                     |
+| `404` | Tâche de scraping introuvable                                          |
+| `409` | Contexte de relecture indisponible — relancez le scraping et réessayez |
+| `410` | La session de navigateur a déjà été détruite                           |
+| `429` | Nombre maximal de sessions de navigateur simultanées atteint           |
+| `502` | Échec du service de navigateur ou de l’exécution de l’agent IA         |
+| `503` | Fonctionnalité de navigateur non configurée (auto-hébergé uniquement)  |
+
+Pour des informations d’utilisation détaillées avec des exemples, consultez le [guide de la fonctionnalité Interact](/fr/features/interact).
