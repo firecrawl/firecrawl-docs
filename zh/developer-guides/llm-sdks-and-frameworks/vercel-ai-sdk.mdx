@@ -1,9 +1,9 @@
 ---
 title: "Vercel AI SDK"
-description: "适用于 Vercel AI SDK 的 Firecrawl 工具，为 AI 应用提供网页抓取、搜索、浏览和数据提取能力。"
+description: "适用于 Vercel AI SDK 的 Firecrawl 工具，为 AI 应用提供网页抓取、搜索、交互和网页爬取能力。"
 ---
 
-适用于 Vercel AI SDK 的 Firecrawl 工具，为 AI 应用提供网页抓取、搜索、浏览和数据提取能力。
+适用于 Vercel AI SDK 的 Firecrawl 工具，为 AI 应用提供搜索、抓取、页面交互和网页爬取能力。
 
 <div id="install">
   ## 安装
@@ -21,7 +21,7 @@ AI_GATEWAY_API_KEY=your-key         # https://vercel.com/ai-gateway
 ```
 
 <Note>
-  这些示例使用 [Vercel AI Gateway](https://vercel.com/ai-gateway) 的 string 模型格式，但 Firecrawl 工具可以搭配任何 AI SDK 提供方使用。你可以改用 `openai('gpt-5-mini')`、`anthropic('claude-sonnet-4.5')`，或任一[受支持的提供方](https://ai-sdk.dev/providers/ai-sdk-providers)。
+  这些示例使用 [Vercel AI Gateway](https://vercel.com/ai-gateway) 的 string 模型格式，但 Firecrawl 工具可以搭配任何 AI SDK 提供方使用。你也可以使用来自 `@ai-sdk/anthropic` 的提供方导入，例如 `anthropic('claude-sonnet-4-5-20250514')`。
 </Note>
 
 
@@ -29,95 +29,96 @@ AI_GATEWAY_API_KEY=your-key         # https://vercel.com/ai-gateway
   ## 快速开始
 </div>
 
-最简单的上手方式。`FirecrawlTools()` 提供搜索、抓取和浏览工具，并自动生成系统提示词，引导模型选择合适的工具。
+`FirecrawlTools()` 默认集成了搜索、抓取和交互工具。
 
 ```typescript
 import { generateText, stepCountIs } from 'ai';
 import { FirecrawlTools } from 'firecrawl-aisdk';
 
 const { text } = await generateText({
-  model: 'anthropic/claude-sonnet-4.5',
-  prompt: 'Search for Firecrawl, scrape the top result, and summarize what it does',
+  model: 'anthropic/claude-sonnet-4-5',
   tools: FirecrawlTools(),
-  stopWhen: stepCountIs(5),
+  stopWhen: stepCountIs(30),
+  prompt: `
+    1. Use interact on Hacker News to identify the top story
+    2. Search for other perspectives on the same topic
+    3. Scrape the most relevant pages you found
+    4. Summarize everything you found
+  `,
 });
 ```
 
-使用自定义配置：
+
+<div id="firecrawltools">
+  ## FirecrawlTools
+</div>
+
+`FirecrawlTools()` 会为你提供默认工具，以及一个可传给 `generateText` 的自动生成 `systemPrompt`。
+
+```typescript
+import { generateText, stepCountIs } from 'ai';
+import { FirecrawlTools } from 'firecrawl-aisdk';
+
+const tools = FirecrawlTools();
+
+const { text } = await generateText({
+  model: 'anthropic/claude-sonnet-4-5',
+  system: `${tools.systemPrompt}\n\nAnswer with citations when possible.`,
+  tools,
+  stopWhen: stepCountIs(20),
+  prompt: 'Find the current Firecrawl pricing page and explain the available plans.',
+});
+```
+
+你可以自定义默认值、按需启用异步工具，或禁用单个工具：
 
 ```typescript
 const tools = FirecrawlTools({
-  apiKey: 'fc-custom-key',                // 可选，默认使用环境变量
-  search: { limit: 3, country: 'US' },    // 默认搜索选项
-  scrape: { onlyMainContent: true },       // 默认抓取选项
-  browser: {},                             // 启用浏览器工具
+  search: { limit: 5 },
+  scrape: { formats: ['markdown'], onlyMainContent: true },
+  interact: { profile: { name: 'my-session', saveChanges: true } },
+  crawl: true,
+  agent: true,
 });
 ```
-
-将其设置为 `false` 即可禁用某个工具：
 
 ```typescript
-const tools = FirecrawlTools({
-  browser: false,   // 仅启用搜索 + 抓取
-});
+// 禁用 interact，保留 search + scrape
+FirecrawlTools({ interact: false });
+
+// 启用已废弃的浏览器兼容性
+FirecrawlTools({ browser: {} });
+
+// 包含所有可用工具
+FirecrawlTools({ all: true });
 ```
+
+在通过抓取回答关于页面的问题时，优先使用 query 格式：
+
+```typescript
+formats: [{ type: 'query', prompt: 'What does this page say about pricing and rate limits?' }]
+```
+
+仅在需要完整页面内容时才使用 `formats: ['markdown']`。
 
 
 <div id="individual-tools">
-  ## 独立工具
+  ## 单个工具
 </div>
 
-每个工具都**兼具两种用法**——既可以直接作为工具使用（从环境变量中读取 `FIRECRAWL_API_KEY`），也可以作为工厂函数调用，用于自定义配置：
+每个工具都可以直接使用，也可以传入选项进行调用：
 
 ```typescript
+import { generateText } from 'ai';
 import { scrape, search } from 'firecrawl-aisdk';
 
-// 直接使用 - 从环境变量读取 FIRECRAWL_API_KEY
 const { text } = await generateText({
-  model: 'anthropic/claude-sonnet-4.5',
-  tools: { scrape, search },
-  prompt: '...',
+  model: 'anthropic/claude-sonnet-4-5',
+  prompt: '搜索 Firecrawl，然后抓取最相关的结果。',
+  tools: { search, scrape },
 });
 
-// 或作为工厂函数调用以自定义配置
-const customScrape = scrape({ apiKey: 'fc-custom-key' });
-const { text } = await generateText({
-  model: 'anthropic/claude-sonnet-4.5',
-  tools: { scrape: customScrape },
-  prompt: '...',
-});
-```
-
-
-<div id="scrape">
-  ### 爬取
-</div>
-
-```typescript
-import { generateText } from 'ai';
-import { scrape } from 'firecrawl-aisdk';
-
-const { text } = await generateText({
-  model: 'anthropic/claude-sonnet-4.5',
-  prompt: '抓取 https://firecrawl.dev 并总结它的作用',
-  tools: { scrape },
-});
-```
-
-
-<div id="search">
-  ### 搜索
-</div>
-
-```typescript
-import { generateText } from 'ai';
-import { search } from 'firecrawl-aisdk';
-
-const { text } = await generateText({
-  model: 'anthropic/claude-sonnet-4.5',
-  prompt: '搜索 Firecrawl 并总结你的发现',
-  tools: { search },
-});
+const customScrape = scrape({ apiKey: 'fc-custom-key', apiUrl: 'https://api.firecrawl.dev' });
 ```
 
 
@@ -130,8 +131,8 @@ import { generateText } from 'ai';
 import { search, scrape } from 'firecrawl-aisdk';
 
 const { text } = await generateText({
-  model: 'anthropic/claude-sonnet-4.5',
-  prompt: '搜索 Firecrawl,抓取首个结果,并说明其功能',
+  model: 'anthropic/claude-sonnet-4-5',
+  prompt: '搜索 Firecrawl,抓取首个官方结果,并说明其功能。',
   tools: { search, scrape },
 });
 ```
@@ -146,8 +147,8 @@ import { generateText } from 'ai';
 import { map } from 'firecrawl-aisdk';
 
 const { text } = await generateText({
-  model: 'anthropic/claude-sonnet-4.5',
-  prompt: 'Map https://docs.firecrawl.dev and list the main sections',
+  model: 'anthropic/claude-sonnet-4-5',
+  prompt: 'Map https://docs.firecrawl.dev and list the main sections.',
   tools: { map },
 });
 ```
@@ -158,81 +159,68 @@ const { text } = await generateText({
 </div>
 
 ```typescript
-import { streamText } from 'ai';
+import { streamText, stepCountIs } from 'ai';
 import { scrape } from 'firecrawl-aisdk';
 
 const result = streamText({
-  model: 'anthropic/claude-sonnet-4.5',
-  prompt: '抓取 https://firecrawl.dev 并解释它的功能',
+  model: 'anthropic/claude-sonnet-4-5',
+  prompt: 'What is the first 100 words of firecrawl.dev?',
   tools: { scrape },
+  stopWhen: stepCountIs(3),
 });
 
 for await (const chunk of result.textStream) {
   process.stdout.write(chunk);
 }
+
+await result.fullStream;
 ```
 
 
-<div id="browser">
-  ## Browser
+<div id="interact">
+  ## 交互
 </div>
 
-`browser` 工具在首次使用时会自动创建一个云端会话，并在进程退出时自动清理：
+`interact()` 会创建一个由抓取驱动的交互式会话。调用 `start(url)` 以初始化会话并获取 live view URL，然后让模型通过 `interact` 工具复用该会话。
 
 ```typescript
 import { generateText, stepCountIs } from 'ai';
-import { browser } from 'firecrawl-aisdk';
+import { interact, search } from 'firecrawl-aisdk';
+
+const interactTool = interact();
+console.log('Live view:', await interactTool.start('https://news.ycombinator.com'));
 
 const { text } = await generateText({
-  model: 'anthropic/claude-sonnet-4.5',
-  tools: { browser: browser() },
+  model: 'anthropic/claude-sonnet-4-5',
+  tools: { interact: interactTool, search },
   stopWhen: stepCountIs(25),
-  prompt: 'Go to https://news.ycombinator.com and get the top 3 stories.',
+  prompt: 'Use interact on the current Hacker News session, find the top story, then search for more context.',
 });
+
+await interactTool.close();
 ```
 
-要获取用于实时查看浏览器的实时预览 URL，或手动控制会话生命周期：
+如果你需要在启动后获取明确的 live view URL，请使用 `interactTool.interactiveLiveViewUrl`。
+
+使用配置文件在不同会话间复用浏览器状态：
 
 ```typescript
-const browserTool = browser();
-console.log('Live view:', await browserTool.start());
-
-const { text } = await generateText({
-  model: 'anthropic/claude-sonnet-4.5',
-  tools: { browserTool },
-  stopWhen: stepCountIs(25),
-  prompt: 'Go to https://news.ycombinator.com and get the top 3 stories.',
-});
-
-await browserTool.close();
-```
-
-
-<div id="browser-search">
-  ### 浏览器 + 搜索
-</div>
-
-```typescript
-import { generateText, stepCountIs } from 'ai';
-import { browser, search } from 'firecrawl-aisdk';
-
-const { text } = await generateText({
-  model: 'anthropic/claude-sonnet-4.5',
-  tools: { browser: browser(), search },
-  stopWhen: stepCountIs(25),
-  prompt: '搜索本周顶级 AI 论文,浏览并总结其核心发现。',
+const interactTool = interact({
+  profile: { name: 'my-session', saveChanges: true },
 });
 ```
+
+`browser()` 已弃用。建议改用 `interact()`。
 
 
 <div id="async-tools">
   ## 异步工具
 </div>
 
-Crawl、batch scrape、extract 和 agent 会返回一个任务 ID。配合 `poll` 获取结果：
+爬取、批量抓取 和 代理 会返回一个任务 ID。配合 `poll`。
 
 <div id="crawl">
-  ### Crawl
+  ### 爬取
 </div>
 
 ```typescript
@@ -240,8 +228,8 @@ import { generateText } from 'ai';
 import { crawl, poll } from 'firecrawl-aisdk';
 
 const { text } = await generateText({
-  model: 'anthropic/claude-sonnet-4.5',
-  prompt: 'Crawl https://docs.firecrawl.dev (limit 3 pages) and summarize',
+  model: 'anthropic/claude-sonnet-4-5',
+  prompt: 'Crawl https://docs.firecrawl.dev (limit 3 pages) and summarize.',
   tools: { crawl, poll },
 });
 ```
@@ -256,57 +244,87 @@ import { generateText } from 'ai';
 import { batchScrape, poll } from 'firecrawl-aisdk';
 
 const { text } = await generateText({
-  model: 'anthropic/claude-sonnet-4.5',
-  prompt: 'Scrape https://firecrawl.dev and https://docs.firecrawl.dev, then compare',
+  model: 'anthropic/claude-sonnet-4-5',
+  prompt: 'Scrape https://firecrawl.dev and https://docs.firecrawl.dev, then compare them.',
   tools: { batchScrape, poll },
 });
 ```
 
 
 <div id="agent">
-  ### Agent
+  ### 代理
 </div>
 
-自动化网页数据采集——可自行搜索、浏览并提取数据。
+自动化网页数据采集，可自行搜索、浏览并提取数据。
 
 ```typescript
 import { generateText, stepCountIs } from 'ai';
 import { agent, poll } from 'firecrawl-aisdk';
 
 const { text } = await generateText({
-  model: 'anthropic/claude-sonnet-4.5',
-  prompt: 'Find the founders of Firecrawl, their roles, and their backgrounds',
+  model: 'anthropic/claude-sonnet-4-5',
+  prompt: 'Find the founders of Firecrawl, their roles, and their backgrounds.',
   tools: { agent, poll },
   stopWhen: stepCountIs(10),
 });
 ```
 
 
+<div id="logging">
+  ## 日志
+</div>
+
+```typescript
+import { generateText } from 'ai';
+import { logStep, scrape, stepLogger } from 'firecrawl-aisdk';
+
+const logger = stepLogger();
+
+const { text, usage } = await generateText({
+  model: 'anthropic/claude-sonnet-4-5',
+  prompt: 'Scrape https://firecrawl.dev and summarize it.',
+  tools: { scrape },
+  onStepFinish: logger.onStep,
+  experimental_onToolCallFinish: logger.onToolCallFinish,
+});
+
+logger.close();
+logger.summary(usage);
+
+await generateText({
+  model: 'anthropic/claude-sonnet-4-5',
+  prompt: 'Scrape https://firecrawl.dev and summarize it again.',
+  tools: { scrape },
+  onStepFinish: logStep,
+});
+```
+
+
 <div id="all-exports">
-  ## 全部导出
+  ## 所有导出项
 </div>
 
 ```typescript
 import {
-  // 双用途工具（可直接使用或作为工厂调用）
+  // 核心工具
+  search,             // 进行网页搜索
   scrape,             // 抓取单个 URL
-  search,             // 搜索网络
   map,                // 发现站点上的 URL
-  crawl,              // 爬取多个页面（异步）
-  batchScrape,        // 批量抓取多个 URL（异步）
-  agent,              // 自主网络代理（异步）
-  extract,            // 提取结构化数据（异步）
+  crawl,              // 爬取多个页面（异步，使用 poll）
+  batchScrape,        // 批量抓取多个 URL（异步，使用 poll）
+  agent,              // 自主网页调研（异步，使用 poll）
 
   // 任务管理
   poll,               // 轮询异步任务以获取结果
-  status,             // 检查任务状态
+  status,             // 查看任务状态
   cancel,             // 取消正在运行的任务
 
-  // 浏览器（仅工厂模式）
-  browser,            // browser({ firecrawlApiKey: '...' })
+  // 浏览器/会话工具
+  interact,           // interact({ profile: { name: '...' } })
+  browser,            // 已废弃的兼容性导出
 
-  // 一体化套件
-  FirecrawlTools,     // FirecrawlTools({ apiKey, search, scrape, browser })
+  // 一体化包
+  FirecrawlTools,     // FirecrawlTools({ search, scrape, interact, crawl, agent })
 
   // 辅助工具
   stepLogger,         // 每次工具调用的 Token 统计
