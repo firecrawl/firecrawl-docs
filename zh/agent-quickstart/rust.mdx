@@ -1,0 +1,314 @@
+---
+title: "Rust 代理快速入门"
+description: "Firecrawl Rust 官方快速入门，适用于使用搜索、抓取和交互功能的外部代理。"
+---
+
+<div id="firecrawl-rust-agent-quickstart">
+  # Firecrawl Rust 代理快速入门
+</div>
+
+本文件是面向外部代理的标准快速入门文档，根据 SDK 源代码和 v2 OpenAPI 规范生成。
+
+<div id="install">
+  ## 安装
+</div>
+
+```bash
+cargo add firecrawl
+```
+
+<div id="authenticate">
+  ## 身份验证
+</div>
+
+```rust
+use firecrawl::v2::Client;
+
+let client = Client::new("fc-your-api-key")?;
+```
+
+<div id="when-to-use-what">
+  ## 何时使用哪种方式
+</div>
+
+* `search`：当你从查询开始，需要先进行发现时使用。
+* `scrape`：当你已经有 URL，并且想获取页面内容时使用。
+* `interact`：当页面需要点击、填写表单，或在抓取后执行浏览器 actions 时使用。
+
+<div id="search">
+  ## 搜索
+</div>
+
+### 为什么使用它
+
+使用 `search` 可以根据查询发现相关 URL，并可选择抓取每个结果。你也可以在抓取特定 URL 之前，先用标准的 `site:` 运算符将查询范围限定在单个站点内 (例如 `site:docs.firecrawl.dev crawl webhooks`) 。
+
+<div id="preferred-sdk-method">
+  ### 推荐的 SDK 方法
+</div>
+
+`client.search(query, options)`
+
+<div id="simple-example">
+  ### 简单示例
+</div>
+
+```rust
+use firecrawl::v2::Client;
+
+let client = Client::new("fc-your-api-key")?;
+let results = client.search("site:docs.firecrawl.dev crawl webhooks", None).await?;
+
+if let Some(web) = results.data.web {
+    println!("{:?}", web.first());
+}
+```
+
+<div id="complex-example">
+  ### 复杂示例
+</div>
+
+```rust
+use firecrawl::v2::{Client, SearchOptions, SearchSource, SearchCategory, ScrapeOptions, Format};
+
+let client = Client::new("fc-your-api-key")?;
+let options = SearchOptions {
+    sources: Some(vec![SearchSource::Web, SearchSource::News]),
+    categories: Some(vec![SearchCategory::Research]),
+    limit: Some(10),
+    tbs: Some("qdr:w".to_string()),
+    location: Some("San Francisco,California,United States".to_string()),
+    ignore_invalid_urls: Some(true),
+    scrape_options: Some(ScrapeOptions {
+        formats: Some(vec![Format::Markdown, Format::Json]),
+        only_main_content: Some(true),
+        ..Default::default()
+    }),
+    integration: Some("agent-quickstart".to_string()),
+};
+
+let results = client.search("firecrawl pricing", options).await?;
+```
+
+<div id="parameters">
+  ### 参数
+</div>
+
+* `query`：搜索查询字符串。始终为必填项。
+* `limit`：返回结果的最大数量。用于限制响应大小。
+* `sources`：要搜索的来源。支持的值：`SearchSource::Web`、`SearchSource::News`、`SearchSource::Images`。
+* `categories`：结果筛选条件。支持的值：`SearchCategory::Github`、`SearchCategory::Research`、`SearchCategory::Pdf`。
+* `tbs`：基于时间的搜索筛选字符串。用于按时间范围限制结果 (例如：`qdr:d`) 。
+* `location`：用于本地化结果的位置字符串。用于地理位置相关的查询。
+* `ignore_invalid_urls`：从结果中排除无效 URL。在将结果传递给其他端点时使用。
+* `timeout`：请求超时时间，单位为毫秒。用于限制搜索时间。
+* `scrape_options`：应用于每个结果的抓取选项 (字段与 `scrape` 相同) 。适用于需要结果同时包含内容的场景。
+* `integration`：集成标识符。用于跟踪/分析。
+
+<div id="scrape">
+  ## 抓取
+</div>
+
+### 为什么使用它
+
+当你已经知道 URL，并且希望以特定格式获取内容时，请使用 `scrape`。
+
+<div id="preferred-sdk-method">
+  ### 推荐的 SDK 方法
+</div>
+
+`client.scrape(url, options)`
+
+<div id="simple-example">
+  ### 简单示例
+</div>
+
+```rust
+use firecrawl::v2::{Client, ScrapeOptions, Format};
+
+let client = Client::new("fc-your-api-key")?;
+let doc = client
+    .scrape(
+        "https://example.com",
+        ScrapeOptions {
+            formats: Some(vec![Format::Markdown]),
+            ..Default::default()
+        },
+    )
+    .await?;
+
+println!("{:?}", doc.markdown);
+```
+
+<div id="complex-example">
+  ### 复杂示例
+</div>
+
+```rust
+use firecrawl::v2::{
+    Action, ChangeTrackingMode, ChangeTrackingOptions, Client, Format, JsonOptions, LocationConfig,
+    ParserConfig, ProxyType, ScrapeOptions, ScreenshotOptions, ScrollDirection, Viewport,
+};
+
+let client = Client::new("fc-your-api-key")?;
+let options = ScrapeOptions {
+    formats: Some(vec![Format::Markdown, Format::Json, Format::ChangeTracking, Format::Screenshot]),
+    json_options: Some(JsonOptions {
+        prompt: Some("Extract headings and slugs.".to_string()),
+        ..Default::default()
+    }),
+    change_tracking_options: Some(ChangeTrackingOptions {
+        modes: Some(vec![ChangeTrackingMode::GitDiff]),
+        tag: Some("docs".to_string()),
+        ..Default::default()
+    }),
+    screenshot_options: Some(ScreenshotOptions {
+        full_page: Some(true),
+        viewport: Some(Viewport { width: 1280, height: 720 }),
+        ..Default::default()
+    }),
+    actions: Some(vec![
+        Action::Wait {
+            milliseconds: Some(1000),
+            selector: None,
+        },
+        Action::Click {
+            selector: "button#accept".to_string(),
+        },
+        Action::Scroll {
+            direction: ScrollDirection::Down,
+            selector: None,
+        },
+    ]),
+    parsers: Some(vec![ParserConfig::Pdf {
+        parser_type: "pdf".to_string(),
+        max_pages: Some(5),
+    }]),
+    location: Some(LocationConfig {
+        country: Some("US".to_string()),
+        languages: Some(vec!["en-US".to_string()]),
+    }),
+    proxy: Some(ProxyType::Stealth),
+    ..Default::default()
+};
+
+let doc = client.scrape("https://example.com/docs", options).await?;
+```
+
+<div id="parameters">
+  ### 参数
+</div>
+
+* `url`：要抓取的 URL。始终为必填项。
+* `formats`：要包含的输出格式。支持的值：`Format::Markdown`、`Format::Html`、`Format::RawHtml`、`Format::Links`、`Format::Images`、`Format::Screenshot`、`Format::Summary`、`Format::ChangeTracking`、`Format::Json`、`Format::Attributes`、`Format::Branding`、`Format::Audio`。
+* `headers`：附加的 HTTP 标头。用于身份验证、cookies 或 user-agent。
+* `include_tags`：仅包含这些 HTML 标签中的内容。用于缩小提取范围。
+* `exclude_tags`：排除这些 HTML 标签中的内容。用于去除噪声。
+* `only_main_content`：仅提取主要内容。用于去掉导航栏/页脚等内容。
+* `timeout`：抓取超时时间 (毫秒) 。用于限制运行时长。
+* `wait_for`：抓取前的延迟时间 (毫秒) 。用于 JS 渲染的页面。
+* `mobile`：模拟移动设备。用于移动端布局。
+* `parsers`：解析器列表或配置。支持的值：`ParserConfig::Simple(String)` 或 `ParserConfig::Pdf { parser_type: "pdf", max_pages: Option<u32> }`。
+* `actions`：抓取前要执行的浏览器 actions。支持的 actions：`Wait { milliseconds?, selector? }`、`Screenshot { full_page?, quality?, viewport? }`、`Click { selector }`、`Write { text }`、`Press { key }`、`Scroll { direction: Up | Down, selector? }`、`Scrape`、`ExecuteJavascript { script }`、`Pdf { format?, landscape?, scale? }`，其中格式支持 `A0`-`A6`、`Letter`、`Legal`、`Tabloid`、`Ledger`。
+* `location`：位置配置 `{ country, languages }`。用于特定地理区域的页面。
+* `skip_tls_verification`：跳过 TLS 证书验证。用于自签名证书。
+* `remove_base64_images`：从 markdown 输出中移除 base64 图片。用于减小负载大小。
+* `block_ads`：启用广告和 cookie 拦截。用于减少噪声。
+* `proxy`：代理模式 `ProxyType::Basic`、`ProxyType::Stealth`、`ProxyType::Enhanced`、`ProxyType::Auto`。
+* `max_age`：接受缓存中未超过此时长的内容 (毫秒) 。用于优先命中缓存。
+* `min_age`：仅返回缓存中至少达到此时长的内容 (毫秒) 。用于仅读取缓存。
+* `store_in_cache`：将结果存入缓存/索引中。用于需要复用时。
+* `profile`：持久化浏览器配置文件 `ProfileConfig { name, save_changes }`。用于保留会话状态。
+* `integration`：集成标识符。用于追踪/分析。
+* `json_options`：用于 `Format::Json` 格式的 JSON 提取选项 (`schema`、`system_prompt`、`prompt`) 。
+* `screenshot_options`：用于 `Format::Screenshot` 格式的截图选项 (`full_page`、`quality`、`viewport`) 。
+* `change_tracking_options`：用于 `Format::ChangeTracking` 格式的变更追踪选项 (`modes`、`schema`、`prompt`、`tag`) 。模式：`ChangeTrackingMode::GitDiff`、`ChangeTrackingMode::Json`。
+* `attribute_selectors`：用于 `Format::Attributes` 格式的属性选择器 (`selector`、`attribute`) 。
+
+<div id="interact">
+  ## 交互
+</div>
+
+<div id="why-use-it">
+  ### 为什么要使用它
+</div>
+
+当页面在抓取后还需要点击、填写表单或执行其他浏览器 actions 时，请使用 `interact`。
+
+<div id="preferred-sdk-method">
+  ### 推荐的 SDK 方法
+</div>
+
+`client.interact(job_id, options)`
+
+<div id="simple-example">
+  ### 简单示例
+</div>
+
+```rust
+use firecrawl::v2::{Client, ScrapeExecuteOptions};
+
+let client = Client::new("fc-your-api-key")?;
+let run = client
+    .interact(
+        "scrape-job-id",
+        ScrapeExecuteOptions {
+            code: Some("console.log(await page.url())".to_string()),
+            ..Default::default()
+        },
+    )
+    .await?;
+
+println!("{:?}", run.stdout);
+```
+
+<div id="complex-example">
+  ### 复杂示例
+</div>
+
+```rust
+use firecrawl::v2::{Client, ScrapeExecuteLanguage, ScrapeExecuteOptions};
+
+let client = Client::new("fc-your-api-key")?;
+let run = client
+    .interact(
+        "scrape-job-id",
+        ScrapeExecuteOptions {
+            prompt: Some("Open the pricing page and list the plan names.".to_string()),
+            language: Some(ScrapeExecuteLanguage::Node),
+            timeout: Some(60),
+            origin: Some("agent-docs".to_string()),
+            ..Default::default()
+        },
+    )
+    .await?;
+```
+
+<div id="parameters">
+  ### 参数
+</div>
+
+* `job_id`：抓取任务 ID (来自 `document.metadata.scrape_id`) 。始终为必填项。
+* `code`：在浏览器沙箱中执行的代码。用于脚本化交互。
+* `prompt`：提供给浏览器代理的自然语言指令。适用于你希望由代理驱动 actions 的场景。
+* `language`：运行时语言 `ScrapeExecuteLanguage::Python`、`ScrapeExecuteLanguage::Node` 或 `ScrapeExecuteLanguage::Bash` (默认值为 `Node`) 。
+* `timeout`：执行超时时间，单位为秒。用于限制运行时间过长的任务。
+* `origin`：可选的来源标签。用于请求归因。
+
+<div id="notes">
+  ## 注意事项
+</div>
+
+* 在 Rust 中，参数采用 snake&#95;case；JSON 序列化后为 camelCase。
+* 便捷方法：`search_and_scrape` 会执行搜索，并启用抓取。
+* 已弃用的别名：`scrape_execute`、`stop_interactive_browser`、`delete_scrape_browser` (请改用 `interact` 和 `stop_interaction`) 。
+
+<div id="source-of-truth">
+  ## 权威信息源
+</div>
+
+* `firecrawl/apps/rust-sdk/src/v2/client.rs`
+* `firecrawl/apps/rust-sdk/src/v2/search.rs`
+* `firecrawl/apps/rust-sdk/src/v2/scrape.rs`
+* `firecrawl/apps/rust-sdk/src/v2/types.rs`
+* `firecrawl-docs/api-reference/v2-openapi.json`
