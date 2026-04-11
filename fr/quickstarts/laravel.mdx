@@ -1,0 +1,213 @@
+---
+title: "Laravel"
+description: "Utilisez Firecrawl avec Laravel pour rechercher, extraire et interagir avec des données web via l’API REST."
+og:title: "Démarrage rapide avec Laravel | Firecrawl"
+og:description: "Utilisez Firecrawl avec Laravel pour rechercher, extraire et interagir avec des données web via l’API REST."
+---
+
+<div id="prerequisites">
+  ## Prérequis
+</div>
+
+* Projet Laravel 10 ou version ultérieure
+* Une clé API Firecrawl — [obtenez-en une gratuitement](https://www.firecrawl.dev/app/api-keys)
+
+<div id="configuration">
+  ## Configuration
+</div>
+
+Ajoutez votre clé API à `.env` :
+
+```bash
+FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+```
+
+Ajoutez l’entrée de configuration dans `config/services.php` :
+
+```php
+'firecrawl' => [
+    'api_key' => env('FIRECRAWL_API_KEY'),
+    'base_url' => env('FIRECRAWL_API_URL', 'https://api.firecrawl.dev/v2'),
+],
+```
+
+<div id="create-a-service-class">
+  ## Créer une classe de service
+</div>
+
+Créez `app/Services/FirecrawlService.php`:
+
+```php
+<?php
+
+namespace App\Services;
+
+use Illuminate\Support\Facades\Http;
+
+class FirecrawlService
+{
+    private string $apiKey;
+    private string $baseUrl;
+
+    public function __construct()
+    {
+        $this->apiKey = config('services.firecrawl.api_key');
+        $this->baseUrl = config('services.firecrawl.base_url');
+    }
+
+    public function search(string $query, int $limit = 5): array
+    {
+        $response = Http::withToken($this->apiKey)
+            ->post("{$this->baseUrl}/search", [
+                'query' => $query,
+                'limit' => $limit,
+            ]);
+
+        return $response->json();
+    }
+
+    public function scrape(string $url, array $options = []): array
+    {
+        $response = Http::withToken($this->apiKey)
+            ->post("{$this->baseUrl}/scrape", array_merge(['url' => $url], $options));
+
+        return $response->json();
+    }
+
+    public function interact(string $url, string $prompt, ?string $followUp = null): array
+    {
+        // 1. Scraper pour ouvrir une session de navigateur
+        $scrapeResult = $this->scrape($url, ['formats' => ['markdown']]);
+        $scrapeId = $scrapeResult['data']['metadata']['scrapeId'];
+
+        // 2. Envoyer le premier prompt
+        Http::withToken($this->apiKey)
+            ->post("{$this->baseUrl}/scrape/{$scrapeId}/interact", [
+                'prompt' => $prompt,
+            ]);
+
+        // 3. Envoyer le prompt de suivi
+        $result = null;
+        if ($followUp) {
+            $result = Http::withToken($this->apiKey)
+                ->post("{$this->baseUrl}/scrape/{$scrapeId}/interact", [
+                    'prompt' => $followUp,
+                ])->json();
+        }
+
+        // 4. Fermer la session
+        Http::withToken($this->apiKey)
+            ->delete("{$this->baseUrl}/scrape/{$scrapeId}/interact");
+
+        return $result ?? $scrapeResult;
+    }
+}
+```
+
+<div id="create-a-controller">
+  ## Créer un contrôleur
+</div>
+
+Créez `app/Http/Controllers/FirecrawlController.php` :
+
+```php
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Services\FirecrawlService;
+use Illuminate\Http\Request;
+
+class FirecrawlController extends Controller
+{
+    public function __construct(private FirecrawlService $firecrawl) {}
+
+    public function search(Request $request)
+    {
+        $validated = $request->validate(['query' => 'required|string']);
+        return response()->json(
+            $this->firecrawl->search($validated['query'], $request->input('limit', 5))
+        );
+    }
+
+    public function scrape(Request $request)
+    {
+        $validated = $request->validate(['url' => 'required|url']);
+        return response()->json($this->firecrawl->scrape($validated['url']));
+    }
+
+    public function interact(Request $request)
+    {
+        $validated = $request->validate([
+            'url' => 'required|url',
+            'prompt' => 'required|string',
+        ]);
+        return response()->json(
+            $this->firecrawl->interact(
+                $validated['url'],
+                $validated['prompt'],
+                $request->input('followUp')
+            )
+        );
+    }
+}
+```
+
+<div id="register-routes">
+  ## Déclarer les routes
+</div>
+
+Dans `routes/api.php`:
+
+```php
+use App\Http\Controllers\FirecrawlController;
+
+Route::post('/search', [FirecrawlController::class, 'search']);
+Route::post('/scrape', [FirecrawlController::class, 'scrape']);
+Route::post('/interact', [FirecrawlController::class, 'interact']);
+```
+
+<div id="test-it">
+  ## Essayez-le
+</div>
+
+```bash
+php artisan serve
+
+# Rechercher sur le web
+curl -X POST http://localhost:8000/api/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "firecrawl web scraping"}'
+
+# Scraper une page
+curl -X POST http://localhost:8000/api/scrape \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}'
+
+# Interagir avec une page
+curl -X POST http://localhost:8000/api/interact \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.amazon.com", "prompt": "Search for iPhone 16 Pro Max", "followUp": "Click on the first result and tell me the price"}'
+```
+
+<div id="next-steps">
+  ## Étapes suivantes
+</div>
+
+<CardGroup cols={2}>
+  <Card title="Docs Search" icon="magnifying-glass" href="/fr/features/search">
+    Effectuez une recherche sur le web et obtenez le contenu intégral de la page
+  </Card>
+
+  <Card title="Docs Scrape" icon="file-lines" href="/fr/features/scrape">
+    Toutes les options de scrape, y compris les formats, les actions et les proxys
+  </Card>
+
+  <Card title="Docs Interact" icon="hand-pointer" href="/fr/features/interact">
+    Cliquez, remplissez des formulaires et extrayez du contenu dynamique
+  </Card>
+
+  <Card title="Référence API" icon="code" href="/fr/api-reference/v2-introduction">
+    Documentation complète de l’API REST
+  </Card>
+</CardGroup>

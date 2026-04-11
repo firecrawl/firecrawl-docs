@@ -1,0 +1,157 @@
+---
+title: "FastAPI"
+description: "Python で Firecrawl と FastAPI を使い、非同期の Web スクレイピング API と検索 API を構築します。"
+og:title: "FastAPI クイックスタート | Firecrawl"
+og:description: "Python で Firecrawl と FastAPI を使い、非同期の Web スクレイピング API と検索 API を構築します。"
+---
+
+<div id="prerequisites">
+  ## 前提条件
+</div>
+
+* Python 3.8+
+* Firecrawl APIキー — [無料で取得](https://www.firecrawl.dev/app/api-keys)
+
+<div id="setup">
+  ## セットアップ
+</div>
+
+```bash
+pip install fastapi uvicorn firecrawl-py
+```
+
+`.env` に API key を追加します:
+
+```bash
+FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+```
+
+<div id="create-the-api">
+  ## APIを作成する
+</div>
+
+`main.py` を作成します。
+
+```python
+import os
+from fastapi import FastAPI
+from pydantic import BaseModel
+from firecrawl import Firecrawl
+
+app = FastAPI()
+firecrawl = Firecrawl(api_key=os.environ["FIRECRAWL_API_KEY"])
+
+
+class SearchRequest(BaseModel):
+    query: str
+    limit: int = 5
+
+
+class ScrapeRequest(BaseModel):
+    url: str
+
+
+class InteractRequest(BaseModel):
+    scrape_id: str
+    prompt: str
+
+
+@app.post("/search")
+async def search(req: SearchRequest):
+    results = firecrawl.search(req.query, limit=req.limit)
+    return [{"title": r.title, "url": r.url} for r in results.web]
+
+
+@app.post("/scrape")
+async def scrape(req: ScrapeRequest):
+    result = firecrawl.scrape(req.url)
+    return {"markdown": result.markdown, "metadata": result.metadata}
+
+
+@app.post("/interact/start")
+async def interact_start(req: ScrapeRequest):
+    result = firecrawl.scrape(req.url, formats=["markdown"])
+    return {"scrape_id": result.metadata.scrape_id}
+
+
+@app.post("/interact")
+async def interact(req: InteractRequest):
+    response = firecrawl.interact(req.scrape_id, prompt=req.prompt)
+    return {"output": response.output}
+
+
+@app.post("/interact/stop")
+async def interact_stop(req: InteractRequest):
+    firecrawl.stop_interaction(req.scrape_id)
+    return {"status": "stopped"}
+```
+
+<div id="run-it">
+  ## 実行してみる
+</div>
+
+```bash
+uvicorn main:app --reload
+```
+
+<div id="test-it">
+  ## 試してみる
+</div>
+
+```bash
+# ウェブを検索する
+curl -X POST http://localhost:8000/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "firecrawl web scraping", "limit": 5}'
+
+# ページをスクレイピングする
+curl -X POST http://localhost:8000/scrape \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}'
+
+# インタラクティブセッションを開始し、プロンプトを送信する
+curl -X POST http://localhost:8000/interact/start \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.amazon.com"}'
+```
+
+FastAPI は `http://localhost:8000/docs` にインタラクティブなドキュメントを自動的に生成します。
+
+<div id="async-variant">
+  ## 非同期版
+</div>
+
+高負荷時の並行処理性能を高めるには、`AsyncFirecrawl` を使用します:
+
+```python
+from firecrawl import AsyncFirecrawl
+
+async_firecrawl = AsyncFirecrawl(api_key=os.environ["FIRECRAWL_API_KEY"])
+
+@app.post("/scrape-async")
+async def scrape_async(req: ScrapeRequest):
+    result = await async_firecrawl.scrape(req.url)
+    return {"markdown": result.markdown}
+```
+
+<div id="next-steps">
+  ## 次のステップ
+</div>
+
+<CardGroup cols={2}>
+  <Card title="Scrape ドキュメント" icon="file-lines" href="/ja/features/scrape">
+    フォーマット、アクション、プロキシなど、スクレイピングのオプションを網羅
+  </Card>
+
+  <Card title="Search ドキュメント" icon="magnifying-glass" href="/ja/features/search">
+    Web を検索してページ全体のコンテンツを取得
+  </Card>
+
+  <Card title="Interact ドキュメント" icon="hand-pointer" href="/ja/features/interact">
+    クリック、フォーム入力、動的コンテンツの抽出
+  </Card>
+
+  <Card title="Python SDK リファレンス" icon="python" href="/ja/sdks/python">
+    クロール、map、async などを含む SDK の完全なリファレンス
+  </Card>
+</CardGroup>

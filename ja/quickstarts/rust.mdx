@@ -1,0 +1,148 @@
+---
+title: "Rust"
+description: "RustでFirecrawlを始めましょう。firecrawlクレートを使用して、ウェブデータを検索し、スクレイピングし、Interactできます。"
+og:title: "Rust クイックスタート | Firecrawl"
+og:description: "RustでFirecrawlを始めましょう。firecrawlクレートを使用して、ウェブデータを検索し、スクレイピングし、Interactできます。"
+---
+
+<div id="prerequisites">
+  ## 前提条件
+</div>
+
+* Cargo が使える Rust 1.70 以降
+* Firecrawl APIキー — [無料で取得する](https://www.firecrawl.dev/app/api-keys)
+
+<div id="install-the-crate">
+  ## クレートをインストール
+</div>
+
+`Cargo.toml` に `firecrawl` を追加します:
+
+```toml
+[dependencies]
+firecrawl = "1"
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["json"] }
+```
+
+<div id="search-the-web">
+  ## ウェブを検索
+</div>
+
+```rust
+use firecrawl::v2::Client;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = Client::new("fc-YOUR-API-KEY")?;
+    let results = client.search("firecrawl web scraping", None).await?;
+
+    for result in &results {
+        println!("{} - {}", result.title.as_deref().unwrap_or(""), result.url.as_deref().unwrap_or(""));
+    }
+    Ok(())
+}
+```
+
+<div id="scrape-a-page">
+  ## ページをスクレイピングする
+</div>
+
+```rust
+let doc = client.scrape("https://example.com", None).await?;
+println!("{}", doc.markdown.unwrap_or_default());
+```
+
+<Accordion title="レスポンス例">
+  ```json
+  {
+    "markdown": "# Example Domain\n\nThis domain is for use in illustrative examples...",
+    "metadata": {
+      "title": "Example Domain",
+      "sourceURL": "https://example.com"
+    }
+  }
+  ```
+</Accordion>
+
+<div id="interact-with-a-page">
+  ## ページを操作する
+</div>
+
+`Interact API` は、HTTP 経由でプロンプトベースのコマンドを使用します。ページをスクレイピングして `scrapeId` を取得し、その後プロンプトを送信してブラウザセッションを操作します:
+
+```rust
+use reqwest::Client as HttpClient;
+use serde_json::json;
+
+let api_key = "fc-YOUR-API-KEY";
+let http = HttpClient::new();
+
+// 1. ブラウザセッションを開くためにスクレイピング
+let scrape_res: serde_json::Value = http
+    .post("https://api.firecrawl.dev/v2/scrape")
+    .bearer_auth(api_key)
+    .json(&json!({ "url": "https://www.amazon.com", "formats": ["markdown"] }))
+    .send().await?
+    .json().await?;
+
+let scrape_id = scrape_res["data"]["metadata"]["scrapeId"]
+    .as_str().unwrap();
+
+// 2. 操作するためにプロンプトを送信
+http.post(format!("https://api.firecrawl.dev/v2/scrape/{scrape_id}/interact"))
+    .bearer_auth(api_key)
+    .json(&json!({ "prompt": "Search for iPhone 16 Pro Max" }))
+    .send().await?;
+
+let interact_res: serde_json::Value = http
+    .post(format!("https://api.firecrawl.dev/v2/scrape/{scrape_id}/interact"))
+    .bearer_auth(api_key)
+    .json(&json!({ "prompt": "Click on the first result and tell me the price" }))
+    .send().await?
+    .json().await?;
+
+println!("{}", interact_res);
+
+// 3. セッションを閉じる
+http.delete(format!("https://api.firecrawl.dev/v2/scrape/{scrape_id}/interact"))
+    .bearer_auth(api_key)
+    .send().await?;
+```
+
+<div id="environment-variable">
+  ## 環境変数
+</div>
+
+キーを直接渡す代わりに、`FIRECRAWL_API_KEY` を設定してください。
+
+```bash
+export FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+```
+
+<Note>
+  `firecrawl` クレートは、`FirecrawlApp` を通じて v1 API にも対応しています。利用可能な API 全体については、[Rust SDK docs](/ja/sdks/rust) を参照してください。
+</Note>
+
+<div id="next-steps">
+  ## 次のステップ
+</div>
+
+<CardGroup cols={2}>
+  <Card title="Search のドキュメント" icon="magnifying-glass" href="/ja/features/search">
+    Web を検索して、ページ全体のコンテンツを取得
+  </Card>
+
+  <Card title="Scrape のドキュメント" icon="file-lines" href="/ja/features/scrape">
+    フォーマット、アクション、プロキシを含む、すべてのスクレイピングのオプション
+  </Card>
+
+  <Card title="Interact のドキュメント" icon="hand-pointer" href="/ja/features/interact">
+    クリック、フォーム入力、動的コンテンツの抽出
+  </Card>
+
+  <Card title="Rust SDK リファレンス" icon="rust" href="/ja/sdks/rust">
+    クロール、map などを含む SDK リファレンス
+  </Card>
+</CardGroup>

@@ -1,0 +1,208 @@
+---
+title: "ASP.NET Core"
+description: "REST API を使って、ASP.NET Core で Firecrawl を利用し、ウェブデータを検索、スクレイピング、Interact できます。"
+og:title: "ASP.NET Core クイックスタート | Firecrawl"
+og:description: "REST API を使って、ASP.NET Core で Firecrawl を利用し、ウェブデータを検索、スクレイピング、Interact できます。"
+---
+
+<div id="prerequisites">
+  ## 前提条件
+</div>
+
+* .NET 6.0+
+* Firecrawl APIキー — [無料で取得できます](https://www.firecrawl.dev/app/api-keys)
+
+<div id="configuration">
+  ## 設定
+</div>
+
+`appsettings.json` に API key を追加します：
+
+```json
+{
+  "Firecrawl": {
+    "ApiKey": "fc-YOUR-API-KEY",
+    "BaseUrl": "https://api.firecrawl.dev/v2"
+  }
+}
+```
+
+または、環境変数 / ユーザーシークレットを使用します:
+
+```bash
+export Firecrawl__ApiKey=fc-YOUR-API-KEY
+```
+
+<div id="create-a-service">
+  ## サービスを作成
+</div>
+
+`Services/FirecrawlService.cs` を作成します。
+
+```csharp
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
+
+public class FirecrawlService
+{
+    private readonly HttpClient _http;
+    private readonly string _baseUrl;
+
+    public FirecrawlService(IConfiguration config)
+    {
+        _baseUrl = config["Firecrawl:BaseUrl"] ?? "https://api.firecrawl.dev/v2";
+        _http = new HttpClient();
+        _http.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", config["Firecrawl:ApiKey"]);
+    }
+
+    public async Task<JsonDocument> SearchAsync(string query, int limit = 5)
+    {
+        var content = new StringContent(
+            JsonSerializer.Serialize(new { query, limit }),
+            Encoding.UTF8, "application/json");
+
+        var response = await _http.PostAsync($"{_baseUrl}/search", content);
+        response.EnsureSuccessStatusCode();
+        return JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+    }
+
+    public async Task<JsonDocument> ScrapeAsync(string url)
+    {
+        var content = new StringContent(
+            JsonSerializer.Serialize(new { url }),
+            Encoding.UTF8, "application/json");
+
+        var response = await _http.PostAsync($"{_baseUrl}/scrape", content);
+        response.EnsureSuccessStatusCode();
+        return JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+    }
+
+    public async Task<JsonDocument> InteractAsync(string url, string prompt, string? followUp = null)
+    {
+        // 1. ブラウザセッションを開くためにスクレイピング
+        var scrapeContent = new StringContent(
+            JsonSerializer.Serialize(new { url, formats = new[] { "markdown" } }),
+            Encoding.UTF8, "application/json");
+
+        var scrapeRes = await _http.PostAsync($"{_baseUrl}/scrape", scrapeContent);
+        scrapeRes.EnsureSuccessStatusCode();
+        var scrapeDoc = JsonDocument.Parse(await scrapeRes.Content.ReadAsStringAsync());
+        var scrapeId = scrapeDoc.RootElement
+            .GetProperty("data").GetProperty("metadata").GetProperty("scrapeId").GetString();
+
+        // 2. 最初のプロンプトを送信
+        var firstPrompt = new StringContent(
+            JsonSerializer.Serialize(new { prompt }),
+            Encoding.UTF8, "application/json");
+        await _http.PostAsync($"{_baseUrl}/scrape/{scrapeId}/interact", firstPrompt);
+
+        // 3. フォローアッププロンプトを送信
+        JsonDocument? result = null;
+        if (followUp != null)
+        {
+            var followUpContent = new StringContent(
+                JsonSerializer.Serialize(new { prompt = followUp }),
+                Encoding.UTF8, "application/json");
+            var followUpRes = await _http.PostAsync(
+                $"{_baseUrl}/scrape/{scrapeId}/interact", followUpContent);
+            followUpRes.EnsureSuccessStatusCode();
+            result = JsonDocument.Parse(await followUpRes.Content.ReadAsStringAsync());
+        }
+
+        // 4. セッションを閉じる
+        await _http.DeleteAsync($"{_baseUrl}/scrape/{scrapeId}/interact");
+
+        return result ?? scrapeDoc;
+    }
+}
+```
+
+<div id="register-and-use">
+  ## 登録して使う
+</div>
+
+`Program.cs` で以下を記述します:
+
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddSingleton<FirecrawlService>();
+
+var app = builder.Build();
+
+app.MapPost("/api/search", async (FirecrawlService firecrawl, SearchRequest req) =>
+{
+    var result = await firecrawl.SearchAsync(req.Query, req.Limit);
+    return Results.Ok(result.RootElement);
+});
+
+app.MapPost("/api/scrape", async (FirecrawlService firecrawl, ScrapeRequest req) =>
+{
+    var result = await firecrawl.ScrapeAsync(req.Url);
+    return Results.Ok(result.RootElement);
+});
+
+app.MapPost("/api/interact", async (FirecrawlService firecrawl, InteractRequest req) =>
+{
+    var result = await firecrawl.InteractAsync(req.Url, req.Prompt, req.FollowUp);
+    return Results.Ok(result.RootElement);
+});
+
+app.Run();
+
+record SearchRequest(string Query, int Limit = 5);
+record ScrapeRequest(string Url);
+record InteractRequest(string Url, string Prompt, string? FollowUp = null);
+```
+
+<div id="run-it">
+  ## 実行
+</div>
+
+```bash
+dotnet run
+```
+
+<div id="test-it">
+  ## 試してみる
+</div>
+
+```bash
+# ウェブを検索する
+curl -X POST http://localhost:5000/api/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "firecrawl web scraping"}'
+
+# ページをスクレイピングする
+curl -X POST http://localhost:5000/api/scrape \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}'
+
+# ページをInteractする
+curl -X POST http://localhost:5000/api/interact \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.amazon.com", "prompt": "Search for iPhone 16 Pro Max", "followUp": "Click on the first result and tell me the price"}'
+```
+
+<div id="next-steps">
+  ## 次のステップ
+</div>
+
+<CardGroup cols={2}>
+  <Card title="Search のドキュメント" icon="magnifying-glass" href="/ja/features/search">
+    Web を検索してページ全体のコンテンツを取得
+  </Card>
+
+  <Card title="Scrape のドキュメント" icon="file-lines" href="/ja/features/scrape">
+    フォーマット、アクション、プロキシを含むスクレイピングの全オプション
+  </Card>
+
+  <Card title="Interact のドキュメント" icon="hand-pointer" href="/ja/features/interact">
+    クリックやフォーム入力を行い、動的コンテンツを抽出
+  </Card>
+
+  <Card title="API リファレンス" icon="code" href="/ja/api-reference/v2-introduction">
+    REST API の完全なドキュメント
+  </Card>
+</CardGroup>

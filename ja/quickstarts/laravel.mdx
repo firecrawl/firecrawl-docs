@@ -1,0 +1,213 @@
+---
+title: "Laravel"
+description: "LaravelでFirecrawlを使って、REST API経由でWebデータを検索、スクレイピング、操作できます。"
+og:title: "Laravel クイックスタート | Firecrawl"
+og:description: "LaravelでFirecrawlを使って、REST API経由でWebデータを検索、スクレイピング、操作できます。"
+---
+
+<div id="prerequisites">
+  ## 前提条件
+</div>
+
+* Laravel 10+ のプロジェクト
+* Firecrawl APIキー — [無料で取得する](https://www.firecrawl.dev/app/api-keys)
+
+<div id="configuration">
+  ## 設定
+</div>
+
+`.env` に API key を追加します。
+
+```bash
+FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+```
+
+`config/services.php` に設定項目を追加します:
+
+```php
+'firecrawl' => [
+    'api_key' => env('FIRECRAWL_API_KEY'),
+    'base_url' => env('FIRECRAWL_API_URL', 'https://api.firecrawl.dev/v2'),
+],
+```
+
+<div id="create-a-service-class">
+  ## サービスクラスを作成
+</div>
+
+`app/Services/FirecrawlService.php` を作成します：
+
+```php
+<?php
+
+namespace App\Services;
+
+use Illuminate\Support\Facades\Http;
+
+class FirecrawlService
+{
+    private string $apiKey;
+    private string $baseUrl;
+
+    public function __construct()
+    {
+        $this->apiKey = config('services.firecrawl.api_key');
+        $this->baseUrl = config('services.firecrawl.base_url');
+    }
+
+    public function search(string $query, int $limit = 5): array
+    {
+        $response = Http::withToken($this->apiKey)
+            ->post("{$this->baseUrl}/search", [
+                'query' => $query,
+                'limit' => $limit,
+            ]);
+
+        return $response->json();
+    }
+
+    public function scrape(string $url, array $options = []): array
+    {
+        $response = Http::withToken($this->apiKey)
+            ->post("{$this->baseUrl}/scrape", array_merge(['url' => $url], $options));
+
+        return $response->json();
+    }
+
+    public function interact(string $url, string $prompt, ?string $followUp = null): array
+    {
+        // 1. ブラウザセッションを開くためにスクレイピング
+        $scrapeResult = $this->scrape($url, ['formats' => ['markdown']]);
+        $scrapeId = $scrapeResult['data']['metadata']['scrapeId'];
+
+        // 2. 最初のプロンプトを送信
+        Http::withToken($this->apiKey)
+            ->post("{$this->baseUrl}/scrape/{$scrapeId}/interact", [
+                'prompt' => $prompt,
+            ]);
+
+        // 3. フォローアッププロンプトを送信
+        $result = null;
+        if ($followUp) {
+            $result = Http::withToken($this->apiKey)
+                ->post("{$this->baseUrl}/scrape/{$scrapeId}/interact", [
+                    'prompt' => $followUp,
+                ])->json();
+        }
+
+        // 4. セッションを閉じる
+        Http::withToken($this->apiKey)
+            ->delete("{$this->baseUrl}/scrape/{$scrapeId}/interact");
+
+        return $result ?? $scrapeResult;
+    }
+}
+```
+
+<div id="create-a-controller">
+  ## コントローラーを作成
+</div>
+
+`app/Http/Controllers/FirecrawlController.php` を作成します:
+
+```php
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Services\FirecrawlService;
+use Illuminate\Http\Request;
+
+class FirecrawlController extends Controller
+{
+    public function __construct(private FirecrawlService $firecrawl) {}
+
+    public function search(Request $request)
+    {
+        $validated = $request->validate(['query' => 'required|string']);
+        return response()->json(
+            $this->firecrawl->search($validated['query'], $request->input('limit', 5))
+        );
+    }
+
+    public function scrape(Request $request)
+    {
+        $validated = $request->validate(['url' => 'required|url']);
+        return response()->json($this->firecrawl->scrape($validated['url']));
+    }
+
+    public function interact(Request $request)
+    {
+        $validated = $request->validate([
+            'url' => 'required|url',
+            'prompt' => 'required|string',
+        ]);
+        return response()->json(
+            $this->firecrawl->interact(
+                $validated['url'],
+                $validated['prompt'],
+                $request->input('followUp')
+            )
+        );
+    }
+}
+```
+
+<div id="register-routes">
+  ## ルートを登録する
+</div>
+
+`routes/api.php` で:
+
+```php
+use App\Http\Controllers\FirecrawlController;
+
+Route::post('/search', [FirecrawlController::class, 'search']);
+Route::post('/scrape', [FirecrawlController::class, 'scrape']);
+Route::post('/interact', [FirecrawlController::class, 'interact']);
+```
+
+<div id="test-it">
+  ## 試す
+</div>
+
+```bash
+php artisan serve
+
+# ウェブを検索する
+curl -X POST http://localhost:8000/api/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "firecrawl web scraping"}'
+
+# ページをスクレイピングする
+curl -X POST http://localhost:8000/api/scrape \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}'
+
+# ページをInteractする
+curl -X POST http://localhost:8000/api/interact \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.amazon.com", "prompt": "Search for iPhone 16 Pro Max", "followUp": "Click on the first result and tell me the price"}'
+```
+
+<div id="next-steps">
+  ## 次のステップ
+</div>
+
+<CardGroup cols={2}>
+  <Card title="Search ドキュメント" icon="magnifying-glass" href="/ja/features/search">
+    ウェブを検索してページ全体のコンテンツを取得
+  </Card>
+
+  <Card title="スクレイピング ドキュメント" icon="file-lines" href="/ja/features/scrape">
+    フォーマット、アクション、プロキシを含むすべてのスクレイピングのオプション
+  </Card>
+
+  <Card title="Interact ドキュメント" icon="hand-pointer" href="/ja/features/interact">
+    クリックやフォーム入力で動的コンテンツを抽出
+  </Card>
+
+  <Card title="API リファレンス" icon="code" href="/ja/api-reference/v2-introduction">
+    REST API の完全なドキュメント
+  </Card>
+</CardGroup>

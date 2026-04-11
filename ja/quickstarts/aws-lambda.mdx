@@ -1,0 +1,138 @@
+---
+title: "AWS Lambda"
+description: "AWS Lambda で Firecrawl を使用して、サーバーレス関数内で Web データの検索、スクレイピング、操作を行えます。"
+og:title: "AWS Lambda クイックスタート | Firecrawl"
+og:description: "AWS Lambda で Firecrawl を使用して、サーバーレス関数内で Web データの検索、スクレイピング、操作を行えます。"
+---
+
+<div id="prerequisites">
+  ## 前提条件
+</div>
+
+* Lambda にアクセスできる AWS アカウント
+* Firecrawl APIキー — [無料で取得する](https://www.firecrawl.dev/app/api-keys)
+
+<div id="setup">
+  ## セットアップ
+</div>
+
+```bash
+mkdir firecrawl-lambda && cd firecrawl-lambda
+npm init -y
+npm install @mendable/firecrawl-js
+```
+
+<div id="search-the-web">
+  ## ウェブを検索する
+</div>
+
+検索ハンドラーを定義した `index.mjs` を作成します:
+
+```javascript
+import Firecrawl from "@mendable/firecrawl-js";
+
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+
+export async function handler(event) {
+  const body = JSON.parse(event.body || "{}");
+
+  if (body.action === "search") {
+    const results = await firecrawl.search(body.query, { limit: 5 });
+    return {
+      statusCode: 200,
+      body: JSON.stringify(results),
+    };
+  }
+
+  return { statusCode: 400, body: JSON.stringify({ error: "Unknown action" }) };
+}
+```
+
+<div id="scrape-a-page">
+  ## ページをスクレイピングする
+</div>
+
+同じハンドラーに`scrape`アクションを追加します：
+
+```javascript
+if (body.action === "scrape") {
+  const result = await firecrawl.scrape(body.url);
+  return {
+    statusCode: 200,
+    body: JSON.stringify(result),
+  };
+}
+```
+
+<div id="interact-with-a-page">
+  ## Interactでページを操作する
+</div>
+
+稼働中のブラウザセッションを制御するために `interact` アクションを追加すると、ボタンのクリック、フォームへの入力、動的なコンテンツの抽出ができます:
+
+```javascript
+if (body.action === "interact") {
+  const result = await firecrawl.scrape("https://www.amazon.com", {
+    formats: ["markdown"],
+  });
+  const scrapeId = result.metadata?.scrapeId;
+
+  await firecrawl.interact(scrapeId, {
+    prompt: "Search for iPhone 16 Pro Max",
+  });
+  const response = await firecrawl.interact(scrapeId, {
+    prompt: "Click on the first result and tell me the price",
+  });
+
+  await firecrawl.stopInteraction(scrapeId);
+  return {
+    statusCode: 200,
+    body: JSON.stringify({ output: response.output }),
+  };
+}
+```
+
+<div id="deploy">
+  ## デプロイ
+</div>
+
+AWS CLI を使ってパッケージ化とデプロイを行います：
+
+```bash
+zip -r function.zip index.mjs node_modules/
+
+aws lambda create-function \
+  --function-name firecrawl-scraper \
+  --runtime nodejs20.x \
+  --handler index.handler \
+  --zip-file fileb://function.zip \
+  --role arn:aws:iam::YOUR_ACCOUNT:role/lambda-role \
+  --environment Variables="{FIRECRAWL_API_KEY=fc-YOUR-API-KEY}" \
+  --timeout 60
+```
+
+<Note>
+  Lambda のタイムアウトは少なくとも30秒に設定してください。動的ページのスクレイピングや Interact セッションは、デフォルトの3秒のタイムアウトでは完了までにそれ以上かかることがあります。
+</Note>
+
+<div id="next-steps">
+  ## 次のステップ
+</div>
+
+<CardGroup cols={2}>
+  <Card title="Searchドキュメント" icon="magnifying-glass" href="/ja/features/search">
+    Webを検索し、ページ全体のコンテンツを取得
+  </Card>
+
+  <Card title="スクレイピングドキュメント" icon="file-lines" href="/ja/features/scrape">
+    フォーマット、アクション、プロキシを含むスクレイピングのオプション
+  </Card>
+
+  <Card title="Interactドキュメント" icon="hand-pointer" href="/ja/features/interact">
+    クリックやフォーム入力で動的コンテンツを抽出
+  </Card>
+
+  <Card title="Node SDKリファレンス" icon="node" href="/ja/sdks/node">
+    クロール、map、バッチスクレイプなどを網羅したSDKリファレンス
+  </Card>
+</CardGroup>

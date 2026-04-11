@@ -1,0 +1,288 @@
+---
+title: "Go"
+description: "Go で Firecrawl を使い始めましょう。REST API を使って、Web データのスクレイピング、検索、操作を行えます。"
+og:title: "Go クイックスタート | Firecrawl"
+og:description: "Go で Firecrawl を使い始めましょう。REST API を使って、Web データのスクレイピング、検索、操作を行えます。"
+---
+
+<div id="prerequisites">
+  ## 前提条件
+</div>
+
+* Go 1.21+
+* Firecrawl APIキー — [無料で取得できます](https://www.firecrawl.dev/app/api-keys)
+
+<div id="search-the-web">
+  ## ウェブを検索
+</div>
+
+Firecrawl は REST API 経由で Go から利用できます。`net/http` を使って直接リクエストを送信できます。
+
+```go
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+)
+
+func main() {
+	apiKey := os.Getenv("FIRECRAWL_API_KEY")
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"query": "firecrawl web scraping",
+		"limit": 5,
+	})
+
+	req, _ := http.NewRequest("POST", "https://api.firecrawl.dev/v2/search", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "リクエストに失敗しました: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	result, _ := io.ReadAll(resp.Body)
+	fmt.Println(string(result))
+}
+```
+
+<Accordion title="レスポンス例">
+  ```json
+  {
+    "success": true,
+    "data": {
+      "web": [
+        {
+          "url": "https://docs.firecrawl.dev",
+          "title": "Firecrawl Documentation",
+          "markdown": "# Firecrawl\n\nFirecrawl is a web scraping API..."
+        }
+      ]
+    }
+  }
+  ```
+</Accordion>
+
+<div id="scrape-a-page">
+  ## ページをスクレイピング
+</div>
+
+```go
+body, _ := json.Marshal(map[string]string{
+	"url": "https://example.com",
+})
+
+req, _ := http.NewRequest("POST", "https://api.firecrawl.dev/v2/scrape", bytes.NewReader(body))
+req.Header.Set("Authorization", "Bearer "+apiKey)
+req.Header.Set("Content-Type", "application/json")
+
+resp, err := http.DefaultClient.Do(req)
+if err != nil {
+	fmt.Fprintf(os.Stderr, "request failed: %v\n", err)
+	os.Exit(1)
+}
+defer resp.Body.Close()
+
+result, _ := io.ReadAll(resp.Body)
+fmt.Println(string(result))
+```
+
+<Accordion title="レスポンス例">
+  ```json
+  {
+    "success": true,
+    "data": {
+      "markdown": "# Example Domain\n\nThis domain is for use in illustrative examples...",
+      "metadata": {
+        "title": "Example Domain",
+        "sourceURL": "https://example.com"
+      }
+    }
+  }
+  ```
+</Accordion>
+
+<div id="interact-with-a-page">
+  ## ページを操作する
+</div>
+
+ブラウザセッションを開始し、自然言語の指示でページをInteractしてから、セッションを終了します。
+
+<div id="step-1-scrape-to-start-a-session">
+  ### ステップ 1 — スクレイピングしてセッションを開始する
+</div>
+
+```go
+body, _ := json.Marshal(map[string]interface{}{
+	"url":     "https://www.amazon.com",
+	"formats": []string{"markdown"},
+})
+
+req, _ := http.NewRequest("POST", "https://api.firecrawl.dev/v2/scrape", bytes.NewReader(body))
+req.Header.Set("Authorization", "Bearer "+apiKey)
+req.Header.Set("Content-Type", "application/json")
+
+resp, err := http.DefaultClient.Do(req)
+if err != nil {
+	fmt.Fprintf(os.Stderr, "request failed: %v\n", err)
+	os.Exit(1)
+}
+defer resp.Body.Close()
+
+var scrapeResult map[string]interface{}
+json.NewDecoder(resp.Body).Decode(&scrapeResult)
+
+data := scrapeResult["data"].(map[string]interface{})
+metadata := data["metadata"].(map[string]interface{})
+scrapeId := metadata["scrapeId"].(string)
+fmt.Println("scrapeId:", scrapeId)
+```
+
+<div id="step-2-send-interactions">
+  ### ステップ 2 — 操作を送信
+</div>
+
+```go
+// 商品を検索する
+interactBody, _ := json.Marshal(map[string]string{
+	"prompt": "Search for iPhone 16 Pro Max",
+})
+
+interactURL := fmt.Sprintf("https://api.firecrawl.dev/v2/scrape/%s/interact", scrapeId)
+req, _ = http.NewRequest("POST", interactURL, bytes.NewReader(interactBody))
+req.Header.Set("Authorization", "Bearer "+apiKey)
+req.Header.Set("Content-Type", "application/json")
+
+resp, err = http.DefaultClient.Do(req)
+if err != nil {
+	fmt.Fprintf(os.Stderr, "interact failed: %v\n", err)
+	os.Exit(1)
+}
+defer resp.Body.Close()
+
+result, _ := io.ReadAll(resp.Body)
+fmt.Println(string(result))
+
+// 最初の結果をクリックする
+interactBody, _ = json.Marshal(map[string]string{
+	"prompt": "Click on the first result and tell me the price",
+})
+
+req, _ = http.NewRequest("POST", interactURL, bytes.NewReader(interactBody))
+req.Header.Set("Authorization", "Bearer "+apiKey)
+req.Header.Set("Content-Type", "application/json")
+
+resp, err = http.DefaultClient.Do(req)
+if err != nil {
+	fmt.Fprintf(os.Stderr, "interact failed: %v\n", err)
+	os.Exit(1)
+}
+defer resp.Body.Close()
+
+result, _ = io.ReadAll(resp.Body)
+fmt.Println(string(result))
+```
+
+<div id="step-3-stop-the-session">
+  ### ステップ 3 — セッションを停止する
+</div>
+
+```go
+req, _ = http.NewRequest("DELETE", interactURL, nil)
+req.Header.Set("Authorization", "Bearer "+apiKey)
+
+resp, err = http.DefaultClient.Do(req)
+if err != nil {
+	fmt.Fprintf(os.Stderr, "delete failed: %v\n", err)
+	os.Exit(1)
+}
+defer resp.Body.Close()
+
+fmt.Println("Session stopped")
+```
+
+<div id="reusable-helper">
+  ## 再利用可能なヘルパー
+</div>
+
+繰り返し使う場合は、API を小さなヘルパーでラップします。
+
+```go
+type FirecrawlClient struct {
+	APIKey  string
+	BaseURL string
+	Client  *http.Client
+}
+
+func NewFirecrawlClient(apiKey string) *FirecrawlClient {
+	return &FirecrawlClient{
+		APIKey:  apiKey,
+		BaseURL: "https://api.firecrawl.dev/v2",
+		Client:  &http.Client{},
+	}
+}
+
+func (fc *FirecrawlClient) post(endpoint string, payload interface{}) ([]byte, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", fc.BaseURL+endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+fc.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := fc.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return io.ReadAll(resp.Body)
+}
+
+func (fc *FirecrawlClient) Scrape(url string) ([]byte, error) {
+	return fc.post("/scrape", map[string]string{"url": url})
+}
+
+func (fc *FirecrawlClient) Search(query string, limit int) ([]byte, error) {
+	return fc.post("/search", map[string]interface{}{"query": query, "limit": limit})
+}
+```
+
+<Note>
+  v1 API では[コミュニティ提供の Go SDK](https://github.com/mendableai/firecrawl-go)を利用できます。詳細は [Go SDK ドキュメント](/ja/sdks/go)をご覧ください。
+</Note>
+
+<div id="next-steps">
+  ## 次のステップ
+</div>
+
+<CardGroup cols={2}>
+  <Card title="Search ドキュメント" icon="magnifying-glass" href="/ja/features/search">
+    Webを検索し、ページ全体のコンテンツを取得
+  </Card>
+
+  <Card title="スクレイピング ドキュメント" icon="file-lines" href="/ja/features/scrape">
+    フォーマット、アクション、プロキシを含む、スクレイピングの全オプション
+  </Card>
+
+  <Card title="Interact ドキュメント" icon="hand-pointer" href="/ja/features/interact">
+    クリック、フォーム入力、動的コンテンツの抽出
+  </Card>
+
+  <Card title="API リファレンス" icon="code" href="/ja/api-reference/v2-introduction">
+    REST APIの完全なドキュメント
+  </Card>
+</CardGroup>

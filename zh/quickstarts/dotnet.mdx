@@ -1,0 +1,233 @@
+---
+title: ".NET"
+description: ".NET 中的 Firecrawl 入门。使用 REST API 抓取、搜索并与网页数据交互。"
+og:title: ".NET 快速开始 | Firecrawl"
+og:description: ".NET 中的 Firecrawl 入门。使用 REST API 抓取、搜索并与网页数据交互。"
+---
+
+<div id="prerequisites">
+  ## 前提条件
+</div>
+
+* .NET 6.0+
+* 一个 Firecrawl API 密钥——[免费获取](https://www.firecrawl.dev/app/api-keys)
+
+<div id="search-the-web">
+  ## 进行网页搜索
+</div>
+
+Firecrawl 可通过 REST API 和 `HttpClient` 与 .NET 集成。
+
+```csharp
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
+
+var apiKey = Environment.GetEnvironmentVariable("FIRECRAWL_API_KEY");
+var client = new HttpClient();
+client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+var content = new StringContent(
+    JsonSerializer.Serialize(new { query = "firecrawl web scraping", limit = 5 }),
+    Encoding.UTF8,
+    "application/json"
+);
+
+var response = await client.PostAsync("https://api.firecrawl.dev/v2/search", content);
+var json = await response.Content.ReadAsStringAsync();
+Console.WriteLine(json);
+```
+
+<Accordion title="示例响应">
+  ```json
+  {
+    "success": true,
+    "data": {
+      "web": [
+        {
+          "url": "https://docs.firecrawl.dev",
+          "title": "Firecrawl Documentation",
+          "markdown": "# Firecrawl\n\nFirecrawl is a web scraping API..."
+        }
+      ]
+    }
+  }
+  ```
+</Accordion>
+
+<div id="scrape-a-page">
+  ## 抓取页面
+</div>
+
+```csharp
+var scrapeContent = new StringContent(
+    JsonSerializer.Serialize(new { url = "https://example.com" }),
+    Encoding.UTF8,
+    "application/json"
+);
+
+var scrapeResponse = await client.PostAsync("https://api.firecrawl.dev/v2/scrape", scrapeContent);
+var scrapeJson = await scrapeResponse.Content.ReadAsStringAsync();
+
+using var doc = JsonDocument.Parse(scrapeJson);
+var markdown = doc.RootElement.GetProperty("data").GetProperty("markdown").GetString();
+Console.WriteLine(markdown);
+```
+
+<Accordion title="示例响应">
+  ```json
+  {
+    "success": true,
+    "data": {
+      "markdown": "# Example Domain\n\nThis domain is for use in illustrative examples...",
+      "metadata": {
+        "title": "Example Domain",
+        "sourceURL": "https://example.com"
+      }
+    }
+  }
+  ```
+</Accordion>
+
+<div id="interact-with-a-page">
+  ## 与页面交互
+</div>
+
+启动浏览器会话，通过自然语言 prompt 与页面交互，然后关闭会话。
+
+<div id="step-1-scrape-to-start-a-session">
+  ### 第 1 步 — 先抓取，开启会话
+</div>
+
+```csharp
+var sessionContent = new StringContent(
+    JsonSerializer.Serialize(new { url = "https://www.amazon.com", formats = new[] { "markdown" } }),
+    Encoding.UTF8,
+    "application/json"
+);
+
+var sessionResponse = await client.PostAsync("https://api.firecrawl.dev/v2/scrape", sessionContent);
+var sessionJson = await sessionResponse.Content.ReadAsStringAsync();
+
+using var sessionDoc = JsonDocument.Parse(sessionJson);
+var scrapeId = sessionDoc.RootElement
+    .GetProperty("data")
+    .GetProperty("metadata")
+    .GetProperty("scrapeId")
+    .GetString();
+
+Console.WriteLine($"scrapeId: {scrapeId}");
+```
+
+<div id="step-2-send-interactions">
+  ### 第 2 步——发送交互指令
+</div>
+
+```csharp
+var interactUrl = $"https://api.firecrawl.dev/v2/scrape/{scrapeId}/interact";
+
+// 搜索产品
+var searchBody = new StringContent(
+    JsonSerializer.Serialize(new { prompt = "Search for iPhone 16 Pro Max" }),
+    Encoding.UTF8,
+    "application/json"
+);
+
+var searchResult = await client.PostAsync(interactUrl, searchBody);
+Console.WriteLine(await searchResult.Content.ReadAsStringAsync());
+
+// 点击第一个结果
+var clickBody = new StringContent(
+    JsonSerializer.Serialize(new { prompt = "Click on the first result and tell me the price" }),
+    Encoding.UTF8,
+    "application/json"
+);
+
+var clickResult = await client.PostAsync(interactUrl, clickBody);
+Console.WriteLine(await clickResult.Content.ReadAsStringAsync());
+```
+
+<div id="step-3-stop-the-session">
+  ### 第 3 步 — 结束会话
+</div>
+
+```csharp
+await client.DeleteAsync(interactUrl);
+Console.WriteLine("会话已停止");
+```
+
+<div id="reusable-client-class">
+  ## 可复用的客户端类
+</div>
+
+如果需要重复使用，可将 API 封装为类型化客户端：
+
+```csharp
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
+
+public class FirecrawlClient
+{
+    private readonly HttpClient _http;
+    private const string BaseUrl = "https://api.firecrawl.dev/v2";
+
+    public FirecrawlClient(string apiKey)
+    {
+        _http = new HttpClient();
+        _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+    }
+
+    private async Task<JsonDocument> PostAsync(string endpoint, object payload)
+    {
+        var content = new StringContent(
+            JsonSerializer.Serialize(payload),
+            Encoding.UTF8,
+            "application/json"
+        );
+
+        var response = await _http.PostAsync($"{BaseUrl}{endpoint}", content);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync();
+        return JsonDocument.Parse(json);
+    }
+
+    public async Task<JsonDocument> ScrapeAsync(string url)
+    {
+        return await PostAsync("/scrape", new { url });
+    }
+
+    public async Task<JsonDocument> SearchAsync(string query, int limit = 5)
+    {
+        return await PostAsync("/search", new { query, limit });
+    }
+}
+
+// 使用方式
+var firecrawl = new FirecrawlClient(Environment.GetEnvironmentVariable("FIRECRAWL_API_KEY")!);
+var result = await firecrawl.SearchAsync("firecrawl web scraping");
+Console.WriteLine(result.RootElement);
+```
+
+<div id="next-steps">
+  ## 后续步骤
+</div>
+
+<CardGroup cols={2}>
+  <Card title="搜索文档" icon="magnifying-glass" href="/zh/features/search">
+    进行网页搜索并获取完整页面内容
+  </Card>
+
+  <Card title="抓取文档" icon="file-lines" href="/zh/features/scrape">
+    所有抓取选项，包括 formats、actions 和代理
+  </Card>
+
+  <Card title="交互文档" icon="hand-pointer" href="/zh/features/interact">
+    点击、填写表单，并提取动态内容
+  </Card>
+
+  <Card title="API 参考" icon="code" href="/zh/api-reference/v2-introduction">
+    完整的 REST API 文档
+  </Card>
+</CardGroup>

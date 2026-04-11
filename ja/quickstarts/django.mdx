@@ -1,0 +1,182 @@
+---
+title: "Django"
+description: "Django で Firecrawl を使用し、Python の Web アプリケーションで Web データのスクレイピング、検索、Interact を行えます。"
+og:title: "Django クイックスタート | Firecrawl"
+og:description: "Django で Firecrawl を使用し、Python の Web アプリケーションで Web データのスクレイピング、検索、Interact を行えます。"
+---
+
+<div id="prerequisites">
+  ## 前提条件
+</div>
+
+* Django 4以降のプロジェクト
+* Firecrawl APIキー — [無料で取得](https://www.firecrawl.dev/app/api-keys)
+
+<div id="install-the-sdk">
+  ## SDK をインストール
+</div>
+
+```bash
+pip install firecrawl-py
+```
+
+Django の設定または環境変数に API key を追加します：
+
+```bash
+export FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+```
+
+<div id="create-views">
+  ## ビューを作成
+</div>
+
+Django アプリに検索、スクレイピング、Interact 用のビューを追加します。`views.py` では以下のように記述します。
+
+```python
+import json
+import os
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
+from firecrawl import Firecrawl
+
+firecrawl = Firecrawl(api_key=os.environ["FIRECRAWL_API_KEY"])
+
+
+@csrf_exempt
+@require_POST
+def search_view(request):
+    body = json.loads(request.body)
+    results = firecrawl.search(body["query"], limit=body.get("limit", 5))
+    return JsonResponse(
+        [{"title": r.title, "url": r.url} for r in results.web],
+        safe=False,
+    )
+
+
+@csrf_exempt
+@require_POST
+def scrape_view(request):
+    body = json.loads(request.body)
+    result = firecrawl.scrape(body["url"])
+    return JsonResponse({
+        "markdown": result.markdown,
+        "metadata": result.metadata,
+    })
+
+
+@csrf_exempt
+@require_POST
+def interact_start_view(request):
+    body = json.loads(request.body)
+    result = firecrawl.scrape(body["url"], formats=["markdown"])
+    return JsonResponse({"scrape_id": result.metadata.scrape_id})
+
+
+@csrf_exempt
+@require_POST
+def interact_view(request):
+    body = json.loads(request.body)
+    response = firecrawl.interact(body["scrape_id"], prompt=body["prompt"])
+    return JsonResponse({"output": response.output})
+
+
+@csrf_exempt
+@require_POST
+def interact_stop_view(request):
+    body = json.loads(request.body)
+    firecrawl.stop_interaction(body["scrape_id"])
+    return JsonResponse({"status": "stopped"})
+```
+
+<div id="wire-up-urls">
+  ## URL を設定する
+</div>
+
+`urls.py` で:
+
+```python
+from django.urls import path
+from . import views
+
+urlpatterns = [
+    path("api/search/", views.search_view),
+    path("api/scrape/", views.scrape_view),
+    path("api/interact/start/", views.interact_start_view),
+    path("api/interact/", views.interact_view),
+    path("api/interact/stop/", views.interact_stop_view),
+]
+```
+
+<div id="test-it">
+  ## 試してみる
+</div>
+
+```bash
+python manage.py runserver
+
+# ウェブを検索する
+curl -X POST http://localhost:8000/api/search/ \
+  -H "Content-Type: application/json" \
+  -d '{"query": "firecrawl web scraping", "limit": 5}'
+
+# ページをスクレイピングする
+curl -X POST http://localhost:8000/api/scrape/ \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}'
+
+# インタラクティブセッションを開始する
+curl -X POST http://localhost:8000/api/interact/start/ \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.amazon.com"}'
+```
+
+<div id="management-command">
+  ## 管理コマンド
+</div>
+
+スクリプトやデータパイプラインで使うために、Django の管理コマンドに Firecrawl を組み込みます。`management/commands/scrape.py` を作成します:
+
+```python
+import os
+from django.core.management.base import BaseCommand
+from firecrawl import Firecrawl
+
+
+class Command(BaseCommand):
+    help = "URLをスクレイピングしてmarkdownを出力する"
+
+    def add_arguments(self, parser):
+        parser.add_argument("url", type=str)
+
+    def handle(self, *args, **options):
+        firecrawl = Firecrawl(api_key=os.environ["FIRECRAWL_API_KEY"])
+        result = firecrawl.scrape(options["url"])
+        self.stdout.write(result.markdown)
+```
+
+```bash
+python manage.py scrape https://example.com
+```
+
+<div id="next-steps">
+  ## 次のステップ
+</div>
+
+<CardGroup cols={2}>
+  <Card title="スクレイピングのドキュメント" icon="file-lines" href="/ja/features/scrape">
+    フォーマット、アクション、プロキシなど、スクレイピングのオプションを網羅
+  </Card>
+
+  <Card title="検索ドキュメント" icon="magnifying-glass" href="/ja/features/search">
+    Webを検索し、ページ全体のコンテンツを取得
+  </Card>
+
+  <Card title="Interact ドキュメント" icon="hand-pointer" href="/ja/features/interact">
+    クリック、フォーム入力、動的コンテンツの抽出
+  </Card>
+
+  <Card title="Python SDK リファレンス" icon="python" href="/ja/sdks/python">
+    クロール、マップ、非同期処理などを含む完全な SDK リファレンス
+  </Card>
+</CardGroup>

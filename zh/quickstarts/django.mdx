@@ -1,0 +1,182 @@
+---
+title: "Django"
+description: "在你的 Python Web 应用中使用 Firecrawl，抓取、搜索并与网页数据交互。"
+og:title: "Django 快速入门 | Firecrawl"
+og:description: "在你的 Python Web 应用中使用 Firecrawl，抓取、搜索并与网页数据交互。"
+---
+
+<div id="prerequisites">
+  ## 前提条件
+</div>
+
+* Django 4+ 项目
+* Firecrawl API 密钥 — [免费获取](https://www.firecrawl.dev/app/api-keys)
+
+<div id="install-the-sdk">
+  ## 安装 SDK
+</div>
+
+```bash
+pip install firecrawl-py
+```
+
+将 API 密钥添加到 Django 设置或环境变量中：
+
+```bash
+export FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+```
+
+<div id="create-views">
+  ## 创建视图
+</div>
+
+在你的 Django 应用中添加 search、抓取 和交互视图。在 `views.py` 中：
+
+```python
+import json
+import os
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
+from firecrawl import Firecrawl
+
+firecrawl = Firecrawl(api_key=os.environ["FIRECRAWL_API_KEY"])
+
+
+@csrf_exempt
+@require_POST
+def search_view(request):
+    body = json.loads(request.body)
+    results = firecrawl.search(body["query"], limit=body.get("limit", 5))
+    return JsonResponse(
+        [{"title": r.title, "url": r.url} for r in results.web],
+        safe=False,
+    )
+
+
+@csrf_exempt
+@require_POST
+def scrape_view(request):
+    body = json.loads(request.body)
+    result = firecrawl.scrape(body["url"])
+    return JsonResponse({
+        "markdown": result.markdown,
+        "metadata": result.metadata,
+    })
+
+
+@csrf_exempt
+@require_POST
+def interact_start_view(request):
+    body = json.loads(request.body)
+    result = firecrawl.scrape(body["url"], formats=["markdown"])
+    return JsonResponse({"scrape_id": result.metadata.scrape_id})
+
+
+@csrf_exempt
+@require_POST
+def interact_view(request):
+    body = json.loads(request.body)
+    response = firecrawl.interact(body["scrape_id"], prompt=body["prompt"])
+    return JsonResponse({"output": response.output})
+
+
+@csrf_exempt
+@require_POST
+def interact_stop_view(request):
+    body = json.loads(request.body)
+    firecrawl.stop_interaction(body["scrape_id"])
+    return JsonResponse({"status": "stopped"})
+```
+
+<div id="wire-up-urls">
+  ## 配置 URL 路由
+</div>
+
+在 `urls.py` 中：
+
+```python
+from django.urls import path
+from . import views
+
+urlpatterns = [
+    path("api/search/", views.search_view),
+    path("api/scrape/", views.scrape_view),
+    path("api/interact/start/", views.interact_start_view),
+    path("api/interact/", views.interact_view),
+    path("api/interact/stop/", views.interact_stop_view),
+]
+```
+
+<div id="test-it">
+  ## 试一下
+</div>
+
+```bash
+python manage.py runserver
+
+# 进行网页搜索
+curl -X POST http://localhost:8000/api/search/ \
+  -H "Content-Type: application/json" \
+  -d '{"query": "firecrawl web scraping", "limit": 5}'
+
+# 抓取页面
+curl -X POST http://localhost:8000/api/scrape/ \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}'
+
+# 启动交互式会话
+curl -X POST http://localhost:8000/api/interact/start/ \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.amazon.com"}'
+```
+
+<div id="management-command">
+  ## 管理命令
+</div>
+
+在 Django 管理命令中使用 Firecrawl 运行脚本和数据管道。创建 `management/commands/scrape.py`：
+
+```python
+import os
+from django.core.management.base import BaseCommand
+from firecrawl import Firecrawl
+
+
+class Command(BaseCommand):
+    help = "抓取一个 URL 并打印 markdown"
+
+    def add_arguments(self, parser):
+        parser.add_argument("url", type=str)
+
+    def handle(self, *args, **options):
+        firecrawl = Firecrawl(api_key=os.environ["FIRECRAWL_API_KEY"])
+        result = firecrawl.scrape(options["url"])
+        self.stdout.write(result.markdown)
+```
+
+```bash
+python manage.py scrape https://example.com
+```
+
+<div id="next-steps">
+  ## 下一步
+</div>
+
+<CardGroup cols={2}>
+  <Card title="抓取文档" icon="file-lines" href="/zh/features/scrape">
+    所有 抓取 选项，包括 formats、actions 和代理
+  </Card>
+
+  <Card title="搜索文档" icon="magnifying-glass" href="/zh/features/search">
+    进行网页搜索并获取完整页面内容
+  </Card>
+
+  <Card title="交互文档" icon="hand-pointer" href="/zh/features/interact">
+    点击、填写表单并提取动态内容
+  </Card>
+
+  <Card title="Python SDK 参考" icon="python" href="/zh/sdks/python">
+    完整的 SDK 参考，涵盖爬取、map、async 等功能
+  </Card>
+</CardGroup>
