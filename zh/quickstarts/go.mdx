@@ -1,0 +1,288 @@
+---
+title: "Go"
+description: "在 Go 中开始使用 Firecrawl。通过 REST API 抓取、搜索并与网页数据交互。"
+og:title: "Go 快速开始 | Firecrawl"
+og:description: "在 Go 中开始使用 Firecrawl。通过 REST API 抓取、搜索并与网页数据交互。"
+---
+
+<div id="prerequisites">
+  ## 前提条件
+</div>
+
+* Go 1.21+
+* Firecrawl API 密钥 — [免费获取](https://www.firecrawl.dev/app/api-keys)
+
+<div id="search-the-web">
+  ## 进行网页搜索
+</div>
+
+Firecrawl 可通过 REST API 与 Go 集成使用。使用 `net/http` 直接发起请求。
+
+```go
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+)
+
+func main() {
+	apiKey := os.Getenv("FIRECRAWL_API_KEY")
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"query": "firecrawl web scraping",
+		"limit": 5,
+	})
+
+	req, _ := http.NewRequest("POST", "https://api.firecrawl.dev/v2/search", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "请求失败: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	result, _ := io.ReadAll(resp.Body)
+	fmt.Println(string(result))
+}
+```
+
+<Accordion title="示例响应">
+  ```json
+  {
+    "success": true,
+    "data": {
+      "web": [
+        {
+          "url": "https://docs.firecrawl.dev",
+          "title": "Firecrawl Documentation",
+          "markdown": "# Firecrawl\n\nFirecrawl is a web scraping API..."
+        }
+      ]
+    }
+  }
+  ```
+</Accordion>
+
+<div id="scrape-a-page">
+  ## 抓取网页
+</div>
+
+```go
+body, _ := json.Marshal(map[string]string{
+	"url": "https://example.com",
+})
+
+req, _ := http.NewRequest("POST", "https://api.firecrawl.dev/v2/scrape", bytes.NewReader(body))
+req.Header.Set("Authorization", "Bearer "+apiKey)
+req.Header.Set("Content-Type", "application/json")
+
+resp, err := http.DefaultClient.Do(req)
+if err != nil {
+	fmt.Fprintf(os.Stderr, "request failed: %v\n", err)
+	os.Exit(1)
+}
+defer resp.Body.Close()
+
+result, _ := io.ReadAll(resp.Body)
+fmt.Println(string(result))
+```
+
+<Accordion title="示例响应">
+  ```json
+  {
+    "success": true,
+    "data": {
+      "markdown": "# Example Domain\n\nThis domain is for use in illustrative examples...",
+      "metadata": {
+        "title": "Example Domain",
+        "sourceURL": "https://example.com"
+      }
+    }
+  }
+  ```
+</Accordion>
+
+<div id="interact-with-a-page">
+  ## 与页面交互
+</div>
+
+启动浏览器会话，使用自然语言 prompt 与页面交互，然后关闭会话。
+
+<div id="step-1-scrape-to-start-a-session">
+  ### 第 1 步 — 先抓取页面以开启会话
+</div>
+
+```go
+body, _ := json.Marshal(map[string]interface{}{
+	"url":     "https://www.amazon.com",
+	"formats": []string{"markdown"},
+})
+
+req, _ := http.NewRequest("POST", "https://api.firecrawl.dev/v2/scrape", bytes.NewReader(body))
+req.Header.Set("Authorization", "Bearer "+apiKey)
+req.Header.Set("Content-Type", "application/json")
+
+resp, err := http.DefaultClient.Do(req)
+if err != nil {
+	fmt.Fprintf(os.Stderr, "request failed: %v\n", err)
+	os.Exit(1)
+}
+defer resp.Body.Close()
+
+var scrapeResult map[string]interface{}
+json.NewDecoder(resp.Body).Decode(&scrapeResult)
+
+data := scrapeResult["data"].(map[string]interface{})
+metadata := data["metadata"].(map[string]interface{})
+scrapeId := metadata["scrapeId"].(string)
+fmt.Println("scrapeId:", scrapeId)
+```
+
+<div id="step-2-send-interactions">
+  ### 第 2 步 — 发送交互操作
+</div>
+
+```go
+// 搜索产品
+interactBody, _ := json.Marshal(map[string]string{
+	"prompt": "Search for iPhone 16 Pro Max",
+})
+
+interactURL := fmt.Sprintf("https://api.firecrawl.dev/v2/scrape/%s/interact", scrapeId)
+req, _ = http.NewRequest("POST", interactURL, bytes.NewReader(interactBody))
+req.Header.Set("Authorization", "Bearer "+apiKey)
+req.Header.Set("Content-Type", "application/json")
+
+resp, err = http.DefaultClient.Do(req)
+if err != nil {
+	fmt.Fprintf(os.Stderr, "interact failed: %v\n", err)
+	os.Exit(1)
+}
+defer resp.Body.Close()
+
+result, _ := io.ReadAll(resp.Body)
+fmt.Println(string(result))
+
+// 点击第一个结果
+interactBody, _ = json.Marshal(map[string]string{
+	"prompt": "Click on the first result and tell me the price",
+})
+
+req, _ = http.NewRequest("POST", interactURL, bytes.NewReader(interactBody))
+req.Header.Set("Authorization", "Bearer "+apiKey)
+req.Header.Set("Content-Type", "application/json")
+
+resp, err = http.DefaultClient.Do(req)
+if err != nil {
+	fmt.Fprintf(os.Stderr, "interact failed: %v\n", err)
+	os.Exit(1)
+}
+defer resp.Body.Close()
+
+result, _ = io.ReadAll(resp.Body)
+fmt.Println(string(result))
+```
+
+<div id="step-3-stop-the-session">
+  ### 步骤 3 — 结束会话
+</div>
+
+```go
+req, _ = http.NewRequest("DELETE", interactURL, nil)
+req.Header.Set("Authorization", "Bearer "+apiKey)
+
+resp, err = http.DefaultClient.Do(req)
+if err != nil {
+	fmt.Fprintf(os.Stderr, "删除失败: %v\n", err)
+	os.Exit(1)
+}
+defer resp.Body.Close()
+
+fmt.Println("会话已停止")
+```
+
+<div id="reusable-helper">
+  ## 可复用的辅助函数
+</div>
+
+如果需要重复使用，可将 API 封装成一个简单的辅助函数：
+
+```go
+type FirecrawlClient struct {
+	APIKey  string
+	BaseURL string
+	Client  *http.Client
+}
+
+func NewFirecrawlClient(apiKey string) *FirecrawlClient {
+	return &FirecrawlClient{
+		APIKey:  apiKey,
+		BaseURL: "https://api.firecrawl.dev/v2",
+		Client:  &http.Client{},
+	}
+}
+
+func (fc *FirecrawlClient) post(endpoint string, payload interface{}) ([]byte, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", fc.BaseURL+endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+fc.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := fc.Client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return io.ReadAll(resp.Body)
+}
+
+func (fc *FirecrawlClient) Scrape(url string) ([]byte, error) {
+	return fc.post("/scrape", map[string]string{"url": url})
+}
+
+func (fc *FirecrawlClient) Search(query string, limit int) ([]byte, error) {
+	return fc.post("/search", map[string]interface{}{"query": query, "limit": limit})
+}
+```
+
+<Note>
+  提供适用于 v1 API 的[社区版 Go SDK](https://github.com/mendableai/firecrawl-go)。详情请参见 [Go SDK 文档](/zh/sdks/go)。
+</Note>
+
+<div id="next-steps">
+  ## 后续步骤
+</div>
+
+<CardGroup cols={2}>
+  <Card title="搜索文档" icon="magnifying-glass" href="/zh/features/search">
+    进行网页搜索并获取完整页面内容
+  </Card>
+
+  <Card title="抓取文档" icon="file-lines" href="/zh/features/scrape">
+    包括 formats、actions 和代理在内的所有抓取选项
+  </Card>
+
+  <Card title="交互文档" icon="hand-pointer" href="/zh/features/interact">
+    点击、填写表单并提取动态内容
+  </Card>
+
+  <Card title="API 参考" icon="code" href="/zh/api-reference/v2-introduction">
+    完整的 REST API 文档
+  </Card>
+</CardGroup>

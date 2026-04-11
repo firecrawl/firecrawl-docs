@@ -1,0 +1,213 @@
+---
+title: "Laravel"
+description: "使用 Firecrawl 与 Laravel，通过 REST API 搜索、抓取并与网页数据交互。"
+og:title: "Laravel 快速入门 | Firecrawl"
+og:description: "使用 Firecrawl 与 Laravel，通过 REST API 搜索、抓取并与网页数据交互。"
+---
+
+<div id="prerequisites">
+  ## 准备工作
+</div>
+
+* Laravel 10+ 项目
+* Firecrawl API 密钥 — [免费获取](https://www.firecrawl.dev/app/api-keys)
+
+<div id="configuration">
+  ## 配置
+</div>
+
+将你的 API 密钥添加到 `.env` 文件中：
+
+```bash
+FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+```
+
+将该配置项添加到 `config/services.php`：
+
+```php
+'firecrawl' => [
+    'api_key' => env('FIRECRAWL_API_KEY'),
+    'base_url' => env('FIRECRAWL_API_URL', 'https://api.firecrawl.dev/v2'),
+],
+```
+
+<div id="create-a-service-class">
+  ## 创建服务类
+</div>
+
+创建 `app/Services/FirecrawlService.php`：
+
+```php
+<?php
+
+namespace App\Services;
+
+use Illuminate\Support\Facades\Http;
+
+class FirecrawlService
+{
+    private string $apiKey;
+    private string $baseUrl;
+
+    public function __construct()
+    {
+        $this->apiKey = config('services.firecrawl.api_key');
+        $this->baseUrl = config('services.firecrawl.base_url');
+    }
+
+    public function search(string $query, int $limit = 5): array
+    {
+        $response = Http::withToken($this->apiKey)
+            ->post("{$this->baseUrl}/search", [
+                'query' => $query,
+                'limit' => $limit,
+            ]);
+
+        return $response->json();
+    }
+
+    public function scrape(string $url, array $options = []): array
+    {
+        $response = Http::withToken($this->apiKey)
+            ->post("{$this->baseUrl}/scrape", array_merge(['url' => $url], $options));
+
+        return $response->json();
+    }
+
+    public function interact(string $url, string $prompt, ?string $followUp = null): array
+    {
+        // 1. 抓取页面以开启浏览器会话
+        $scrapeResult = $this->scrape($url, ['formats' => ['markdown']]);
+        $scrapeId = $scrapeResult['data']['metadata']['scrapeId'];
+
+        // 2. 发送第一个 prompt
+        Http::withToken($this->apiKey)
+            ->post("{$this->baseUrl}/scrape/{$scrapeId}/interact", [
+                'prompt' => $prompt,
+            ]);
+
+        // 3. 发送后续 prompt
+        $result = null;
+        if ($followUp) {
+            $result = Http::withToken($this->apiKey)
+                ->post("{$this->baseUrl}/scrape/{$scrapeId}/interact", [
+                    'prompt' => $followUp,
+                ])->json();
+        }
+
+        // 4. 关闭会话
+        Http::withToken($this->apiKey)
+            ->delete("{$this->baseUrl}/scrape/{$scrapeId}/interact");
+
+        return $result ?? $scrapeResult;
+    }
+}
+```
+
+<div id="create-a-controller">
+  ## 创建控制器
+</div>
+
+创建 `app/Http/Controllers/FirecrawlController.php`：
+
+```php
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Services\FirecrawlService;
+use Illuminate\Http\Request;
+
+class FirecrawlController extends Controller
+{
+    public function __construct(private FirecrawlService $firecrawl) {}
+
+    public function search(Request $request)
+    {
+        $validated = $request->validate(['query' => 'required|string']);
+        return response()->json(
+            $this->firecrawl->search($validated['query'], $request->input('limit', 5))
+        );
+    }
+
+    public function scrape(Request $request)
+    {
+        $validated = $request->validate(['url' => 'required|url']);
+        return response()->json($this->firecrawl->scrape($validated['url']));
+    }
+
+    public function interact(Request $request)
+    {
+        $validated = $request->validate([
+            'url' => 'required|url',
+            'prompt' => 'required|string',
+        ]);
+        return response()->json(
+            $this->firecrawl->interact(
+                $validated['url'],
+                $validated['prompt'],
+                $request->input('followUp')
+            )
+        );
+    }
+}
+```
+
+<div id="register-routes">
+  ## 注册路由
+</div>
+
+在 `routes/api.php` 中：
+
+```php
+use App\Http\Controllers\FirecrawlController;
+
+Route::post('/search', [FirecrawlController::class, 'search']);
+Route::post('/scrape', [FirecrawlController::class, 'scrape']);
+Route::post('/interact', [FirecrawlController::class, 'interact']);
+```
+
+<div id="test-it">
+  ## 试一试
+</div>
+
+```bash
+php artisan serve
+
+# 进行网页搜索
+curl -X POST http://localhost:8000/api/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "firecrawl web scraping"}'
+
+# 抓取页面
+curl -X POST http://localhost:8000/api/scrape \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}'
+
+# 与页面交互
+curl -X POST http://localhost:8000/api/interact \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.amazon.com", "prompt": "Search for iPhone 16 Pro Max", "followUp": "Click on the first result and tell me the price"}'
+```
+
+<div id="next-steps">
+  ## 下一步
+</div>
+
+<CardGroup cols={2}>
+  <Card title="搜索文档" icon="magnifying-glass" href="/zh/features/search">
+    进行网页搜索并获取完整页面内容
+  </Card>
+
+  <Card title="抓取文档" icon="file-lines" href="/zh/features/scrape">
+    涵盖所有抓取选项，包括 formats、actions 和代理
+  </Card>
+
+  <Card title="交互文档" icon="hand-pointer" href="/zh/features/interact">
+    点击、填写表单，并提取动态内容
+  </Card>
+
+  <Card title="API 参考" icon="code" href="/zh/api-reference/v2-introduction">
+    完整的 REST API 文档
+  </Card>
+</CardGroup>

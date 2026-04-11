@@ -1,0 +1,196 @@
+---
+title: "Rails"
+description: "在 Ruby on Rails 中通过 REST API 使用 Firecrawl，对网页数据进行搜索、抓取和交互。"
+og:title: "Rails 快速入门 | Firecrawl"
+og:description: "在 Ruby on Rails 中通过 REST API 使用 Firecrawl，对网页数据进行搜索、抓取和交互。"
+---
+
+<div id="prerequisites">
+  ## 前置条件
+</div>
+
+* Ruby 3.0+ 和 Rails 7+
+* 一个 Firecrawl API 密钥——[免费获取](https://www.firecrawl.dev/app/api-keys)
+
+<div id="configuration">
+  ## 配置
+</div>
+
+将 API 密钥添加到 Rails 凭据或环境变量中：
+
+```bash
+export FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+```
+
+<div id="create-a-service">
+  ## 创建服务
+</div>
+
+创建 `app/services/firecrawl_service.rb`：
+
+```ruby
+require "net/http"
+require "json"
+require "uri"
+
+class FirecrawlService
+  BASE_URL = "https://api.firecrawl.dev/v2"
+
+  def initialize(api_key: ENV.fetch("FIRECRAWL_API_KEY"))
+    @api_key = api_key
+  end
+
+  def search(query, limit: 5)
+    post("/search", { query: query, limit: limit })
+  end
+
+  def scrape(url, **options)
+    post("/scrape", { url: url }.merge(options))
+  end
+
+  def interact(url, prompt, follow_up: nil)
+    # 1. 抓取以打开浏览器会话
+    scrape_result = scrape(url, formats: ["markdown"])
+    scrape_id = scrape_result.dig("data", "metadata", "scrapeId")
+
+    # 2. 发送第一个 prompt
+    post("/scrape/#{scrape_id}/interact", { prompt: prompt })
+
+    # 3. 发送后续 prompt
+    result = nil
+    if follow_up
+      result = post("/scrape/#{scrape_id}/interact", { prompt: follow_up })
+    end
+
+    # 4. 关闭会话
+    delete("/scrape/#{scrape_id}/interact")
+
+    result || scrape_result
+  end
+
+  private
+
+  def post(endpoint, payload)
+    uri = URI("#{BASE_URL}#{endpoint}")
+    request = Net::HTTP::Post.new(uri)
+    request["Authorization"] = "Bearer #{@api_key}"
+    request["Content-Type"] = "application/json"
+    request.body = payload.to_json
+
+    response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true) do |http|
+      http.request(request)
+    end
+
+    JSON.parse(response.body)
+  end
+
+  def delete(endpoint)
+    uri = URI("#{BASE_URL}#{endpoint}")
+    request = Net::HTTP::Delete.new(uri)
+    request["Authorization"] = "Bearer #{@api_key}"
+
+    Net::HTTP.start(uri.hostname, uri.port, use_ssl: true) do |http|
+      http.request(request)
+    end
+  end
+end
+```
+
+<div id="create-a-controller">
+  ## 创建控制器
+</div>
+
+生成控制器：
+
+```bash
+rails generate controller Firecrawl search scrape interact --skip-routes
+```
+
+编辑 `app/controllers/firecrawl_controller.rb`：
+
+```ruby
+class FirecrawlController < ApplicationController
+  skip_before_action :verify_authenticity_token
+
+  def search
+    service = FirecrawlService.new
+    result = service.search(params.require(:query), limit: params.fetch(:limit, 5).to_i)
+    render json: result
+  end
+
+  def scrape
+    service = FirecrawlService.new
+    result = service.scrape(params.require(:url))
+    render json: result
+  end
+
+  def interact
+    service = FirecrawlService.new
+    result = service.interact(
+      params.require(:url),
+      params.require(:prompt),
+      follow_up: params[:followUp]
+    )
+    render json: result
+  end
+end
+```
+
+<div id="add-routes">
+  ## 添加路由
+</div>
+
+在 `config/routes.rb` 中：
+
+```ruby
+Rails.application.routes.draw do
+  post "api/search", to: "firecrawl#search"
+  post "api/scrape", to: "firecrawl#scrape"
+  post "api/interact", to: "firecrawl#interact"
+end
+```
+
+<div id="test-it">
+  ## 测试一下
+</div>
+
+```bash
+rails server
+
+# 进行网页搜索
+curl -X POST http://localhost:3000/api/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "firecrawl web scraping"}'
+
+# 抓取页面
+curl -X POST http://localhost:3000/api/scrape \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}'
+
+# 与页面交互
+curl -X POST http://localhost:3000/api/interact \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.amazon.com", "prompt": "Search for iPhone 16 Pro Max", "followUp": "Click on the first result and tell me the price"}'
+```
+
+<div id="next-steps">
+  ## 下一步
+</div>
+
+<CardGroup cols={2}>
+  <Card title="搜索文档" icon="magnifying-glass" href="/zh/features/search">
+    进行网页搜索并获取完整页面内容
+  </Card>
+
+  <Card title="抓取文档" icon="file-lines" href="/zh/features/scrape">
+    包含 formats、actions 和代理在内的所有 抓取 选项
+  </Card>
+
+  <Card title="交互文档" icon="hand-pointer" href="/zh/features/interact">
+    点击、填写表单并提取动态内容
+  </Card>
+
+  <Card title="API 参考" icon="code" href="/zh/api-reference/v2-introduction">
+    完整的 REST API 文档
+  </Card>
+</CardGroup>

@@ -1,0 +1,159 @@
+---
+title: "SvelteKit"
+description: "Svelte アプリケーションで SvelteKit と Firecrawl を使用して、Web データのスクレイピング、検索、操作を行います。"
+og:title: "SvelteKit クイックスタート | Firecrawl"
+og:description: "Svelte アプリケーションで SvelteKit と Firecrawl を使用して、Web データのスクレイピング、検索、操作を行います。"
+---
+
+<div id="prerequisites">
+  ## 前提条件
+</div>
+
+* SvelteKit プロジェクト
+* Firecrawl APIキー — [無料で取得する](https://www.firecrawl.dev/app/api-keys)
+
+<div id="install-the-sdk">
+  ## SDKをインストールする
+</div>
+
+```bash
+npm install @mendable/firecrawl-js
+```
+
+`.env` に APIキーを追加してください:
+
+```bash
+FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+```
+
+<div id="search-the-web">
+  ## Webを検索する
+</div>
+
+`src/routes/search/+page.server.ts` にフォームのアクションを作成します:
+
+```typescript
+import Firecrawl from "@mendable/firecrawl-js";
+import { FIRECRAWL_API_KEY } from "$env/static/private";
+
+const firecrawl = new Firecrawl({ apiKey: FIRECRAWL_API_KEY });
+
+export const actions = {
+  default: async ({ request }) => {
+    const data = await request.formData();
+    const query = data.get("query") as string;
+    const results = await firecrawl.search(query, { limit: 5 });
+    return { results: (results.web || []).map((r) => ({ title: r.title, url: r.url })) };
+  },
+};
+```
+
+`src/routes/search/+page.svelte` に追加します:
+
+```svelte
+<script>
+  export let form;
+</script>
+
+<form method="POST">
+  <input name="query" placeholder="Search the web..." />
+  <button>Search</button>
+</form>
+
+{#if form?.results}
+  {#each form.results as result}
+    <div><a href={result.url}>{result.title}</a></div>
+  {/each}
+{/if}
+```
+
+<div id="scrape-a-page">
+  ## ページをスクレイピングする
+</div>
+
+`src/routes/scrape/+page.server.ts` の `load` 関数でデータを取得します：
+
+```typescript
+import Firecrawl from "@mendable/firecrawl-js";
+import { FIRECRAWL_API_KEY } from "$env/static/private";
+
+const firecrawl = new Firecrawl({ apiKey: FIRECRAWL_API_KEY });
+
+export async function load({ url }) {
+  const target = url.searchParams.get("url");
+  if (!target) return { markdown: null };
+
+  const result = await firecrawl.scrape(target);
+  return { markdown: result.markdown };
+}
+```
+
+これを `src/routes/scrape/+page.svelte` に表示します:
+
+```svelte
+<script>
+  export let data;
+</script>
+
+{#if data.markdown}
+  <pre>{data.markdown}</pre>
+{:else}
+  <p>Pass ?url= to scrape a page</p>
+{/if}
+```
+
+<div id="interact-with-a-page">
+  ## ページに対して Interact する
+</div>
+
+`src/routes/api/interact/+server.ts` にサーバーエンドポイントを作成します。
+
+```typescript
+import { json } from "@sveltejs/kit";
+import Firecrawl from "@mendable/firecrawl-js";
+import { FIRECRAWL_API_KEY } from "$env/static/private";
+
+const firecrawl = new Firecrawl({ apiKey: FIRECRAWL_API_KEY });
+
+export async function POST() {
+  const result = await firecrawl.scrape("https://www.amazon.com", {
+    formats: ["markdown"],
+  });
+
+  const scrapeId = result.metadata?.scrapeId;
+
+  await firecrawl.interact(scrapeId, {
+    prompt: "Search for iPhone 16 Pro Max",
+  });
+
+  const response = await firecrawl.interact(scrapeId, {
+    prompt: "Click on the first result and tell me the price",
+  });
+
+  await firecrawl.stopInteraction(scrapeId);
+
+  return json({ output: response.output });
+}
+```
+
+<div id="next-steps">
+  ## 次のステップ
+</div>
+
+<CardGroup cols={2}>
+  <Card title="スクレイピングのドキュメント" icon="file-lines" href="/ja/features/scrape">
+    フォーマット、アクション、プロキシを含む、スクレイピングの全オプション
+  </Card>
+
+  <Card title="検索ドキュメント" icon="magnifying-glass" href="/ja/features/search">
+    Web を検索して、ページ全体のコンテンツを取得
+  </Card>
+
+  <Card title="Interact ドキュメント" icon="hand-pointer" href="/ja/features/interact">
+    クリック、フォーム入力、動的コンテンツの抽出
+  </Card>
+
+  <Card title="Node SDK リファレンス" icon="node" href="/ja/sdks/node">
+    クロール、map、バッチスクレイプなどを含む SDK リファレンス
+  </Card>
+</CardGroup>

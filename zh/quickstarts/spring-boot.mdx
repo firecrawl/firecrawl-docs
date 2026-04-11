@@ -1,0 +1,192 @@
+---
+title: "Spring Boot"
+description: "通过 Spring Boot 和官方 Java SDK 使用 Firecrawl 搜索、抓取并与网页数据交互。"
+og:title: "Spring Boot 快速入门 | Firecrawl"
+og:description: "通过 Spring Boot 和官方 Java SDK 使用 Firecrawl 搜索、抓取并与网页数据交互。"
+---
+
+<div id="prerequisites">
+  ## 前提条件
+</div>
+
+* Java 17+ 和 Spring Boot 3+
+* 一个 Firecrawl API 密钥——[免费获取](https://www.firecrawl.dev/app/api-keys)
+
+<div id="add-the-dependency">
+  ## 添加依赖
+</div>
+
+<Tabs>
+  <Tab title="Gradle（Kotlin DSL）">
+    ```kotlin
+    dependencies {
+        implementation("com.firecrawl:firecrawl-java:1.2.0")
+    }
+    ```
+  </Tab>
+
+  <Tab title="Maven">
+    ```xml
+    <dependency>
+        <groupId>com.firecrawl</groupId>
+        <artifactId>firecrawl-java</artifactId>
+        <version>1.2.0</version>
+    </dependency>
+    ```
+  </Tab>
+</Tabs>
+
+<div id="configuration">
+  ## 配置
+</div>
+
+将您的 API 密钥添加到 `application.properties` 中：
+
+```properties
+firecrawl.api-key=${FIRECRAWL_API_KEY}
+```
+
+或者将其设为环境变量：
+
+```bash
+export FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+```
+
+<div id="create-a-configuration-bean">
+  ## 创建配置 Bean
+</div>
+
+创建 `FirecrawlConfig.java`：
+
+```java
+import com.firecrawl.client.FirecrawlClient;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class FirecrawlConfig {
+
+    @Bean
+    public FirecrawlClient firecrawlClient(
+            @Value("${firecrawl.api-key}") String apiKey) {
+        return FirecrawlClient.builder()
+            .apiKey(apiKey)
+            .build();
+    }
+}
+```
+
+<div id="create-a-rest-controller">
+  ## 创建 REST 控制器
+</div>
+
+创建 `FirecrawlController.java`：
+
+```java
+import com.firecrawl.client.FirecrawlClient;
+import com.firecrawl.models.Document;
+import com.firecrawl.models.SearchData;
+import com.firecrawl.models.SearchOptions;
+import com.firecrawl.models.ScrapeOptions;
+import com.firecrawl.models.BrowserExecuteResponse;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.Map;
+
+@RestController
+@RequestMapping("/api")
+public class FirecrawlController {
+
+    private final FirecrawlClient firecrawl;
+
+    public FirecrawlController(FirecrawlClient firecrawl) {
+        this.firecrawl = firecrawl;
+    }
+
+    @PostMapping("/search")
+    public SearchData search(@RequestBody Map<String, Object> body) {
+        return firecrawl.search(
+            (String) body.get("query"),
+            SearchOptions.builder()
+                .limit((int) body.getOrDefault("limit", 5))
+                .build()
+        );
+    }
+
+    @PostMapping("/scrape")
+    public Map<String, Object> scrape(@RequestBody Map<String, String> body) {
+        Document doc = firecrawl.scrape(body.get("url"));
+        return Map.of(
+            "markdown", doc.getMarkdown(),
+            "metadata", doc.getMetadata()
+        );
+    }
+
+    @PostMapping("/interact")
+    public Map<String, Object> interact(@RequestBody Map<String, String> body) {
+        Document doc = firecrawl.scrape(body.get("url"),
+            ScrapeOptions.builder().formats(List.of((Object) "markdown")).build());
+        String scrapeId = (String) doc.getMetadata().get("scrapeId");
+
+        BrowserExecuteResponse response = firecrawl.interact(scrapeId,
+            body.getOrDefault("code", "const title = await page.title(); console.log(title);"));
+
+        firecrawl.stopInteractiveBrowser(scrapeId);
+
+        return Map.of("result", response.getStdout());
+    }
+}
+```
+
+<div id="run-it">
+  ## 运行
+</div>
+
+```bash
+./gradlew bootRun
+```
+
+<div id="test-it">
+  ## 进行测试
+</div>
+
+```bash
+# 进行网页搜索
+curl -X POST http://localhost:8080/api/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "firecrawl web scraping"}'
+
+# 抓取页面
+curl -X POST http://localhost:8080/api/scrape \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}'
+
+# 与页面交互
+curl -X POST http://localhost:8080/api/interact \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.amazon.com", "code": "const title = await page.title(); console.log(title);"}'
+```
+
+<div id="next-steps">
+  ## 后续步骤
+</div>
+
+<CardGroup cols={2}>
+  <Card title="搜索文档" icon="magnifying-glass" href="/zh/features/search">
+    进行网页搜索并获取完整页面内容
+  </Card>
+
+  <Card title="抓取 文档" icon="file-lines" href="/zh/features/scrape">
+    所有 scrape 选项，包括 formats、actions 和代理
+  </Card>
+
+  <Card title="交互 文档" icon="hand-pointer" href="/zh/features/interact">
+    点击、填写表单并提取动态内容
+  </Card>
+
+  <Card title="Java SDK 参考文档" icon="java" href="/zh/sdks/java">
+    完整的 SDK 参考，涵盖爬取、map、batch scrape 等功能
+  </Card>
+</CardGroup>
