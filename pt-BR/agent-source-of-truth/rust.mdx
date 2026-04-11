@@ -1,0 +1,363 @@
+---
+title: "Fonte de referência em Rust"
+description: "Fonte de referência canônica do Firecrawl em Rust para agentes que usam endpoints importantes, como busca, scraping e interação."
+---
+
+<div id="firecrawl-rust-source-of-truth">
+  # Firecrawl Rust Fonte de Referência
+</div>
+
+Este arquivo é a fonte pública canônica de referência para agentes. Ele é gerado a partir do código-fonte do SDK Rust do Firecrawl e da especificação OpenAPI v2.
+
+<div id="install">
+  ## Instalação
+</div>
+
+```bash
+cargo add firecrawl
+```
+
+<div id="authenticate">
+  ## Autentique-se
+</div>
+
+```rust
+use firecrawl::v2::Client;
+
+let client = Client::new("fc-your-api-key")?;
+// let client = Client::new_selfhosted("https://api.firecrawl.dev", Some("fc-your-api-key"))?;
+```
+
+<div id="when-to-use-what">
+  ## Quando usar cada um
+</div>
+
+* `search`: parta de uma consulta para encontrar URLs relevantes, incluindo restrições `site:`.
+* `scrape`: busque e extraia conteúdo de uma URL conhecida.
+* `interact`: execute ações no navegador ou código quando uma página exigir cliques, formulários ou etapas pós-scraping.
+
+<div id="search">
+  ## Busca
+</div>
+
+<div id="why-use-it">
+  ### Por que usar
+</div>
+
+Use a busca quando precisar descobrir resultados a partir de uma consulta e quiser que o Firecrawl retorne URLs (e, opcionalmente, faça scraping de cada resultado). Você pode restringir os resultados a um domínio com o operador padrão `site:`, por exemplo `site:docs.firecrawl.dev crawl webhooks`.
+
+<div id="preferred-sdk-method">
+  ### Método recomendado do SDK
+</div>
+
+`client.search(query, options)`
+
+<div id="simple-example">
+  ### Exemplo simples
+</div>
+
+```rust
+use firecrawl::v2::Client;
+
+let results = client
+    .search("site:docs.firecrawl.dev webhook retries", None)
+    .await?;
+```
+
+<div id="complex-example">
+  ### Exemplo complexo
+</div>
+
+```rust
+use firecrawl::v2::{
+    Client, SearchOptions, SearchSource, SearchCategory, ScrapeOptions, Format, JsonOptions
+};
+
+let options = SearchOptions {
+    sources: Some(vec![SearchSource::Web, SearchSource::News]),
+    categories: Some(vec![SearchCategory::Research]),
+    limit: Some(10),
+    tbs: Some("qdr:m".to_string()),
+    location: Some("San Francisco,California,United States".to_string()),
+    ignore_invalid_urls: Some(true),
+    timeout: Some(60000),
+    scrape_options: Some(ScrapeOptions {
+        formats: Some(vec![Format::Markdown, Format::Links, Format::Json]),
+        json_options: Some(JsonOptions {
+            prompt: Some("Extract title and key endpoints.".to_string()),
+            ..Default::default()
+        }),
+        only_main_content: Some(true),
+        ..Default::default()
+    }),
+    ..Default::default()
+};
+
+let results = client
+    .search("site:docs.firecrawl.dev crawl webhooks", options)
+    .await?;
+```
+
+<div id="parameters">
+  ### Parâmetros
+</div>
+
+| Parâmetro                     | Tipo / Opções                                       | Descrição                                                                                                |
+| ----------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `query`                       | `&str`                                              | Consulta de busca. Use `site:domain` para restringir os resultados a um site específico.                 |
+| `options.sources`             | `Vec<SearchSource>` (`Web`, `News`, `Images`)       | Fontes a serem pesquisadas.                                                                              |
+| `options.categories`          | `Vec<SearchCategory>` (`Github`, `Research`, `Pdf`) | Categorias para filtrar os resultados.                                                                   |
+| `options.limit`               | `u32`                                               | Número máximo de resultados retornados. O padrão é 5, com máximo de 20 (conforme a documentação do SDK). |
+| `options.tbs`                 | `String`                                            | Filtro de busca por tempo (por exemplo, `qdr:d`, `qdr:w`, `sbd:1,qdr:m`).                                |
+| `options.location`            | `String`                                            | String de localização dos resultados de busca.                                                           |
+| `options.ignore_invalid_urls` | `bool`                                              | Exclui URLs inválidas que outros endpoints do Firecrawl não conseguem processar com scraping.            |
+| `options.timeout`             | `u32`                                               | Tempo limite em milissegundos.                                                                           |
+| `options.scrape_options`      | `ScrapeOptions`                                     | Opções de scraping aplicadas a cada resultado (os mesmos campos de `scrape`).                            |
+| `options.integration`         | `String`                                            | Apenas para uso interno. Reservado para a instrumentação do Firecrawl.                                   |
+
+<div id="scrape">
+  ## Scrape
+</div>
+
+<div id="why-use-it">
+  ### Por que usar
+</div>
+
+Use o scrape quando você já tiver uma URL e quiser que o Firecrawl retorne conteúdo estruturado e formatos opcionais.
+
+<div id="preferred-sdk-method">
+  ### Método recomendado do SDK
+</div>
+
+`client.scrape(url, options)`
+
+<div id="simple-example">
+  ### Exemplo simples
+</div>
+
+```rust
+use firecrawl::v2::{Client, ScrapeOptions, Format};
+
+let doc = client
+    .scrape("https://docs.firecrawl.dev", ScrapeOptions {
+        formats: Some(vec![Format::Markdown]),
+        ..Default::default()
+    })
+    .await?;
+```
+
+<div id="complex-example">
+  ### Exemplo complexo
+</div>
+
+```rust
+use firecrawl::v2::{
+    Client, ScrapeOptions, Format, JsonOptions, ScreenshotOptions, ChangeTrackingOptions,
+    ChangeTrackingMode, AttributeSelector, Action, ScrollDirection, ProxyType, ParserConfig
+};
+
+let options = ScrapeOptions {
+    formats: Some(vec![
+        Format::Markdown,
+        Format::Links,
+        Format::Json,
+        Format::Screenshot,
+        Format::ChangeTracking,
+        Format::Attributes,
+    ]),
+    json_options: Some(JsonOptions {
+        prompt: Some("Extract plan names and prices.".to_string()),
+        ..Default::default()
+    }),
+    screenshot_options: Some(ScreenshotOptions {
+        full_page: Some(true),
+        quality: Some(80),
+        viewport: None,
+    }),
+    change_tracking_options: Some(ChangeTrackingOptions {
+        modes: Some(vec![ChangeTrackingMode::GitDiff]),
+        tag: Some("pricing".to_string()),
+        ..Default::default()
+    }),
+    attribute_selectors: Some(vec![AttributeSelector {
+        selector: "a".to_string(),
+        attribute: "href".to_string(),
+    }]),
+    headers: None,
+    include_tags: Some(vec!["main".to_string(), "article".to_string()]),
+    exclude_tags: Some(vec!["nav".to_string(), "footer".to_string()]),
+    only_main_content: Some(true),
+    wait_for: Some(1000),
+    parsers: Some(vec![ParserConfig::Pdf {
+        parser_type: "pdf".to_string(),
+        max_pages: Some(5),
+    }]),
+    actions: Some(vec![
+        Action::Click { selector: "#accept".to_string() },
+        Action::Write { text: "firecrawl".to_string() },
+        Action::Press { key: "Enter".to_string() },
+        Action::Wait { milliseconds: Some(1500), selector: None },
+        Action::Scroll { direction: ScrollDirection::Down, selector: None },
+        Action::Scrape,
+    ]),
+    skip_tls_verification: Some(true),
+    remove_base64_images: Some(true),
+    fast_mode: Some(true),
+    block_ads: Some(true),
+    proxy: Some(ProxyType::Auto),
+    max_age: Some(86400000),
+    min_age: None,
+    store_in_cache: Some(true),
+    ..Default::default()
+};
+
+let doc = client.scrape("https://example.com/pricing", options).await?;
+```
+
+<div id="parameters">
+  ### Parâmetros
+</div>
+
+| Parâmetro                                 | Tipo / Opções                                 | Descrição                                                              |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| ----------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------- | -------------------------------- | ----- | -------------- | ---------- | ------- | ----------------- | ---- | -------------------------------- | -------- | ------ | ------------------- |
+| `url`                                     | `&str`                                        | URL para scraping.                                                     |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.formats`                         | `Vec<Format>`                                 | Formatos de resultado a incluir.                                       |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.formats[]`                       | `Format::Markdown                             | Html                                                                   | RawHtml                          | Links | Images         | Screenshot | Summary | ChangeTracking    | Json | Attributes                       | Branding | Audio` | Valores de formato. |
+| `options.json_options`                    | `JsonOptions`                                 | Opções de extração JSON (use com `Format::Json`).                      |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.json_options.schema`             | `serde_json::Value`                           | Schema JSON para extração estruturada.                                 |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.json_options.system_prompt`      | `String`                                      | Prompt do sistema para extração JSON.                                  |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.json_options.prompt`             | `String`                                      | Prompt para extração JSON.                                             |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.screenshot_options`              | `ScreenshotOptions`                           | Opções de captura de tela (use com `Format::Screenshot`).              |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.screenshot_options.full_page`    | `bool`                                        | Captura de tela da página inteira quando ativada.                      |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.screenshot_options.quality`      | `u8`                                          | Qualidade da captura de tela (1-100).                                  |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.screenshot_options.viewport`     | `{ width: u32, height: u32 }`                 | Tamanho da viewport da captura de tela.                                |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.change_tracking_options`         | `ChangeTrackingOptions`                       | Opções de rastreamento de mudanças (use com `Format::ChangeTracking`). |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.change_tracking_options.modes`   | `Vec<ChangeTrackingMode>` (`GitDiff`, `Json`) | Modos de rastreamento de mudanças.                                     |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.change_tracking_options.schema`  | `serde_json::Value`                           | Schema JSON para o modo `Json`.                                        |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.change_tracking_options.prompt`  | `String`                                      | Prompt para rastreamento de mudanças.                                  |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.change_tracking_options.tag`     | `String`                                      | Tag de rastreamento de mudanças para isolar o histórico.               |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.attribute_selectors`             | `Vec<AttributeSelector>`                      | Seletores para extração de atributos (use com `Format::Attributes`).   |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.attribute_selectors[].selector`  | `String`                                      | Seletor CSS.                                                           |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.attribute_selectors[].attribute` | `String`                                      | Nome do atributo a extrair.                                            |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.headers`                         | `HashMap<String, String>`                     | Cabeçalhos personalizados.                                             |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.include_tags`                    | `Vec<String>`                                 | Tags a incluir.                                                        |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.exclude_tags`                    | `Vec<String>`                                 | Tags a excluir.                                                        |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.only_main_content`               | `bool`                                        | Manter apenas o conteúdo principal.                                    |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.timeout`                         | `u32`                                         | Tempo limite em milissegundos.                                         |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.wait_for`                        | `u32`                                         | Tempo de espera em milissegundos antes do scraping.                    |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.mobile`                          | `bool`                                        | Emular um dispositivo móvel.                                           |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.parsers`                         | `Vec<ParserConfig>`                           | Configuração do parser (com suporte a opções de PDF).                  |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.parsers[]`                       | `ParserConfig::Simple(&quot;pdf&quot;)        | ParserConfig::Pdf { type, max_pages }`                                 | Modo do parser de PDF e limites. |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.actions`                         | `Vec<Action>`                                 | Ações do navegador a executar antes do scraping.                       |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.actions[]`                       | `Action::Wait                                 | Screenshot                                                             | Click                            | Write | Press          | Scroll     | Scrape  | ExecuteJavascript | Pdf` | Variantes de ação e seus campos. |          |        |                     |
+| `options.location`                        | `LocationConfig`                              | Configurações de localização para a requisição.                        |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.location.country`                | `String`                                      | Código ISO do país.                                                    |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.location.languages`              | `Vec<String>`                                 | Idiomas preferidos.                                                    |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.skip_tls_verification`           | `bool`                                        | Ignorar a verificação do certificado TLS.                              |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.remove_base64_images`            | `bool`                                        | Remover imagens em base64 do resultado em markdown.                    |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.fast_mode`                       | `bool`                                        | Scraping mais rápido com fidelidade reduzida.                          |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.block_ads`                       | `bool`                                        | Ativar o bloqueio de anúncios e pop-ups de cookies.                    |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.proxy`                           | `ProxyType::Basic                             | Stealth                                                                | Enhanced                         | Auto` | Modo de proxy. |            |         |                   |      |                                  |          |        |                     |
+| `options.max_age`                         | `u32`                                         | Preferir dados em cache até esta idade.                                |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.min_age`                         | `u32`                                         | Retornar dados em cache apenas se atenderem à idade mínima.            |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.store_in_cache`                  | `bool`                                        | Armazenar resultados em cache.                                         |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.profile`                         | `ProfileConfig`                               | Perfil persistente do navegador compartilhado entre sessões.           |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.profile.name`                    | `String`                                      | Nome do perfil.                                                        |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.profile.save_changes`            | `bool`                                        | Salvar o estado do navegador quando a interação terminar.              |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+| `options.integration`                     | `String`                                      | Apenas para uso interno. Reservado para a instrumentação do Firecrawl. |                                  |       |                |            |         |                   |      |                                  |          |        |                     |
+
+<div id="interact">
+  ## Interagir
+</div>
+
+<div id="why-use-it">
+  ### Por que usar
+</div>
+
+Use `interact` quando uma página exigir ações no navegador ou execução de código após o início do scraping (cliques, formulários ou etapas com script).
+
+<div id="preferred-sdk-method">
+  ### Método recomendado do SDK
+</div>
+
+`client.interact(job_id, options)`
+
+<div id="simple-example">
+  ### Exemplo simples
+</div>
+
+```rust
+use firecrawl::v2::{Client, ScrapeOptions, Format, ScrapeExecuteOptions};
+
+let doc = client
+    .scrape("https://example.com", ScrapeOptions {
+        formats: Some(vec![Format::Markdown]),
+        ..Default::default()
+    })
+    .await?;
+
+let job_id = doc
+    .metadata
+    .as_ref()
+    .and_then(|m| m.scrape_id.clone())
+    .expect("Missing scrape_id");
+
+let result = client
+    .interact(job_id, ScrapeExecuteOptions {
+        prompt: Some("Click the pricing tab and summarize the plans.".to_string()),
+        language: None,
+        ..Default::default()
+    })
+    .await?;
+```
+
+<div id="complex-example">
+  ### Exemplo complexo
+</div>
+
+```rust
+use firecrawl::v2::{Client, ScrapeExecuteOptions, ScrapeExecuteLanguage};
+
+let result = client
+    .interact(
+        "<scrape_job_id>",
+        ScrapeExecuteOptions {
+            code: Some("console.log(await page.title());".to_string()),
+            language: Some(ScrapeExecuteLanguage::Node),
+            timeout: Some(60),
+            ..Default::default()
+        },
+    )
+    .await?;
+```
+
+<div id="parameters">
+  ### Parâmetros
+</div>
+
+| Parâmetro          | Tipo / Opções                                      | Descrição                                                                                           |
+| ------------------ | -------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `job_id`           | `&str`                                             | ID do job de scraping em `document.metadata.scrape_id`.                                             |
+| `options.code`     | `String`                                           | Código a ser executado na sessão do navegador. Obrigatório se `prompt` não for fornecido.           |
+| `options.prompt`   | `String`                                           | Instrução em linguagem natural para o agente do navegador. Obrigatório se `code` não for fornecido. |
+| `options.language` | `ScrapeExecuteLanguage` (`Python`, `Node`, `Bash`) | Linguagem de execução. Usa `Node` por padrão quando omitido.                                        |
+| `options.timeout`  | `u32`                                              | Tempo limite de execução em segundos.                                                               |
+| `options.origin`   | `String`                                           | Apenas para uso interno. Reservado para a instrumentação do Firecrawl.                              |
+
+<div id="notes">
+  ## Observações
+</div>
+
+* Aliases descontinuados: `scrape_execute`, `stop_interactive_browser` e `delete_scrape_browser` correspondem a `interact` e `stop_interaction`.
+* Os campos das structs em Rust usam `snake_case`, mas são serializados para os campos `camelCase` da API via serde.
+
+<div id="source-of-truth">
+  ## Fonte de referência
+</div>
+
+* `firecrawl/apps/rust-sdk/Cargo.toml`
+* `firecrawl/apps/rust-sdk/src/v2/client.rs`
+* `firecrawl/apps/rust-sdk/src/v2/search.rs`
+* `firecrawl/apps/rust-sdk/src/v2/scrape.rs`
+* `firecrawl/apps/rust-sdk/src/v2/types.rs`
+* `firecrawl-docs/api-reference/v2-openapi.json`

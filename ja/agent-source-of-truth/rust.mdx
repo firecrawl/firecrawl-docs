@@ -1,0 +1,351 @@
+---
+title: "Rustの信頼できる唯一の情報源"
+description: "search、scrape、interact などのキーエンドポイントを使用するエージェント向けの、Firecrawl Rust の正規の情報源。"
+---
+
+<div id="firecrawl-rust-source-of-truth">
+  # Firecrawl Rust の信頼できる唯一の情報源
+</div>
+
+このファイルは、エージェント向けの公開された正式な信頼できる唯一の情報源です。Firecrawl Rust SDK のソースコードと v2 OpenAPI 仕様から生成されています。
+
+<div id="install">
+  ## インストール
+</div>
+
+```bash
+cargo add firecrawl
+```
+
+<div id="authenticate">
+  ## 認証
+</div>
+
+```rust
+use firecrawl::v2::Client;
+
+let client = Client::new("fc-your-api-key")?;
+// let client = Client::new_selfhosted("https://api.firecrawl.dev", Some("fc-your-api-key"))?;
+```
+
+<div id="when-to-use-what">
+  ## 何をいつ使うか
+</div>
+
+* `search`: クエリから始めて、`site:` 制約を含む関連 URL を見つけます。
+* `scrape`: 既知の URL からコンテンツを取得して抽出します。
+* `interact`: ページでクリックやフォーム入力、またはスクレイピング後の処理が必要な場合に、ブラウザのアクションやコードを実行します。
+
+<div id="search">
+  ## 検索
+</div>
+
+<div id="why-use-it">
+  ### どのような場合に使うか
+</div>
+
+クエリに基づいて候補を見つけ、Firecrawl に URL を返してほしい場合に search を使用します (必要に応じて各結果をスクレイピングすることもできます) 。たとえば、標準の `site:` 演算子を使うと、`site:docs.firecrawl.dev crawl webhooks` のように結果を特定のドメインに絞り込めます。
+
+<div id="preferred-sdk-method">
+  ### 推奨SDKメソッド
+</div>
+
+`client.search(query, options)`
+
+<div id="simple-example">
+  ### シンプルな例
+</div>
+
+```rust
+use firecrawl::v2::Client;
+
+let results = client
+    .search("site:docs.firecrawl.dev webhook retries", None)
+    .await?;
+```
+
+### 複雑な例
+
+```rust
+use firecrawl::v2::{
+    Client, SearchOptions, SearchSource, SearchCategory, ScrapeOptions, Format, JsonOptions
+};
+
+let options = SearchOptions {
+    sources: Some(vec![SearchSource::Web, SearchSource::News]),
+    categories: Some(vec![SearchCategory::Research]),
+    limit: Some(10),
+    tbs: Some("qdr:m".to_string()),
+    location: Some("San Francisco,California,United States".to_string()),
+    ignore_invalid_urls: Some(true),
+    timeout: Some(60000),
+    scrape_options: Some(ScrapeOptions {
+        formats: Some(vec![Format::Markdown, Format::Links, Format::Json]),
+        json_options: Some(JsonOptions {
+            prompt: Some("Extract title and key endpoints.".to_string()),
+            ..Default::default()
+        }),
+        only_main_content: Some(true),
+        ..Default::default()
+    }),
+    ..Default::default()
+};
+
+let results = client
+    .search("site:docs.firecrawl.dev crawl webhooks", options)
+    .await?;
+```
+
+<div id="parameters">
+  ### パラメータ
+</div>
+
+| パラメータ                         | 型 / オプション                                           | 説明                                                |
+| ----------------------------- | --------------------------------------------------- | ------------------------------------------------- |
+| `query`                       | `&str`                                              | 検索クエリ。`site:domain` を使うと、結果を特定のサイトに限定できます。        |
+| `options.sources`             | `Vec<SearchSource>` (`Web`, `News`, `Images`)       | 検索対象のソース。                                         |
+| `options.categories`          | `Vec<SearchCategory>` (`Github`, `Research`, `Pdf`) | 結果を絞り込むカテゴリ。                                      |
+| `options.limit`               | `u32`                                               | 返される結果の最大数。既定値は 5、最大値は 20 です (SDK ドキュメントによる) 。    |
+| `options.tbs`                 | `String`                                            | 時間ベースの検索フィルタ (例: `qdr:d`、`qdr:w`、`sbd:1,qdr:m`) 。 |
+| `options.location`            | `String`                                            | 検索結果のロケーションを指定する文字列。                              |
+| `options.ignore_invalid_urls` | `bool`                                              | 他の Firecrawl エンドポイントでスクレイピングできない無効な URL を除外します。   |
+| `options.timeout`             | `u32`                                               | ミリ秒単位のタイムアウト。                                     |
+| `options.scrape_options`      | `ScrapeOptions`                                     | 各結果に適用されるスクレイピングのオプション (`scrape` と同じフィールド) 。      |
+| `options.integration`         | `String`                                            | 内部専用。Firecrawl の計測用に予約されています。                     |
+
+<div id="scrape">
+  ## スクレイピング
+</div>
+
+### これを使う理由
+
+URLがすでにあり、Firecrawl から構造化されたコンテンツや任意のフォーマットを取得したい場合は、スクレイピングを使用します。
+
+<div id="preferred-sdk-method">
+  ### 推奨SDKメソッド
+</div>
+
+`client.scrape(url, options)`
+
+### 簡単な例
+
+```rust
+use firecrawl::v2::{Client, ScrapeOptions, Format};
+
+let doc = client
+    .scrape("https://docs.firecrawl.dev", ScrapeOptions {
+        formats: Some(vec![Format::Markdown]),
+        ..Default::default()
+    })
+    .await?;
+```
+
+### 複雑な例
+
+```rust
+use firecrawl::v2::{
+    Client, ScrapeOptions, Format, JsonOptions, ScreenshotOptions, ChangeTrackingOptions,
+    ChangeTrackingMode, AttributeSelector, Action, ScrollDirection, ProxyType, ParserConfig
+};
+
+let options = ScrapeOptions {
+    formats: Some(vec![
+        Format::Markdown,
+        Format::Links,
+        Format::Json,
+        Format::Screenshot,
+        Format::ChangeTracking,
+        Format::Attributes,
+    ]),
+    json_options: Some(JsonOptions {
+        prompt: Some("Extract plan names and prices.".to_string()),
+        ..Default::default()
+    }),
+    screenshot_options: Some(ScreenshotOptions {
+        full_page: Some(true),
+        quality: Some(80),
+        viewport: None,
+    }),
+    change_tracking_options: Some(ChangeTrackingOptions {
+        modes: Some(vec![ChangeTrackingMode::GitDiff]),
+        tag: Some("pricing".to_string()),
+        ..Default::default()
+    }),
+    attribute_selectors: Some(vec![AttributeSelector {
+        selector: "a".to_string(),
+        attribute: "href".to_string(),
+    }]),
+    headers: None,
+    include_tags: Some(vec!["main".to_string(), "article".to_string()]),
+    exclude_tags: Some(vec!["nav".to_string(), "footer".to_string()]),
+    only_main_content: Some(true),
+    wait_for: Some(1000),
+    parsers: Some(vec![ParserConfig::Pdf {
+        parser_type: "pdf".to_string(),
+        max_pages: Some(5),
+    }]),
+    actions: Some(vec![
+        Action::Click { selector: "#accept".to_string() },
+        Action::Write { text: "firecrawl".to_string() },
+        Action::Press { key: "Enter".to_string() },
+        Action::Wait { milliseconds: Some(1500), selector: None },
+        Action::Scroll { direction: ScrollDirection::Down, selector: None },
+        Action::Scrape,
+    ]),
+    skip_tls_verification: Some(true),
+    remove_base64_images: Some(true),
+    fast_mode: Some(true),
+    block_ads: Some(true),
+    proxy: Some(ProxyType::Auto),
+    max_age: Some(86400000),
+    min_age: None,
+    store_in_cache: Some(true),
+    ..Default::default()
+};
+
+let doc = client.scrape("https://example.com/pricing", options).await?;
+```
+
+<div id="parameters">
+  ### パラメータ
+</div>
+
+| パラメータ                                     | 型 / オプション                                     | 説明                                           |                 |       |          |            |         |                   |      |                      |          |        |          |
+| ----------------------------------------- | --------------------------------------------- | -------------------------------------------- | --------------- | ----- | -------- | ---------- | ------- | ----------------- | ---- | -------------------- | -------- | ------ | -------- |
+| `url`                                     | `&str`                                        | スクレイピング対象のURL。                               |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.formats`                         | `Vec<Format>`                                 | 含める出力フォーマット。                                 |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.formats[]`                       | `Format::Markdown                             | Html                                         | RawHtml         | Links | Images   | Screenshot | Summary | ChangeTracking    | Json | Attributes           | Branding | Audio` | フォーマット値。 |
+| `options.json_options`                    | `JsonOptions`                                 | JSON抽出のオプション (`Format::Json` と併用) 。          |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.json_options.schema`             | `serde_json::Value`                           | 構造化抽出用のJSONスキーマ。                             |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.json_options.system_prompt`      | `String`                                      | JSON抽出用のシステムプロンプト。                           |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.json_options.prompt`             | `String`                                      | JSON抽出用のプロンプト。                               |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.screenshot_options`              | `ScreenshotOptions`                           | スクリーンショットのオプション (`Format::Screenshot` と併用) 。 |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.screenshot_options.full_page`    | `bool`                                        | 有効にするとページ全体のスクリーンショットを取得。                    |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.screenshot_options.quality`      | `u8`                                          | スクリーンショットの品質 (1〜100) 。                       |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.screenshot_options.viewport`     | `{ width: u32, height: u32 }`                 | スクリーンショットのビューポートサイズ。                         |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.change_tracking_options`         | `ChangeTrackingOptions`                       | 変更追跡オプション (`Format::ChangeTracking` と併用) 。   |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.change_tracking_options.modes`   | `Vec<ChangeTrackingMode>` (`GitDiff`, `Json`) | 変更追跡モード。                                     |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.change_tracking_options.schema`  | `serde_json::Value`                           | `Json` モード用のJSONスキーマ。                        |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.change_tracking_options.prompt`  | `String`                                      | 変更追跡用のプロンプト。                                 |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.change_tracking_options.tag`     | `String`                                      | 履歴を分離するための変更追跡タグ。                            |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.attribute_selectors`             | `Vec<AttributeSelector>`                      | 属性抽出セレクタ (`Format::Attributes` と併用) 。        |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.attribute_selectors[].selector`  | `String`                                      | CSSセレクタ。                                     |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.attribute_selectors[].attribute` | `String`                                      | 抽出する属性名。                                     |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.headers`                         | `HashMap<String, String>`                     | カスタムヘッダー。                                    |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.include_tags`                    | `Vec<String>`                                 | 含めるタグ。                                       |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.exclude_tags`                    | `Vec<String>`                                 | 除外するタグ。                                      |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.only_main_content`               | `bool`                                        | メインコンテンツのみを保持。                               |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.timeout`                         | `u32`                                         | タイムアウト (ミリ秒) 。                               |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.wait_for`                        | `u32`                                         | スクレイピング前の待機時間 (ミリ秒) 。                        |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.mobile`                          | `bool`                                        | モバイルデバイスをエミュレート。                             |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.parsers`                         | `Vec<ParserConfig>`                           | パーサー設定 (PDFオプションをサポート) 。                     |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.parsers[]`                       | `ParserConfig::Simple(&quot;pdf&quot;)        | ParserConfig::Pdf { type, max_pages }`       | PDFパーサーのモードと上限。 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.actions`                         | `Vec<Action>`                                 | スクレイピング前に実行するブラウザアクション。                      |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.actions[]`                       | `Action::Wait                                 | Screenshot                                   | Click           | Write | Press    | Scroll     | Scrape  | ExecuteJavascript | Pdf` | アクションのバリアントとそのフィールド。 |          |        |          |
+| `options.location`                        | `LocationConfig`                              | リクエストのロケーション設定。                              |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.location.country`                | `String`                                      | ISO国コード。                                     |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.location.languages`              | `Vec<String>`                                 | 優先言語。                                        |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.skip_tls_verification`           | `bool`                                        | TLS証明書の確認をスキップ。                              |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.remove_base64_images`            | `bool`                                        | Markdown出力からbase64画像を削除。                     |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.fast_mode`                       | `bool`                                        | 精度をやや落として高速にスクレイピング。                         |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.block_ads`                       | `bool`                                        | 広告とCookieポップアップのブロックを有効化。                    |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.proxy`                           | `ProxyType::Basic                             | Stealth                                      | Enhanced        | Auto` | プロキシモード。 |            |         |                   |      |                      |          |        |          |
+| `options.max_age`                         | `u32`                                         | この期間以内のキャッシュデータを優先。                          |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.min_age`                         | `u32`                                         | 最小経過時間を満たす場合のみキャッシュデータを返す。                   |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.store_in_cache`                  | `bool`                                        | 結果をキャッシュに保存。                                 |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.profile`                         | `ProfileConfig`                               | セッション間で共有される永続的なブラウザプロファイル。                  |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.profile.name`                    | `String`                                      | プロファイル名。                                     |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.profile.save_changes`            | `bool`                                        | インタラクション終了時にブラウザの状態を保存。                      |                 |       |          |            |         |                   |      |                      |          |        |          |
+| `options.integration`                     | `String`                                      | 内部専用。Firecrawlの計測用に予約済み。                     |                 |       |          |            |         |                   |      |                      |          |        |          |
+
+<div id="interact">
+  ## Interact
+</div>
+
+### なぜこれを使うのか
+
+ページで、スクレイピング開始後にブラウザのアクションやコードの実行 (クリック、フォーム入力、スクリプトによる手順など) が必要な場合は、interact を使用します。
+
+<div id="preferred-sdk-method">
+  ### 推奨SDKメソッド
+</div>
+
+`client.interact(job_id, options)`
+
+### 簡単な例
+
+```rust
+use firecrawl::v2::{Client, ScrapeOptions, Format, ScrapeExecuteOptions};
+
+let doc = client
+    .scrape("https://example.com", ScrapeOptions {
+        formats: Some(vec![Format::Markdown]),
+        ..Default::default()
+    })
+    .await?;
+
+let job_id = doc
+    .metadata
+    .as_ref()
+    .and_then(|m| m.scrape_id.clone())
+    .expect("Missing scrape_id");
+
+let result = client
+    .interact(job_id, ScrapeExecuteOptions {
+        prompt: Some("Click the pricing tab and summarize the plans.".to_string()),
+        language: None,
+        ..Default::default()
+    })
+    .await?;
+```
+
+<div id="complex-example">
+  ### 複雑な使用例
+</div>
+
+```rust
+use firecrawl::v2::{Client, ScrapeExecuteOptions, ScrapeExecuteLanguage};
+
+let result = client
+    .interact(
+        "<scrape_job_id>",
+        ScrapeExecuteOptions {
+            code: Some("console.log(await page.title());".to_string()),
+            language: Some(ScrapeExecuteLanguage::Node),
+            timeout: Some(60),
+            ..Default::default()
+        },
+    )
+    .await?;
+```
+
+<div id="parameters">
+  ### パラメータ
+</div>
+
+| パラメータ              | 型 / オプション                                          | 説明                                                  |
+| ------------------ | -------------------------------------------------- | --------------------------------------------------- |
+| `job_id`           | `&str`                                             | `document.metadata.scrape_id` から取得するスクレイピング job ID。 |
+| `options.code`     | `String`                                           | ブラウザセッションで実行するコード。`prompt` が指定されていない場合は必須です。        |
+| `options.prompt`   | `String`                                           | ブラウザ エージェントに対する自然言語の指示。`code` が指定されていない場合は必須です。     |
+| `options.language` | `ScrapeExecuteLanguage` (`Python`, `Node`, `Bash`) | 実行言語。省略した場合のデフォルトは `Node` です。                       |
+| `options.timeout`  | `u32`                                              | 実行タイムアウト (秒) 。                                      |
+| `options.origin`   | `String`                                           | 内部専用。Firecrawl のインストルメンテーション用に予約されています。             |
+
+<div id="notes">
+  ## 注意
+</div>
+
+* 非推奨エイリアス: `scrape_execute`、`stop_interactive_browser`、`delete_scrape_browser` は、`interact` と `stop_interaction` に対応しています。
+* Rust の構造体フィールドは snake&#95;case ですが、serde によって camelCase の API フィールドへシリアライズされます。
+
+<div id="source-of-truth">
+  ## 信頼できる唯一の情報源
+</div>
+
+* `firecrawl/apps/rust-sdk/Cargo.toml`
+* `firecrawl/apps/rust-sdk/src/v2/client.rs`
+* `firecrawl/apps/rust-sdk/src/v2/search.rs`
+* `firecrawl/apps/rust-sdk/src/v2/scrape.rs`
+* `firecrawl/apps/rust-sdk/src/v2/types.rs`
+* `firecrawl-docs/api-reference/v2-openapi.json`

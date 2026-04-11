@@ -1,0 +1,318 @@
+---
+title: "Python版の参照元"
+description: "search、スクレイピング、Interact などの主要なエンドポイントを使うエージェント向けの、Firecrawl Python の参照元。"
+---
+
+
+
+<div id="firecrawl-python-source-of-truth">
+  # Firecrawl Python の正式な参照元
+</div>
+
+このファイルは、エージェント向けの正式な公開参照元です。Firecrawl Python SDK のソースコードと v2 OpenAPI 仕様から生成されています。
+
+
+
+<div id="install">
+  ## インストール
+</div>
+
+```bash
+pip install firecrawl-py
+```
+
+
+
+<div id="authenticate">
+  ## 認証
+</div>
+
+```py
+import os
+from firecrawl import Firecrawl
+```
+
+
+
+client = Firecrawl(api&#95;key=os.environ.get(&quot;FIRECRAWL&#95;API&#95;KEY&quot;))
+
+# client = Firecrawl(api_key=&quot;fc-...&quot;, api_url=&quot;https://api.firecrawl.dev&quot;)
+
+```
+```
+
+
+
+<div id="search">
+  ## 使い分け
+</div>
+
+* `search`: クエリから始めて、`site:` 制約を含む関連 URL を見つけます。
+* `scrape`: 既知の URL からコンテンツを取得・抽出します。
+* `interact`: クリックやフォーム入力、スクレイピング後の処理が必要なページで、ブラウザのアクションやコードを実行します。
+
+
+
+## 検索
+
+<div id="preferred-sdk-method">
+  ### 使用する理由
+</div>
+
+クエリからURLを探索し、Firecrawlに各結果を返させたい場合（任意でスクレイピングも可）に検索を使用します。標準の `site:` 演算子でドメインに結果を絞り込むことができます（例：`site:docs.firecrawl.dev crawl webhooks`）。
+
+<div id="simple-example">
+  ### 推奨SDKメソッド
+</div>
+
+`client.search(query, **options)`
+
+<div id="complex-example">
+  ### シンプルな例
+</div>
+
+```py
+results = client.search("site:docs.firecrawl.dev webhook retries")
+```
+
+<div id="parameters">
+  ### 複雑な例
+</div>
+
+```py
+from firecrawl.v2.types import ScrapeOptions
+
+results = client.search(
+    "site:docs.firecrawl.dev crawl webhooks",
+    sources=["web", "news"],
+    categories=["research"],
+    limit=10,
+    tbs="qdr:m",
+    location="San Francisco,California,United States",
+    ignore_invalid_urls=True,
+    timeout=300000,
+    scrape_options=ScrapeOptions(
+        formats=[
+            "markdown",
+            "links",
+            {"type": "json", "prompt": "Extract title and key endpoints."}
+        ],
+        only_main_content=True,
+        include_tags=["main", "article"],
+        exclude_tags=["nav", "footer"],
+        wait_for=1000,
+        actions=[
+            {"type": "click", "selector": "button#accept"},
+            {"type": "wait", "milliseconds": 750},
+            {"type": "scrape"}
+        ]
+    )
+)
+```
+
+### パラメータ
+
+| パラメータ             | 型 / オプション  | 説明                                                                      |
+| --------------------- | --------------- | -------------------------------------------------------------------------------- | -------- | ----------------- | ---------- | ----------- | ----------------------------- |
+| `query`               | `str`           | 検索クエリ。`site:domain` を使用して結果を特定のサイトに絞り込めます。                   |
+| `sources`             | `List["web"     | "news"                                                                           | "images" | {"type": "web"    | "news"     | "images"}]` | 検索対象のソース。            |
+| `categories`          | `List["github"  | "research"                                                                       | "pdf"    | {"type": "github" | "research" | "pdf"}]`    | 結果を絞り込むカテゴリ。 |
+| `limit`               | `int`           | 返す結果の最大件数。SDKモデルのデフォルトは `5`。            |
+| `tbs`                 | `str`           | 時間ベースの検索フィルター（例：`qdr:d`、`qdr:w`、`sbd:1,qdr:m`）。          |
+| `location`            | `str`           | 検索結果に使用するロケーション文字列。                                              |
+| `ignore_invalid_urls` | `bool`          | 他のFirecrawlエンドポイントでスクレイピングできない無効なURLを除外します。               |
+| `timeout`             | `int`           | タイムアウト（ミリ秒）。SDKモデルのデフォルトは `300000`。                   |
+| `scrape_options`      | `ScrapeOptions` | 各結果に適用されるスクレイピングのオプション（`scrape` と同じフィールドに加え `min_age` も指定可）。 |
+| `integration`         | `str`           | 内部専用。Firecrawlのインストルメンテーション用に予約済み。                           |
+
+
+## スクレイピング
+
+<div id="preferred-sdk-method">
+  ### 使用する理由
+</div>
+
+URLがすでに分かっていて、Firecrawl から構造化されたコンテンツと任意のフォーマットを返してほしい場合は、スクレイピングを使用します。
+
+<div id="simple-example">
+  ### 推奨SDKメソッド
+</div>
+
+`client.scrape(url, **options)`
+
+### 簡単な例
+
+```py
+doc = client.scrape("https://docs.firecrawl.dev", formats=["markdown"])
+```
+
+<div id="parameters">
+  ### 複雑な例
+</div>
+
+```py
+doc = client.scrape(
+    "https://example.com/pricing",
+    formats=[
+        "markdown",
+        "links",
+        {"type": "json", "prompt": "Extract plan names and prices."},
+        {"type": "screenshot", "full_page": True, "quality": 80, "viewport": {"width": 1280, "height": 720}},
+        {"type": "changeTracking", "modes": ["git-diff"], "tag": "pricing"}
+    ],
+    headers={"User-Agent": "FirecrawlDocsBot/1.0"},
+    include_tags=["main", "article"],
+    exclude_tags=["nav", "footer"],
+    only_main_content=True,
+    wait_for=1000,
+    mobile=False,
+    parsers=[{"type": "pdf", "mode": "auto", "max_pages": 5}],
+    actions=[
+        {"type": "click", "selector": "#accept"},
+        {"type": "write", "text": "firecrawl"},
+        {"type": "press", "key": "Enter"},
+        {"type": "wait", "milliseconds": 1500},
+        {"type": "scrape"}
+    ],
+    location={"country": "US", "languages": ["en-US"]},
+    skip_tls_verification=True,
+    remove_base64_images=True,
+    fast_mode=True,
+    block_ads=True,
+    proxy="auto",
+    max_age=86400000,
+    store_in_cache=True,
+    profile={"name": "docs-session", "save_changes": True}
+)
+```
+
+### パラメータ
+
+
+
+| Parameter                | Type / Options                               | Description                                                                                                          |
+| ------------------------ | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------- | -------------------------- | --------------------------------------------- | ------------ | --------- | ------------------- | ------- | ------------ | ---------- | ------------------------ | ------- | ---------- | ------------------ | ----------------------------------------------------------------- |
+| `url`                    | `str`                                        | スクレイピング対象のURL。                                                                                                       |
+| `formats`                | `List[FormatOption]` or `ScrapeFormats`      | 含める出力フォーマット。文字列または高度なフォーマット用オブジェクト、あるいはブール値で切り替える `ScrapeFormats` を指定できます。 |
+| `formats[].type`         | `"markdown"                                  | "html"                                                                                                               | "rawHtml"              | "links"                    | "images"                                      | "screenshot" | "summary" | "changeTracking"    | "json"  | "attributes" | "branding" | "query"                  | "audio" | "raw_html" | "change_tracking"` | オブジェクトエントリのフォーマット指定子 (snake&#95;caseエイリアスも使用可) 。 |
+| `formats[].prompt`       | `str`                                        | `json` または `query` フォーマット用のプロンプト。                                                                                |
+| `formats[].schema`       | `dict`                                       | `json` フォーマット、または `json` モードでの変更追跡に使用するJSONスキーマ。                                                                      |
+| `formats[].modes`        | `List["git-diff"                             | "json"]`                                                                                                             | 変更追跡モード。 |
+| `formats[].tag`          | `str`                                        | 履歴を分離するための変更追跡タグ。                                                                                              |
+| `formats[].full_page`    | `bool`                                       | `type: "screenshot"` 時にページ全体をキャプチャします。                                                                      |
+| `formats[].quality`      | `int`                                        | スクリーンショットの品質 (1〜100) 。                                                                                          |
+| `formats[].viewport`     | `{ "width": int, "height": int }`            | スクリーンショットのビューポートサイズ。                                                                                            |
+| `formats[].selectors`    | `List[{"selector": str, "attribute": str}]`  | `type: "attributes"` の属性抽出セレクター。                                                                             |
+| `headers`                | `Dict[str, str]`                             | カスタムヘッダー。                                                                                                      |
+| `include_tags`           | `List[str]`                                  | 含めるタグ。                                                                                                     |
+| `exclude_tags`           | `List[str]`                                  | 除外するタグ。                                                                                                     |
+| `only_main_content`      | `bool`                                       | メインコンテンツのみを取得します。                                                                                                          |
+| `timeout`                | `int`                                        | タイムアウト (ミリ秒) 。                                                                                             |
+| `wait_for`               | `int`                                        | スクレイピング前の待機時間 (ミリ秒) 。                                                                           |
+| `mobile`                 | `bool`                                       | モバイルデバイスをエミュレートします。                                                                                                             |
+| `parsers`                | `List[str                                    | {"type": "pdf", "mode": "fast"                                                                                       | "auto"                 | "ocr", "max_pages": int}]` | パーサー設定 (PDFオプションに対応) 。 |
+| `actions`                | `List[Action]`                               | スクレイピング前に実行するブラウザアクション。                                                                              |
+| `actions[].type`         | `"wait"                                      | "screenshot"                                                                                                         | "click"                | "write"                    | "press"                                       | "scroll"     | "scrape"  | "executeJavascript" | "pdf"`  | アクションの種類。 |
+| `actions[].milliseconds` | `int`                                        | `type: "wait"` 時の待機時間。                                                                                   |
+| `actions[].selector`     | `str`                                        | `wait`、`click`、または `scroll` 用のセレクター。                                                                           |
+| `actions[].text`         | `str`                                        | `write` 用のテキスト。                                                                                                    |
+| `actions[].key`          | `str`                                        | `press` で押下するキー。                                                                                            |
+| `actions[].direction`    | `"up"                                        | "down"`                                                                                                              | スクロール方向。      |
+| `actions[].script`       | `str`                                        | `executeJavascript` 用のJavaScript。                                                                                  |
+| `actions[].format`       | `"A0"                                        | "A1"                                                                                                                 | "A2"                   | "A3"                       | "A4"                                          | "A5"         | "A6"      | "Letter"            | "Legal" | "Tabloid"    | "Ledger"`  | `pdf` 用のPDFページサイズ。 |
+| `actions[].landscape`    | `bool`                                       | PDFの横向きモード。                                                                                                  |
+| `actions[].scale`        | `float`                                      | PDFのスケール係数。                                                                                                    |
+| `actions[].full_page`    | `bool`                                       | スクリーンショットアクションでページ全体をキャプチャします。                                                                                         |
+| `actions[].quality`      | `int`                                        | スクリーンショットアクションの品質。                                                                                           |
+| `actions[].viewport`     | `{ "width": int, "height": int }`            | スクリーンショットアクションのビューポート。                                                                                          |
+| `location`               | `{ "country": str, "languages": List[str] }` | リクエストのロケーション設定。                                                                                                   |
+| `skip_tls_verification`  | `bool`                                       | TLS証明書の確認をスキップします。                                                                                                   |
+| `remove_base64_images`   | `bool`                                       | Markdown出力からbase64画像を除去します。                                                                                            |
+| `fast_mode`              | `bool`                                       | 精度を下げて高速スクレイピングを行います。                                                                               |
+| `use_mock`               | `str`                                        | 内部専用。SDKテスト用に予約済み。                                                                             |
+| `block_ads`              | `bool`                                       | 広告およびCookieポップアップのブロックを有効にします。                                                                                 |
+| `proxy`                  | `"basic"                                     | "stealth"                                                                                                            | "enhanced"             | "auto"`                    | プロキシモード。                                   |
+| `max_age`                | `int`                                        | 指定した期間内のキャッシュデータを優先して使用します。                                                                                   |
+| `store_in_cache`         | `bool`                                       | 結果をキャッシュに保存します。                                                                                              |
+| `profile`                | `dict`                                       | 永続的なブラウザプロファイル。例: `{ "name": "profile", "save_changes": True }`。                               |
+| `integration`            | `str`                                        | 内部専用。Firecrawlの計測用に予約済み。                                                                               |
+
+
+
+
+
+## Interact
+
+### なぜ使うのか
+
+ページで、スクレイピング開始後にブラウザのアクションやコード実行 (クリック、フォーム操作、スクリプト化された手順など) が必要な場合は、interact を使用します。
+
+<div id="simple-example">
+  ### 推奨SDKメソッド
+</div>
+
+`client.interact(job_id, code=None, prompt=None, language="node", timeout=None)`
+
+<div id="complex-example">
+  ### シンプルな例
+</div>
+
+```py
+doc = client.scrape("https://example.com", formats=["markdown"])
+job_id = doc.metadata.scrape_id if doc.metadata else None
+if not job_id:
+    raise ValueError("Missing scrape_id from scrape response")
+
+result = client.interact(
+    job_id,
+    prompt="Click the pricing tab and summarize the plans.",
+    language="node"
+)
+```
+
+<div id="parameters">
+  ### 複雑な例
+</div>
+
+```py
+result = client.interact(
+    "<scrape_job_id>",
+    code="print(await page.title())",
+    language="python",
+    timeout=60
+)
+```
+
+### パラメータ
+
+| パラメータ      | 型 / オプション           | 説明                                             |                   |                        |
+| ---------- | ------------------- | ---------------------------------------------- | ----------------- | ---------------------- |
+| `job_id`   | `str`               | `document.metadata.scrape_id` のスクレイピングジョブ ID。  |                   |                        |
+| `code`     | `str`               | ブラウザセッションで実行するコード。`prompt` が指定されていない場合は必須です。   |                   |                        |
+| `prompt`   | `str`               | ブラウザエージェントに対する自然言語の指示。`code` が指定されていない場合は必須です。 |                   |                        |
+| `language` | `&quot;python&quot; | &quot;node&quot;                               | &quot;bash&quot;` | 実行言語。デフォルトは `node` です。 |
+| `timeout`  | `int`               | 実行タイムアウト (秒、1～300) 。                           |                   |                        |
+| `origin`   | `str`               | 内部専用。Firecrawl のインストルメンテーション用に予約されています。        |                   |                        |
+
+
+
+<div id="source-of-truth">
+  ## 注記
+</div>
+
+* 非推奨のエイリアス: `scrape_execute`、`stop_interactive_browser`、`delete_scrape_browser` は、`interact` と `stop_interaction` にマップされています。
+* `ScrapeOptions` には `min_age` が含まれますが、`scrape` の簡易メソッドではこれを指定できません。必要な場合は、`search(..., scrape_options=...)` 経由で `ScrapeOptions` を使用してください。
+* トップレベルの `Firecrawl` クライアントでは v2 メソッドを直接利用でき、従来の v1 は `client.v1` で利用できます。
+
+
+
+## 参照元
+
+* `firecrawl/apps/python-sdk/pyproject.toml`
+* `firecrawl/apps/python-sdk/firecrawl/client.py`
+* `firecrawl/apps/python-sdk/firecrawl/v2/client.py`
+* `firecrawl/apps/python-sdk/firecrawl/v2/types.py`
+* `firecrawl/apps/python-sdk/firecrawl/v2/methods/search.py`
+* `firecrawl/apps/python-sdk/firecrawl/v2/methods/scrape.py`
+* `firecrawl/apps/python-sdk/firecrawl/v2/utils/validation.py`
+* `firecrawl-docs/api-reference/v2-openapi.json`
