@@ -1,0 +1,241 @@
+---
+title: "curl Source of Truth"
+description: "Canonical Firecrawl curl source of truth for agents using key endpoints like search, scrape, and interact."
+---
+
+# Firecrawl curl Source of Truth
+
+This file is the canonical public source of truth for agents. It is generated from the Firecrawl v2 OpenAPI spec and SDK surfaces.
+
+## Authenticate
+
+All requests use a Bearer token in the `Authorization` header.
+
+```bash
+export FIRECRAWL_API_KEY="fc-your-api-key"
+```
+
+## When To Use What
+
+- `search`: start from a query to discover relevant URLs, including `site:` constraints.
+- `scrape`: fetch and extract content from a known URL.
+- `interact`: run browser actions or code when a page needs clicks, forms, or post-scrape steps.
+
+## Search
+
+### Why use it
+
+Use search when you need discovery from a query and want Firecrawl to return URLs (and optionally scrape each result). You can constrain results to a domain with the standard `site:` operator, for example `site:docs.firecrawl.dev crawl webhooks`.
+
+### Preferred SDK method
+
+`POST https://api.firecrawl.dev/v2/search`
+
+### Simple Example
+
+```bash
+curl -sS "https://api.firecrawl.dev/v2/search" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "site:docs.firecrawl.dev webhook retries"
+  }'
+```
+
+### Complex Example
+
+```bash
+curl -sS "https://api.firecrawl.dev/v2/search" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "site:docs.firecrawl.dev crawl webhooks",
+    "sources": ["web", "news"],
+    "categories": ["research"],
+    "limit": 10,
+    "tbs": "qdr:m",
+    "location": "San Francisco,California,United States",
+    "country": "US",
+    "ignoreInvalidURLs": true,
+    "timeout": 60000,
+    "scrapeOptions": {
+      "formats": [
+        "markdown",
+        "links",
+        { "type": "json", "prompt": "Extract title and key endpoints." }
+      ],
+      "onlyMainContent": true,
+      "includeTags": ["main", "article"],
+      "excludeTags": ["nav", "footer"],
+      "waitFor": 1000,
+      "actions": [
+        { "type": "click", "selector": "button#accept" },
+        { "type": "wait", "milliseconds": 750 },
+        { "type": "scrape" }
+      ]
+    }
+  }'
+```
+
+### Parameters
+
+| Parameter | Type / Options | Description |
+| --- | --- | --- |
+| `query` | `string` | Search query. Use `site:domain` to restrict results to a site. |
+| `sources` | `Array<"web" | "news" | "images" | { type: "web" | "news" | "images" }>` | Sources to search. |
+| `categories` | `Array<"github" | "research" | "pdf" | { type: "github" | "research" | "pdf" }>` | Categories to filter results. |
+| `limit` | `integer` | Maximum number of results to return. |
+| `tbs` | `string` | Time-based search filter (for example `qdr:d`, `qdr:w`, `sbd:1,qdr:m`). |
+| `location` | `string` | Location string for search results. |
+| `country` | `string` | ISO country code for geo-targeting search results. |
+| `timeout` | `integer` | Timeout in milliseconds. |
+| `ignoreInvalidURLs` | `boolean` | Exclude invalid URLs that other Firecrawl endpoints cannot scrape. |
+| `enterprise` | `Array<"anon" | "zdr">` | Enterprise ZDR options when enabled for your team. |
+| `scrapeOptions` | `ScrapeOptions` | Scrape options applied to each result (same fields as `scrape`). |
+
+## Scrape
+
+### Why use it
+
+Use scrape when you already have a URL and want Firecrawl to return structured content and optional formats.
+
+### Preferred SDK method
+
+`POST https://api.firecrawl.dev/v2/scrape`
+
+### Simple Example
+
+```bash
+curl -sS "https://api.firecrawl.dev/v2/scrape" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://docs.firecrawl.dev",
+    "formats": ["markdown"]
+  }'
+```
+
+### Complex Example
+
+```bash
+curl -sS "https://api.firecrawl.dev/v2/scrape" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com/pricing",
+    "formats": [
+      "markdown",
+      "links",
+      { "type": "json", "prompt": "Extract plan names and prices." },
+      { "type": "screenshot", "fullPage": true, "quality": 80, "viewport": { "width": 1280, "height": 720 } },
+      { "type": "changeTracking", "modes": ["git-diff"], "tag": "pricing" }
+    ],
+    "headers": { "User-Agent": "FirecrawlDocsBot/1.0" },
+    "includeTags": ["main", "article"],
+    "excludeTags": ["nav", "footer"],
+    "onlyMainContent": true,
+    "waitFor": 1000,
+    "mobile": false,
+    "parsers": [{ "type": "pdf", "mode": "auto", "maxPages": 5 }],
+    "actions": [
+      { "type": "click", "selector": "#accept" },
+      { "type": "write", "text": "firecrawl" },
+      { "type": "press", "key": "Enter" },
+      { "type": "wait", "milliseconds": 1500 },
+      { "type": "scrape" }
+    ],
+    "location": { "country": "US", "languages": ["en-US"] },
+    "skipTlsVerification": true,
+    "removeBase64Images": true,
+    "blockAds": true,
+    "proxy": "auto",
+    "maxAge": 86400000,
+    "storeInCache": true,
+    "profile": { "name": "docs-session", "saveChanges": true }
+  }'
+```
+
+### Parameters
+
+| Parameter | Type / Options | Description |
+| --- | --- | --- |
+| `url` | `string` | URL to scrape. |
+| `formats` | `Array` | Output formats to include. Strings or objects such as `{type: "json", prompt, schema}` or `{type: "screenshot", fullPage, quality, viewport}`. |
+| `onlyMainContent` | `boolean` | Keep only the main content. |
+| `includeTags` | `Array<string>` | Tags to include. |
+| `excludeTags` | `Array<string>` | Tags to exclude. |
+| `maxAge` | `integer` | Prefer cached data up to this age. |
+| `minAge` | `integer` | Only return cached data if it meets the minimum age. |
+| `headers` | `object` | Custom headers. |
+| `waitFor` | `integer` | Wait time in milliseconds before scraping. |
+| `mobile` | `boolean` | Emulate a mobile device. |
+| `skipTlsVerification` | `boolean` | Skip TLS certificate verification. |
+| `timeout` | `integer` | Timeout in milliseconds. |
+| `parsers` | `Array` | Parser configuration (PDF options supported). |
+| `actions` | `Array` | Browser actions to run before scraping. |
+| `location` | `object` | Location settings for the request. |
+| `location.country` | `string` | ISO country code. |
+| `location.languages` | `Array<string>` | Preferred languages. |
+| `removeBase64Images` | `boolean` | Strip base64 images from markdown output. |
+| `blockAds` | `boolean` | Enable ad and cookie popup blocking. |
+| `proxy` | `"basic" | "enhanced" | "auto"` | Proxy mode. |
+| `storeInCache` | `boolean` | Store results in cache. |
+| `profile` | `object` | Persistent browser profile with `name` and `saveChanges`. |
+| `zeroDataRetention` | `boolean` | Enable zero data retention when your account allows it. |
+
+## Interact
+
+### Why use it
+
+Use interact when a page requires browser actions or code execution after a scrape starts (clicks, forms, or scripted steps).
+
+### Preferred SDK method
+
+`POST https://api.firecrawl.dev/v2/scrape/{jobId}/interact`
+
+### Simple Example
+
+```bash
+curl -sS "https://api.firecrawl.dev/v2/scrape/<jobId>/interact" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "console.log(document.title)",
+    "language": "node"
+  }'
+```
+
+### Complex Example
+
+```bash
+curl -sS "https://api.firecrawl.dev/v2/scrape/<jobId>/interact" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Click the pricing tab and summarize the plans.",
+    "language": "node",
+    "timeout": 60
+  }'
+```
+
+### Parameters
+
+| Parameter | Type / Options | Description |
+| --- | --- | --- |
+| `jobId` | `string` | Scrape job ID from `data.metadata.scrapeId`. |
+| `code` | `string` | Code to execute in the browser session. Required if `prompt` is not provided. |
+| `prompt` | `string` | Natural language instruction for the browser agent. Required if `code` is not provided. |
+| `language` | `"python" | "node" | "bash"` | Execution language. Defaults to `node` when omitted. |
+| `timeout` | `integer` | Execution timeout in seconds. |
+| `origin` | `string` | Internal only. Reserved for Firecrawl instrumentation. |
+
+## Notes
+
+- The OpenAPI spec currently marks `code` as required for interact, but SDKs accept `prompt` as an alternative. Use either `code` or `prompt` in practice.
+
+## Source Of Truth
+
+- `firecrawl-docs/api-reference/v2-openapi.json`
+- `firecrawl/apps/js-sdk/firecrawl/src/v2/methods/scrape.ts`
+- `firecrawl/apps/python-sdk/firecrawl/v2/methods/scrape.py`
+- `firecrawl/apps/rust-sdk/src/v2/scrape.rs`
