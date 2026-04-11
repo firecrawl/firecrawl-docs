@@ -1,0 +1,355 @@
+---
+title: "Rust 权威来源"
+description: "供代理使用的 Firecrawl Rust 权威来源，涵盖 search、scrape 和交互等关键端点。"
+---
+
+<div id="firecrawl-rust-source-of-truth">
+  # Firecrawl Rust 权威来源
+</div>
+
+此文件是面向代理的公开权威来源。它根据 Firecrawl Rust SDK 源代码和 v2 OpenAPI 规范生成。
+
+<div id="install">
+  ## 安装
+</div>
+
+```bash
+cargo add firecrawl
+```
+
+<div id="authenticate">
+  ## 认证
+</div>
+
+```rust
+use firecrawl::v2::Client;
+
+let client = Client::new("fc-your-api-key")?;
+// let client = Client::new_selfhosted("https://api.firecrawl.dev", Some("fc-your-api-key"))?;
+```
+
+<div id="when-to-use-what">
+  ## 何时该用哪一种
+</div>
+
+* `search`：从查询出发发现相关 URL，包括 `site:` 限制。
+* `scrape`：从已知 URL 获取并提取内容。
+* `interact`：当页面需要点击、填写表单或执行抓取后步骤时，运行浏览器 actions 或代码。
+
+<div id="search">
+  ## 搜索
+</div>
+
+### 为什么使用它
+
+当你需要根据查询发现内容，并希望 Firecrawl 返回 URL (也可选择抓取每个结果) 时，请使用 search。你可以使用标准的 `site:` 运算符将结果限制在某个域名下，例如 `site:docs.firecrawl.dev crawl webhooks`。
+
+<div id="preferred-sdk-method">
+  ### 推荐使用的 SDK 方法
+</div>
+
+`client.search(query, options)`
+
+<div id="simple-example">
+  ### 简单示例
+</div>
+
+```rust
+use firecrawl::v2::Client;
+
+let results = client
+    .search("site:docs.firecrawl.dev webhook retries", None)
+    .await?;
+```
+
+<div id="complex-example">
+  ### 复杂示例
+</div>
+
+```rust
+use firecrawl::v2::{
+    Client, SearchOptions, SearchSource, SearchCategory, ScrapeOptions, Format, JsonOptions
+};
+
+let options = SearchOptions {
+    sources: Some(vec![SearchSource::Web, SearchSource::News]),
+    categories: Some(vec![SearchCategory::Research]),
+    limit: Some(10),
+    tbs: Some("qdr:m".to_string()),
+    location: Some("San Francisco,California,United States".to_string()),
+    ignore_invalid_urls: Some(true),
+    timeout: Some(60000),
+    scrape_options: Some(ScrapeOptions {
+        formats: Some(vec![Format::Markdown, Format::Links, Format::Json]),
+        json_options: Some(JsonOptions {
+            prompt: Some("Extract title and key endpoints.".to_string()),
+            ..Default::default()
+        }),
+        only_main_content: Some(true),
+        ..Default::default()
+    }),
+    ..Default::default()
+};
+
+let results = client
+    .search("site:docs.firecrawl.dev crawl webhooks", options)
+    .await?;
+```
+
+<div id="parameters">
+  ### 参数
+</div>
+
+| 参数                            | 类型 / 选项                                             | 描述                                                |
+| ----------------------------- | --------------------------------------------------- | ------------------------------------------------- |
+| `query`                       | `&str`                                              | 搜索查询。使用 `site:domain` 可将结果限定在某个站点内。               |
+| `options.sources`             | `Vec<SearchSource>` (`Web`, `News`, `Images`)       | 要搜索的来源。                                           |
+| `options.categories`          | `Vec<SearchCategory>` (`Github`, `Research`, `Pdf`) | 用于筛选结果的类别。                                        |
+| `options.limit`               | `u32`                                               | 返回结果的最大数量。默认值为 5，最大为 20 (根据 SDK 文档) 。             |
+| `options.tbs`                 | `String`                                            | 按时间筛选的搜索过滤条件 (例如 `qdr:d`、`qdr:w`、`sbd:1,qdr:m`) 。 |
+| `options.location`            | `String`                                            | 用于搜索结果的地理位置字符串。                                   |
+| `options.ignore_invalid_urls` | `bool`                                              | 排除其他 Firecrawl 端点无法抓取的无效 URL。                     |
+| `options.timeout`             | `u32`                                               | 超时时间 (毫秒) 。                                       |
+| `options.scrape_options`      | `ScrapeOptions`                                     | 应用于每个结果的抓取选项 (字段与 `scrape` 相同) 。                  |
+| `options.integration`         | `String`                                            | 仅供内部使用。保留给 Firecrawl 埋点使用。                        |
+
+<div id="scrape">
+  ## 抓取
+</div>
+
+<div id="why-use-it">
+  ### 为什么使用 scrape
+</div>
+
+当你已经有 URL，并希望 Firecrawl 返回结构化内容和可选 formats 时，请使用 scrape。
+
+### 推荐的 SDK 方法
+
+`client.scrape(url, options)`
+
+<div id="simple-example">
+  ### 简单示例
+</div>
+
+```rust
+use firecrawl::v2::{Client, ScrapeOptions, Format};
+
+let doc = client
+    .scrape("https://docs.firecrawl.dev", ScrapeOptions {
+        formats: Some(vec![Format::Markdown]),
+        ..Default::default()
+    })
+    .await?;
+```
+
+<div id="complex-example">
+  ### 复杂示例
+</div>
+
+```rust
+use firecrawl::v2::{
+    Client, ScrapeOptions, Format, JsonOptions, ScreenshotOptions, ChangeTrackingOptions,
+    ChangeTrackingMode, AttributeSelector, Action, ScrollDirection, ProxyType, ParserConfig
+};
+
+let options = ScrapeOptions {
+    formats: Some(vec![
+        Format::Markdown,
+        Format::Links,
+        Format::Json,
+        Format::Screenshot,
+        Format::ChangeTracking,
+        Format::Attributes,
+    ]),
+    json_options: Some(JsonOptions {
+        prompt: Some("Extract plan names and prices.".to_string()),
+        ..Default::default()
+    }),
+    screenshot_options: Some(ScreenshotOptions {
+        full_page: Some(true),
+        quality: Some(80),
+        viewport: None,
+    }),
+    change_tracking_options: Some(ChangeTrackingOptions {
+        modes: Some(vec![ChangeTrackingMode::GitDiff]),
+        tag: Some("pricing".to_string()),
+        ..Default::default()
+    }),
+    attribute_selectors: Some(vec![AttributeSelector {
+        selector: "a".to_string(),
+        attribute: "href".to_string(),
+    }]),
+    headers: None,
+    include_tags: Some(vec!["main".to_string(), "article".to_string()]),
+    exclude_tags: Some(vec!["nav".to_string(), "footer".to_string()]),
+    only_main_content: Some(true),
+    wait_for: Some(1000),
+    parsers: Some(vec![ParserConfig::Pdf {
+        parser_type: "pdf".to_string(),
+        max_pages: Some(5),
+    }]),
+    actions: Some(vec![
+        Action::Click { selector: "#accept".to_string() },
+        Action::Write { text: "firecrawl".to_string() },
+        Action::Press { key: "Enter".to_string() },
+        Action::Wait { milliseconds: Some(1500), selector: None },
+        Action::Scroll { direction: ScrollDirection::Down, selector: None },
+        Action::Scrape,
+    ]),
+    skip_tls_verification: Some(true),
+    remove_base64_images: Some(true),
+    fast_mode: Some(true),
+    block_ads: Some(true),
+    proxy: Some(ProxyType::Auto),
+    max_age: Some(86400000),
+    min_age: None,
+    store_in_cache: Some(true),
+    ..Default::default()
+};
+
+let doc = client.scrape("https://example.com/pricing", options).await?;
+```
+
+<div id="parameters">
+  ### 参数
+</div>
+
+| 参数                                        | 类型 / 选项                                       | 描述                                         |               |       |        |            |         |                   |      |                |          |        |      |
+| ----------------------------------------- | --------------------------------------------- | ------------------------------------------ | ------------- | ----- | ------ | ---------- | ------- | ----------------- | ---- | -------------- | -------- | ------ | ---- |
+| `url`                                     | `&str`                                        | 要抓取的 URL。                                  |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.formats`                         | `Vec<Format>`                                 | 要包含的输出formats。                                 |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.formats[]`                       | `Format::Markdown                             | Html                                       | RawHtml       | Links | Images | Screenshot | Summary | ChangeTracking    | Json | Attributes     | Branding | Audio` | formats值。 |
+| `options.json_options`                    | `JsonOptions`                                 | JSON 提取选项 (与 `Format::Json` 一起使用) 。        |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.json_options.schema`             | `serde_json::Value`                           | 用于结构化提取的 JSON schema。                      |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.json_options.system_prompt`      | `String`                                      | 用于 JSON 提取的系统 prompt。                      |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.json_options.prompt`             | `String`                                      | 用于 JSON 提取的 prompt。                        |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.screenshot_options`              | `ScreenshotOptions`                           | 截图选项 (与 `Format::Screenshot` 一起使用) 。       |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.screenshot_options.full_page`    | `bool`                                        | 启用时截取整页截图。                                 |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.screenshot_options.quality`      | `u8`                                          | 截图质量 (1-100) 。                             |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.screenshot_options.viewport`     | `{ width: u32, height: u32 }`                 | 截图视口大小。                                    |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.change_tracking_options`         | `ChangeTrackingOptions`                       | 变更追踪选项 (与 `Format::ChangeTracking` 一起使用) 。 |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.change_tracking_options.modes`   | `Vec<ChangeTrackingMode>` (`GitDiff`, `Json`) | 变更追踪模式。                                    |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.change_tracking_options.schema`  | `serde_json::Value`                           | `Json` 模式使用的 JSON schema。                  |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.change_tracking_options.prompt`  | `String`                                      | 用于变更追踪的 prompt。                            |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.change_tracking_options.tag`     | `String`                                      | 用于隔离历史记录的变更追踪标签。                           |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.attribute_selectors`             | `Vec<AttributeSelector>`                      | 属性提取选择器 (与 `Format::Attributes` 一起使用) 。    |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.attribute_selectors[].selector`  | `String`                                      | CSS 选择器。                                   |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.attribute_selectors[].attribute` | `String`                                      | 要提取的属性名称。                                  |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.headers`                         | `HashMap<String, String>`                     | 自定义请求头。                                    |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.include_tags`                    | `Vec<String>`                                 | 要包含的标签。                                    |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.exclude_tags`                    | `Vec<String>`                                 | 要排除的标签。                                    |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.only_main_content`               | `bool`                                        | 仅保留主要内容。                                   |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.timeout`                         | `u32`                                         | 超时时间 (毫秒) 。                                |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.wait_for`                        | `u32`                                         | 抓取前等待的时间 (毫秒) 。                            |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.mobile`                          | `bool`                                        | 模拟移动设备。                                    |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.parsers`                         | `Vec<ParserConfig>`                           | 解析器配置 (支持 PDF 选项) 。                        |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.parsers[]`                       | `ParserConfig::Simple(&quot;pdf&quot;)        | ParserConfig::Pdf { type, max_pages }`     | PDF 解析器模式及限制。 |       |        |            |         |                   |      |                |          |        |      |
+| `options.actions`                         | `Vec<Action>`                                 | 抓取前要执行的浏览器 actions。                        |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.actions[]`                       | `Action::Wait                                 | Screenshot                                 | Click         | Write | Press  | Scroll     | Scrape  | ExecuteJavascript | Pdf` | Action 变体及其字段。 |          |        |      |
+| `options.location`                        | `LocationConfig`                              | 请求的位置设置。                                   |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.location.country`                | `String`                                      | ISO 国家/地区代码。                               |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.location.languages`              | `Vec<String>`                                 | 首选语言。                                      |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.skip_tls_verification`           | `bool`                                        | 跳过 TLS 证书验证。                               |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.remove_base64_images`            | `bool`                                        | 从 markdown 输出中移除 base64 图片。                |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.fast_mode`                       | `bool`                                        | 以较低保真度实现更快抓取。                              |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.block_ads`                       | `bool`                                        | 启用广告和 Cookie 弹窗屏蔽。                         |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.proxy`                           | `ProxyType::Basic                             | Stealth                                    | Enhanced      | Auto` | 代理模式。  |            |         |                   |      |                |          |        |      |
+| `options.max_age`                         | `u32`                                         | 优先使用不超过此时长的缓存数据。                           |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.min_age`                         | `u32`                                         | 仅当缓存数据达到最小时长时才返回。                          |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.store_in_cache`                  | `bool`                                        | 将结果存入缓存。                                   |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.profile`                         | `ProfileConfig`                               | 在各会话间共享的持久化浏览器配置。                          |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.profile.name`                    | `String`                                      | 配置名称。                                      |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.profile.save_changes`            | `bool`                                        | 交互结束时保存浏览器状态。                              |               |       |        |            |         |                   |      |                |          |        |      |
+| `options.integration`                     | `String`                                      | 仅供内部使用。为 Firecrawl 埋点保留。                   |               |       |        |            |         |                   |      |                |          |        |      |
+
+<div id="interact">
+  ## 交互
+</div>
+
+### 为什么使用它
+
+当页面需要在抓取开始后执行浏览器 actions 或运行代码时，请使用交互 (例如点击、填写表单或按脚本执行步骤) 。
+
+### 推荐的 SDK 方法
+
+`client.interact(job_id, options)`
+
+<div id="simple-example">
+  ### 简单示例
+</div>
+
+```rust
+use firecrawl::v2::{Client, ScrapeOptions, Format, ScrapeExecuteOptions};
+
+let doc = client
+    .scrape("https://example.com", ScrapeOptions {
+        formats: Some(vec![Format::Markdown]),
+        ..Default::default()
+    })
+    .await?;
+
+let job_id = doc
+    .metadata
+    .as_ref()
+    .and_then(|m| m.scrape_id.clone())
+    .expect("Missing scrape_id");
+
+let result = client
+    .interact(job_id, ScrapeExecuteOptions {
+        prompt: Some("Click the pricing tab and summarize the plans.".to_string()),
+        language: None,
+        ..Default::default()
+    })
+    .await?;
+```
+
+<div id="complex-example">
+  ### 复杂示例
+</div>
+
+```rust
+use firecrawl::v2::{Client, ScrapeExecuteOptions, ScrapeExecuteLanguage};
+
+let result = client
+    .interact(
+        "<scrape_job_id>",
+        ScrapeExecuteOptions {
+            code: Some("console.log(await page.title());".to_string()),
+            language: Some(ScrapeExecuteLanguage::Node),
+            timeout: Some(60),
+            ..Default::default()
+        },
+    )
+    .await?;
+```
+
+<div id="parameters">
+  ### 参数
+</div>
+
+| 参数                 | 类型 / 选项                                            | 描述                                         |
+| ------------------ | -------------------------------------------------- | ------------------------------------------ |
+| `job_id`           | `&str`                                             | 来自 `document.metadata.scrape_id` 的抓取任务 ID。 |
+| `options.code`     | `String`                                           | 在浏览器会话中执行的代码。若未提供 `prompt`，则为必填。           |
+| `options.prompt`   | `String`                                           | 提供给浏览器代理的自然语言指令。若未提供 `code`，则为必填。          |
+| `options.language` | `ScrapeExecuteLanguage` (`Python`, `Node`, `Bash`) | 执行语言。省略时默认为 `Node`。                        |
+| `options.timeout`  | `u32`                                              | 执行超时时间 (秒) 。                               |
+| `options.origin`   | `String`                                           | 仅供内部使用。保留用于 Firecrawl 埋点。                  |
+
+<div id="notes">
+  ## 说明
+</div>
+
+* 已弃用别名：`scrape_execute`、`stop_interactive_browser` 和 `delete_scrape_browser` 对应 `interact` 和 `stop_interaction`。
+* Rust 结构体字段使用 snake&#95;case，但会通过 serde 序列化为 camelCase 的 API 字段。
+
+<div id="source-of-truth">
+  ## 权威来源
+</div>
+
+* `firecrawl/apps/rust-sdk/Cargo.toml`
+* `firecrawl/apps/rust-sdk/src/v2/client.rs`
+* `firecrawl/apps/rust-sdk/src/v2/search.rs`
+* `firecrawl/apps/rust-sdk/src/v2/scrape.rs`
+* `firecrawl/apps/rust-sdk/src/v2/types.rs`
+* `firecrawl-docs/api-reference/v2-openapi.json`
