@@ -1,0 +1,144 @@
+---
+title: "SvelteKit"
+description: "Use Firecrawl with SvelteKit to scrape, search, and interact with web data in your Svelte application."
+og:title: "SvelteKit Quickstart | Firecrawl"
+og:description: "Use Firecrawl with SvelteKit to scrape, search, and interact with web data in your Svelte application."
+---
+
+## Prerequisites
+
+- SvelteKit project
+- A Firecrawl API key — [get one free](https://www.firecrawl.dev/app/api-keys)
+
+## Install the SDK
+
+```bash
+npm install @mendable/firecrawl-js
+```
+
+Add your API key to `.env`:
+
+```bash
+FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+```
+
+## Search the web
+
+Create a form action in `src/routes/search/+page.server.ts`:
+
+```typescript
+import Firecrawl from "@mendable/firecrawl-js";
+import { FIRECRAWL_API_KEY } from "$env/static/private";
+
+const firecrawl = new Firecrawl({ apiKey: FIRECRAWL_API_KEY });
+
+export const actions = {
+  default: async ({ request }) => {
+    const data = await request.formData();
+    const query = data.get("query") as string;
+    const results = await firecrawl.search(query, { limit: 5 });
+    return { results: (results.web || []).map((r) => ({ title: r.title, url: r.url })) };
+  },
+};
+```
+
+Wire it up in `src/routes/search/+page.svelte`:
+
+```svelte
+<script>
+  export let form;
+</script>
+
+<form method="POST">
+  <input name="query" placeholder="Search the web..." />
+  <button>Search</button>
+</form>
+
+{#if form?.results}
+  {#each form.results as result}
+    <div><a href={result.url}>{result.title}</a></div>
+  {/each}
+{/if}
+```
+
+## Scrape a page
+
+Fetch data in a load function at `src/routes/scrape/+page.server.ts`:
+
+```typescript
+import Firecrawl from "@mendable/firecrawl-js";
+import { FIRECRAWL_API_KEY } from "$env/static/private";
+
+const firecrawl = new Firecrawl({ apiKey: FIRECRAWL_API_KEY });
+
+export async function load({ url }) {
+  const target = url.searchParams.get("url");
+  if (!target) return { markdown: null };
+
+  const result = await firecrawl.scrape(target);
+  return { markdown: result.markdown };
+}
+```
+
+Display it in `src/routes/scrape/+page.svelte`:
+
+```svelte
+<script>
+  export let data;
+</script>
+
+{#if data.markdown}
+  <pre>{data.markdown}</pre>
+{:else}
+  <p>Pass ?url= to scrape a page</p>
+{/if}
+```
+
+## Interact with a page
+
+Create a server endpoint at `src/routes/api/interact/+server.ts`:
+
+```typescript
+import { json } from "@sveltejs/kit";
+import Firecrawl from "@mendable/firecrawl-js";
+import { FIRECRAWL_API_KEY } from "$env/static/private";
+
+const firecrawl = new Firecrawl({ apiKey: FIRECRAWL_API_KEY });
+
+export async function POST() {
+  const result = await firecrawl.scrape("https://www.amazon.com", {
+    formats: ["markdown"],
+  });
+
+  const scrapeId = result.metadata?.scrapeId;
+
+  await firecrawl.interact(scrapeId, {
+    prompt: "Search for iPhone 16 Pro Max",
+  });
+
+  const response = await firecrawl.interact(scrapeId, {
+    prompt: "Click on the first result and tell me the price",
+  });
+
+  await firecrawl.stopInteraction(scrapeId);
+
+  return json({ output: response.output });
+}
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Scrape docs" icon="file-lines" href="/features/scrape">
+    All scrape options including formats, actions, and proxies
+  </Card>
+  <Card title="Search docs" icon="magnifying-glass" href="/features/search">
+    Search the web and get full page content
+  </Card>
+  <Card title="Interact docs" icon="hand-pointer" href="/features/interact">
+    Click, fill forms, and extract dynamic content
+  </Card>
+  <Card title="Node SDK reference" icon="node" href="/sdks/node">
+    Full SDK reference with crawl, map, batch scrape, and more
+  </Card>
+</CardGroup>

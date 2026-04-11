@@ -1,0 +1,191 @@
+---
+title: "ASP.NET Core"
+description: "Use Firecrawl with ASP.NET Core to search, scrape, and interact with web data using the REST API."
+og:title: "ASP.NET Core Quickstart | Firecrawl"
+og:description: "Use Firecrawl with ASP.NET Core to search, scrape, and interact with web data using the REST API."
+---
+
+## Prerequisites
+
+- .NET 6.0+
+- A Firecrawl API key — [get one free](https://www.firecrawl.dev/app/api-keys)
+
+## Configuration
+
+Add your API key to `appsettings.json`:
+
+```json
+{
+  "Firecrawl": {
+    "ApiKey": "fc-YOUR-API-KEY",
+    "BaseUrl": "https://api.firecrawl.dev/v2"
+  }
+}
+```
+
+Or use environment variables / user secrets:
+
+```bash
+export Firecrawl__ApiKey=fc-YOUR-API-KEY
+```
+
+## Create a service
+
+Create `Services/FirecrawlService.cs`:
+
+```csharp
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
+
+public class FirecrawlService
+{
+    private readonly HttpClient _http;
+    private readonly string _baseUrl;
+
+    public FirecrawlService(IConfiguration config)
+    {
+        _baseUrl = config["Firecrawl:BaseUrl"] ?? "https://api.firecrawl.dev/v2";
+        _http = new HttpClient();
+        _http.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", config["Firecrawl:ApiKey"]);
+    }
+
+    public async Task<JsonDocument> SearchAsync(string query, int limit = 5)
+    {
+        var content = new StringContent(
+            JsonSerializer.Serialize(new { query, limit }),
+            Encoding.UTF8, "application/json");
+
+        var response = await _http.PostAsync($"{_baseUrl}/search", content);
+        response.EnsureSuccessStatusCode();
+        return JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+    }
+
+    public async Task<JsonDocument> ScrapeAsync(string url)
+    {
+        var content = new StringContent(
+            JsonSerializer.Serialize(new { url }),
+            Encoding.UTF8, "application/json");
+
+        var response = await _http.PostAsync($"{_baseUrl}/scrape", content);
+        response.EnsureSuccessStatusCode();
+        return JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+    }
+
+    public async Task<JsonDocument> InteractAsync(string url, string prompt, string? followUp = null)
+    {
+        // 1. Scrape to open a browser session
+        var scrapeContent = new StringContent(
+            JsonSerializer.Serialize(new { url, formats = new[] { "markdown" } }),
+            Encoding.UTF8, "application/json");
+
+        var scrapeRes = await _http.PostAsync($"{_baseUrl}/scrape", scrapeContent);
+        scrapeRes.EnsureSuccessStatusCode();
+        var scrapeDoc = JsonDocument.Parse(await scrapeRes.Content.ReadAsStringAsync());
+        var scrapeId = scrapeDoc.RootElement
+            .GetProperty("data").GetProperty("metadata").GetProperty("scrapeId").GetString();
+
+        // 2. Send first prompt
+        var firstPrompt = new StringContent(
+            JsonSerializer.Serialize(new { prompt }),
+            Encoding.UTF8, "application/json");
+        await _http.PostAsync($"{_baseUrl}/scrape/{scrapeId}/interact", firstPrompt);
+
+        // 3. Send follow-up prompt
+        JsonDocument? result = null;
+        if (followUp != null)
+        {
+            var followUpContent = new StringContent(
+                JsonSerializer.Serialize(new { prompt = followUp }),
+                Encoding.UTF8, "application/json");
+            var followUpRes = await _http.PostAsync(
+                $"{_baseUrl}/scrape/{scrapeId}/interact", followUpContent);
+            followUpRes.EnsureSuccessStatusCode();
+            result = JsonDocument.Parse(await followUpRes.Content.ReadAsStringAsync());
+        }
+
+        // 4. Close the session
+        await _http.DeleteAsync($"{_baseUrl}/scrape/{scrapeId}/interact");
+
+        return result ?? scrapeDoc;
+    }
+}
+```
+
+## Register and use
+
+In `Program.cs`:
+
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddSingleton<FirecrawlService>();
+
+var app = builder.Build();
+
+app.MapPost("/api/search", async (FirecrawlService firecrawl, SearchRequest req) =>
+{
+    var result = await firecrawl.SearchAsync(req.Query, req.Limit);
+    return Results.Ok(result.RootElement);
+});
+
+app.MapPost("/api/scrape", async (FirecrawlService firecrawl, ScrapeRequest req) =>
+{
+    var result = await firecrawl.ScrapeAsync(req.Url);
+    return Results.Ok(result.RootElement);
+});
+
+app.MapPost("/api/interact", async (FirecrawlService firecrawl, InteractRequest req) =>
+{
+    var result = await firecrawl.InteractAsync(req.Url, req.Prompt, req.FollowUp);
+    return Results.Ok(result.RootElement);
+});
+
+app.Run();
+
+record SearchRequest(string Query, int Limit = 5);
+record ScrapeRequest(string Url);
+record InteractRequest(string Url, string Prompt, string? FollowUp = null);
+```
+
+## Run it
+
+```bash
+dotnet run
+```
+
+## Test it
+
+```bash
+# Search the web
+curl -X POST http://localhost:5000/api/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "firecrawl web scraping"}'
+
+# Scrape a page
+curl -X POST http://localhost:5000/api/scrape \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}'
+
+# Interact with a page
+curl -X POST http://localhost:5000/api/interact \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.amazon.com", "prompt": "Search for iPhone 16 Pro Max", "followUp": "Click on the first result and tell me the price"}'
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Search docs" icon="magnifying-glass" href="/features/search">
+    Search the web and get full page content
+  </Card>
+  <Card title="Scrape docs" icon="file-lines" href="/features/scrape">
+    All scrape options including formats, actions, and proxies
+  </Card>
+  <Card title="Interact docs" icon="hand-pointer" href="/features/interact">
+    Click, fill forms, and extract dynamic content
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/v2-introduction">
+    Complete REST API documentation
+  </Card>
+</CardGroup>
