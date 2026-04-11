@@ -1,0 +1,143 @@
+---
+title: "Rails"
+description: "Use Firecrawl with Ruby on Rails to scrape, search, and interact with web data using the REST API."
+og:title: "Rails Quickstart | Firecrawl"
+og:description: "Use Firecrawl with Ruby on Rails to scrape, search, and interact with web data using the REST API."
+---
+
+## Prerequisites
+
+- Ruby 3.0+ and Rails 7+
+- A Firecrawl API key — [get one free](https://www.firecrawl.dev/app/api-keys)
+
+## Configuration
+
+Add your API key to your Rails credentials or environment:
+
+```bash
+export FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+```
+
+## Create a service
+
+Create `app/services/firecrawl_service.rb`:
+
+```ruby
+require "net/http"
+require "json"
+require "uri"
+
+class FirecrawlService
+  BASE_URL = "https://api.firecrawl.dev/v2"
+
+  def initialize(api_key: ENV.fetch("FIRECRAWL_API_KEY"))
+    @api_key = api_key
+  end
+
+  def scrape(url, **options)
+    post("/scrape", { url: url }.merge(options))
+  end
+
+  def search(query, limit: 5)
+    post("/search", { query: query, limit: limit })
+  end
+
+  private
+
+  def post(endpoint, payload)
+    uri = URI("#{BASE_URL}#{endpoint}")
+    request = Net::HTTP::Post.new(uri)
+    request["Authorization"] = "Bearer #{@api_key}"
+    request["Content-Type"] = "application/json"
+    request.body = payload.to_json
+
+    response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true) do |http|
+      http.request(request)
+    end
+
+    JSON.parse(response.body)
+  end
+end
+```
+
+## Create a controller
+
+Generate a controller:
+
+```bash
+rails generate controller Firecrawl scrape search --skip-routes
+```
+
+Edit `app/controllers/firecrawl_controller.rb`:
+
+```ruby
+class FirecrawlController < ApplicationController
+  skip_before_action :verify_authenticity_token
+
+  def scrape
+    service = FirecrawlService.new
+    result = service.scrape(params.require(:url))
+    render json: result
+  end
+
+  def search
+    service = FirecrawlService.new
+    result = service.search(params.require(:query), limit: params.fetch(:limit, 5).to_i)
+    render json: result
+  end
+end
+```
+
+## Add routes
+
+In `config/routes.rb`:
+
+```ruby
+Rails.application.routes.draw do
+  post "api/scrape", to: "firecrawl#scrape"
+  post "api/search", to: "firecrawl#search"
+end
+```
+
+## Test it
+
+```bash
+rails server
+
+curl -X POST http://localhost:3000/api/scrape \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}'
+```
+
+## Rake task
+
+Use Firecrawl from the command line. Create `lib/tasks/scrape.rake`:
+
+```ruby
+desc "Scrape a URL and print the markdown"
+task :scrape, [:url] => :environment do |_t, args|
+  result = FirecrawlService.new.scrape(args[:url])
+  puts result.dig("data", "markdown")
+end
+```
+
+```bash
+rails scrape["https://example.com"]
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Scrape docs" icon="file-lines" href="/features/scrape">
+    All scrape options including formats, actions, and proxies
+  </Card>
+  <Card title="Search docs" icon="magnifying-glass" href="/features/search">
+    Search the web and get full page content
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/v2-introduction">
+    Complete REST API documentation
+  </Card>
+  <Card title="Interact docs" icon="hand-pointer" href="/features/interact">
+    Click, fill forms, and extract dynamic content
+  </Card>
+</CardGroup>
