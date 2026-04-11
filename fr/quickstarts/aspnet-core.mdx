@@ -1,0 +1,208 @@
+---
+title: "ASP.NET Core"
+description: "Utilisez Firecrawl avec ASP.NET Core pour rechercher, scraper et interagir avec les données du Web via l’API REST."
+og:title: "ASP.NET Core : démarrage rapide | Firecrawl"
+og:description: "Utilisez Firecrawl avec ASP.NET Core pour rechercher, scraper et interagir avec les données du Web via l’API REST."
+---
+
+<div id="prerequisites">
+  ## Prérequis
+</div>
+
+* .NET 6.0+
+* Une clé API Firecrawl — [obtenez-en une gratuitement](https://www.firecrawl.dev/app/api-keys)
+
+<div id="configuration">
+  ## Configuration
+</div>
+
+Ajoutez votre clé API dans `appsettings.json` :
+
+```json
+{
+  "Firecrawl": {
+    "ApiKey": "fc-YOUR-API-KEY",
+    "BaseUrl": "https://api.firecrawl.dev/v2"
+  }
+}
+```
+
+Ou utilisez des variables d’environnement / des secrets utilisateur :
+
+```bash
+export Firecrawl__ApiKey=fc-YOUR-API-KEY
+```
+
+<div id="create-a-service">
+  ## Créer un service
+</div>
+
+Créez `Services/FirecrawlService.cs` :
+
+```csharp
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
+
+public class FirecrawlService
+{
+    private readonly HttpClient _http;
+    private readonly string _baseUrl;
+
+    public FirecrawlService(IConfiguration config)
+    {
+        _baseUrl = config["Firecrawl:BaseUrl"] ?? "https://api.firecrawl.dev/v2";
+        _http = new HttpClient();
+        _http.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", config["Firecrawl:ApiKey"]);
+    }
+
+    public async Task<JsonDocument> SearchAsync(string query, int limit = 5)
+    {
+        var content = new StringContent(
+            JsonSerializer.Serialize(new { query, limit }),
+            Encoding.UTF8, "application/json");
+
+        var response = await _http.PostAsync($"{_baseUrl}/search", content);
+        response.EnsureSuccessStatusCode();
+        return JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+    }
+
+    public async Task<JsonDocument> ScrapeAsync(string url)
+    {
+        var content = new StringContent(
+            JsonSerializer.Serialize(new { url }),
+            Encoding.UTF8, "application/json");
+
+        var response = await _http.PostAsync($"{_baseUrl}/scrape", content);
+        response.EnsureSuccessStatusCode();
+        return JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+    }
+
+    public async Task<JsonDocument> InteractAsync(string url, string prompt, string? followUp = null)
+    {
+        // 1. Scraper pour ouvrir une session de navigateur
+        var scrapeContent = new StringContent(
+            JsonSerializer.Serialize(new { url, formats = new[] { "markdown" } }),
+            Encoding.UTF8, "application/json");
+
+        var scrapeRes = await _http.PostAsync($"{_baseUrl}/scrape", scrapeContent);
+        scrapeRes.EnsureSuccessStatusCode();
+        var scrapeDoc = JsonDocument.Parse(await scrapeRes.Content.ReadAsStringAsync());
+        var scrapeId = scrapeDoc.RootElement
+            .GetProperty("data").GetProperty("metadata").GetProperty("scrapeId").GetString();
+
+        // 2. Envoyer le premier prompt
+        var firstPrompt = new StringContent(
+            JsonSerializer.Serialize(new { prompt }),
+            Encoding.UTF8, "application/json");
+        await _http.PostAsync($"{_baseUrl}/scrape/{scrapeId}/interact", firstPrompt);
+
+        // 3. Envoyer le prompt de suivi
+        JsonDocument? result = null;
+        if (followUp != null)
+        {
+            var followUpContent = new StringContent(
+                JsonSerializer.Serialize(new { prompt = followUp }),
+                Encoding.UTF8, "application/json");
+            var followUpRes = await _http.PostAsync(
+                $"{_baseUrl}/scrape/{scrapeId}/interact", followUpContent);
+            followUpRes.EnsureSuccessStatusCode();
+            result = JsonDocument.Parse(await followUpRes.Content.ReadAsStringAsync());
+        }
+
+        // 4. Fermer la session
+        await _http.DeleteAsync($"{_baseUrl}/scrape/{scrapeId}/interact");
+
+        return result ?? scrapeDoc;
+    }
+}
+```
+
+<div id="register-and-use">
+  ## Enregistrer et utiliser
+</div>
+
+Dans `Program.cs` :
+
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddSingleton<FirecrawlService>();
+
+var app = builder.Build();
+
+app.MapPost("/api/search", async (FirecrawlService firecrawl, SearchRequest req) =>
+{
+    var result = await firecrawl.SearchAsync(req.Query, req.Limit);
+    return Results.Ok(result.RootElement);
+});
+
+app.MapPost("/api/scrape", async (FirecrawlService firecrawl, ScrapeRequest req) =>
+{
+    var result = await firecrawl.ScrapeAsync(req.Url);
+    return Results.Ok(result.RootElement);
+});
+
+app.MapPost("/api/interact", async (FirecrawlService firecrawl, InteractRequest req) =>
+{
+    var result = await firecrawl.InteractAsync(req.Url, req.Prompt, req.FollowUp);
+    return Results.Ok(result.RootElement);
+});
+
+app.Run();
+
+record SearchRequest(string Query, int Limit = 5);
+record ScrapeRequest(string Url);
+record InteractRequest(string Url, string Prompt, string? FollowUp = null);
+```
+
+<div id="run-it">
+  ## Lancez-le
+</div>
+
+```bash
+dotnet run
+```
+
+<div id="test-it">
+  ## Essayez-le
+</div>
+
+```bash
+# Rechercher sur le web
+curl -X POST http://localhost:5000/api/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "firecrawl web scraping"}'
+
+# Scraper une page
+curl -X POST http://localhost:5000/api/scrape \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}'
+
+# Interagir avec une page
+curl -X POST http://localhost:5000/api/interact \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.amazon.com", "prompt": "Search for iPhone 16 Pro Max", "followUp": "Click on the first result and tell me the price"}'
+```
+
+<div id="next-steps">
+  ## Étapes suivantes
+</div>
+
+<CardGroup cols={2}>
+  <Card title="Docs Search" icon="magnifying-glass" href="/fr/features/search">
+    Recherchez sur le web et obtenez le contenu complet des pages
+  </Card>
+
+  <Card title="Docs Scrape" icon="file-lines" href="/fr/features/scrape">
+    Toutes les options de scrape, y compris les formats, les actions et les proxys
+  </Card>
+
+  <Card title="Docs Interact" icon="hand-pointer" href="/fr/features/interact">
+    Cliquez, remplissez des formulaires et extrayez du contenu dynamique
+  </Card>
+
+  <Card title="Référence API" icon="code" href="/fr/api-reference/v2-introduction">
+    Documentation complète de l’API REST
+  </Card>
+</CardGroup>

@@ -1,0 +1,148 @@
+---
+title: "Rust"
+description: "在 Rust 中开始使用 Firecrawl。使用 firecrawl crate 搜索、抓取网页数据并与之交互。"
+og:title: "Rust 快速入门 | Firecrawl"
+og:description: "在 Rust 中开始使用 Firecrawl。使用 firecrawl crate 搜索、抓取网页数据并与之交互。"
+---
+
+<div id="prerequisites">
+  ## 前置条件
+</div>
+
+* Rust 1.70+，并已安装 Cargo
+* 一个 Firecrawl API 密钥——[免费获取](https://www.firecrawl.dev/app/api-keys)
+
+<div id="install-the-crate">
+  ## 安装 crate
+</div>
+
+将 `firecrawl` 添加到 `Cargo.toml` 中：
+
+```toml
+[dependencies]
+firecrawl = "1"
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["json"] }
+```
+
+<div id="search-the-web">
+  ## 进行网页搜索
+</div>
+
+```rust
+use firecrawl::v2::Client;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = Client::new("fc-YOUR-API-KEY")?;
+    let results = client.search("firecrawl web scraping", None).await?;
+
+    for result in &results {
+        println!("{} - {}", result.title.as_deref().unwrap_or(""), result.url.as_deref().unwrap_or(""));
+    }
+    Ok(())
+}
+```
+
+<div id="scrape-a-page">
+  ## 抓取网页
+</div>
+
+```rust
+let doc = client.scrape("https://example.com", None).await?;
+println!("{}", doc.markdown.unwrap_or_default());
+```
+
+<Accordion title="示例响应">
+  ```json
+  {
+    "markdown": "# Example Domain\n\nThis domain is for use in illustrative examples...",
+    "metadata": {
+      "title": "Example Domain",
+      "sourceURL": "https://example.com"
+    }
+  }
+  ```
+</Accordion>
+
+<div id="interact-with-a-page">
+  ## 与页面交互
+</div>
+
+交互 API 通过 HTTP 接收基于 prompt 的命令。先抓取页面以获取 `scrapeId`，然后发送 prompt 来控制浏览器会话：
+
+```rust
+use reqwest::Client as HttpClient;
+use serde_json::json;
+
+let api_key = "fc-YOUR-API-KEY";
+let http = HttpClient::new();
+
+// 1. 抓取页面以开启浏览器会话
+let scrape_res: serde_json::Value = http
+    .post("https://api.firecrawl.dev/v2/scrape")
+    .bearer_auth(api_key)
+    .json(&json!({ "url": "https://www.amazon.com", "formats": ["markdown"] }))
+    .send().await?
+    .json().await?;
+
+let scrape_id = scrape_res["data"]["metadata"]["scrapeId"]
+    .as_str().unwrap();
+
+// 2. 发送 prompt 进行交互
+http.post(format!("https://api.firecrawl.dev/v2/scrape/{scrape_id}/interact"))
+    .bearer_auth(api_key)
+    .json(&json!({ "prompt": "Search for iPhone 16 Pro Max" }))
+    .send().await?;
+
+let interact_res: serde_json::Value = http
+    .post(format!("https://api.firecrawl.dev/v2/scrape/{scrape_id}/interact"))
+    .bearer_auth(api_key)
+    .json(&json!({ "prompt": "Click on the first result and tell me the price" }))
+    .send().await?
+    .json().await?;
+
+println!("{}", interact_res);
+
+// 3. 关闭会话
+http.delete(format!("https://api.firecrawl.dev/v2/scrape/{scrape_id}/interact"))
+    .bearer_auth(api_key)
+    .send().await?;
+```
+
+<div id="environment-variable">
+  ## 环境变量
+</div>
+
+设置 `FIRECRAWL_API_KEY`，不要直接传入 API 密钥：
+
+```bash
+export FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+```
+
+<Note>
+  `firecrawl` crate 也通过 `FirecrawlApp` 支持 v1 API。完整的 API 说明请参见 [Rust SDK 文档](/zh/sdks/rust)。
+</Note>
+
+<div id="next-steps">
+  ## 后续步骤
+</div>
+
+<CardGroup cols={2}>
+  <Card title="Search 文档" icon="magnifying-glass" href="/zh/features/search">
+    进行网页搜索并获取完整页面内容
+  </Card>
+
+  <Card title="抓取 文档" icon="file-lines" href="/zh/features/scrape">
+    包含所有 抓取 选项，包括 formats、actions 和代理
+  </Card>
+
+  <Card title="交互文档" icon="hand-pointer" href="/zh/features/interact">
+    点击、填写表单并提取动态内容
+  </Card>
+
+  <Card title="Rust SDK 参考" icon="rust" href="/zh/sdks/rust">
+    完整的 SDK 参考，包含爬取、map 等功能
+  </Card>
+</CardGroup>

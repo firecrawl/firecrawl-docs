@@ -1,0 +1,165 @@
+---
+title: "Django"
+description: "Use Firecrawl with Django to scrape, search, and interact with web data in your Python web application."
+og:title: "Django Quickstart | Firecrawl"
+og:description: "Use Firecrawl with Django to scrape, search, and interact with web data in your Python web application."
+---
+
+## Prerequisites
+
+- Django 4+ project
+- A Firecrawl API key — [get one free](https://www.firecrawl.dev/app/api-keys)
+
+## Install the SDK
+
+```bash
+pip install firecrawl-py
+```
+
+Add your API key to your Django settings or environment:
+
+```bash
+export FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+```
+
+## Create views
+
+Add search, scrape, and interact views to your Django app. In `views.py`:
+
+```python
+import json
+import os
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
+from firecrawl import Firecrawl
+
+firecrawl = Firecrawl(api_key=os.environ["FIRECRAWL_API_KEY"])
+
+
+@csrf_exempt
+@require_POST
+def search_view(request):
+    body = json.loads(request.body)
+    results = firecrawl.search(body["query"], limit=body.get("limit", 5))
+    return JsonResponse(
+        [{"title": r.title, "url": r.url} for r in results.web],
+        safe=False,
+    )
+
+
+@csrf_exempt
+@require_POST
+def scrape_view(request):
+    body = json.loads(request.body)
+    result = firecrawl.scrape(body["url"])
+    return JsonResponse({
+        "markdown": result.markdown,
+        "metadata": result.metadata,
+    })
+
+
+@csrf_exempt
+@require_POST
+def interact_start_view(request):
+    body = json.loads(request.body)
+    result = firecrawl.scrape(body["url"], formats=["markdown"])
+    return JsonResponse({"scrape_id": result.metadata.scrape_id})
+
+
+@csrf_exempt
+@require_POST
+def interact_view(request):
+    body = json.loads(request.body)
+    response = firecrawl.interact(body["scrape_id"], prompt=body["prompt"])
+    return JsonResponse({"output": response.output})
+
+
+@csrf_exempt
+@require_POST
+def interact_stop_view(request):
+    body = json.loads(request.body)
+    firecrawl.stop_interaction(body["scrape_id"])
+    return JsonResponse({"status": "stopped"})
+```
+
+## Wire up URLs
+
+In `urls.py`:
+
+```python
+from django.urls import path
+from . import views
+
+urlpatterns = [
+    path("api/search/", views.search_view),
+    path("api/scrape/", views.scrape_view),
+    path("api/interact/start/", views.interact_start_view),
+    path("api/interact/", views.interact_view),
+    path("api/interact/stop/", views.interact_stop_view),
+]
+```
+
+## Test it
+
+```bash
+python manage.py runserver
+
+# Search the web
+curl -X POST http://localhost:8000/api/search/ \
+  -H "Content-Type: application/json" \
+  -d '{"query": "firecrawl web scraping", "limit": 5}'
+
+# Scrape a page
+curl -X POST http://localhost:8000/api/scrape/ \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}'
+
+# Start an interactive session
+curl -X POST http://localhost:8000/api/interact/start/ \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.amazon.com"}'
+```
+
+## Management command
+
+Use Firecrawl in a Django management command for scripts and data pipelines. Create `management/commands/scrape.py`:
+
+```python
+import os
+from django.core.management.base import BaseCommand
+from firecrawl import Firecrawl
+
+
+class Command(BaseCommand):
+    help = "Scrape a URL and print the markdown"
+
+    def add_arguments(self, parser):
+        parser.add_argument("url", type=str)
+
+    def handle(self, *args, **options):
+        firecrawl = Firecrawl(api_key=os.environ["FIRECRAWL_API_KEY"])
+        result = firecrawl.scrape(options["url"])
+        self.stdout.write(result.markdown)
+```
+
+```bash
+python manage.py scrape https://example.com
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Scrape docs" icon="file-lines" href="/features/scrape">
+    All scrape options including formats, actions, and proxies
+  </Card>
+  <Card title="Search docs" icon="magnifying-glass" href="/features/search">
+    Search the web and get full page content
+  </Card>
+  <Card title="Interact docs" icon="hand-pointer" href="/features/interact">
+    Click, fill forms, and extract dynamic content
+  </Card>
+  <Card title="Python SDK reference" icon="python" href="/sdks/python">
+    Full SDK reference with crawl, map, async, and more
+  </Card>
+</CardGroup>

@@ -1,0 +1,196 @@
+---
+title: "Rails"
+description: "Usa Firecrawl con Ruby on Rails para buscar, hacer scraping e interactuar con datos de la web mediante la API REST."
+og:title: "Inicio rápido de Rails | Firecrawl"
+og:description: "Usa Firecrawl con Ruby on Rails para buscar, hacer scraping e interactuar con datos de la web mediante la API REST."
+---
+
+<div id="prerequisites">
+  ## Requisitos previos
+</div>
+
+* Ruby 3.0+ y Rails 7+
+* Una clave de API de Firecrawl: [consigue una gratis](https://www.firecrawl.dev/app/api-keys)
+
+<div id="configuration">
+  ## Configuración
+</div>
+
+Agrega tu clave de API a las credenciales de Rails o al entorno:
+
+```bash
+export FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+```
+
+<div id="create-a-service">
+  ## Crear un servicio
+</div>
+
+Crea `app/services/firecrawl_service.rb`:
+
+```ruby
+require "net/http"
+require "json"
+require "uri"
+
+class FirecrawlService
+  BASE_URL = "https://api.firecrawl.dev/v2"
+
+  def initialize(api_key: ENV.fetch("FIRECRAWL_API_KEY"))
+    @api_key = api_key
+  end
+
+  def search(query, limit: 5)
+    post("/search", { query: query, limit: limit })
+  end
+
+  def scrape(url, **options)
+    post("/scrape", { url: url }.merge(options))
+  end
+
+  def interact(url, prompt, follow_up: nil)
+    # 1. Hacer scraping para abrir una sesión de navegador
+    scrape_result = scrape(url, formats: ["markdown"])
+    scrape_id = scrape_result.dig("data", "metadata", "scrapeId")
+
+    # 2. Enviar el primer prompt
+    post("/scrape/#{scrape_id}/interact", { prompt: prompt })
+
+    # 3. Enviar el prompt de seguimiento
+    result = nil
+    if follow_up
+      result = post("/scrape/#{scrape_id}/interact", { prompt: follow_up })
+    end
+
+    # 4. Cerrar la sesión
+    delete("/scrape/#{scrape_id}/interact")
+
+    result || scrape_result
+  end
+
+  private
+
+  def post(endpoint, payload)
+    uri = URI("#{BASE_URL}#{endpoint}")
+    request = Net::HTTP::Post.new(uri)
+    request["Authorization"] = "Bearer #{@api_key}"
+    request["Content-Type"] = "application/json"
+    request.body = payload.to_json
+
+    response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: true) do |http|
+      http.request(request)
+    end
+
+    JSON.parse(response.body)
+  end
+
+  def delete(endpoint)
+    uri = URI("#{BASE_URL}#{endpoint}")
+    request = Net::HTTP::Delete.new(uri)
+    request["Authorization"] = "Bearer #{@api_key}"
+
+    Net::HTTP.start(uri.hostname, uri.port, use_ssl: true) do |http|
+      http.request(request)
+    end
+  end
+end
+```
+
+<div id="create-a-controller">
+  ## Crear un controlador
+</div>
+
+Genera un controlador:
+
+```bash
+rails generate controller Firecrawl search scrape interact --skip-routes
+```
+
+Edita `app/controllers/firecrawl_controller.rb`:
+
+```ruby
+class FirecrawlController < ApplicationController
+  skip_before_action :verify_authenticity_token
+
+  def search
+    service = FirecrawlService.new
+    result = service.search(params.require(:query), limit: params.fetch(:limit, 5).to_i)
+    render json: result
+  end
+
+  def scrape
+    service = FirecrawlService.new
+    result = service.scrape(params.require(:url))
+    render json: result
+  end
+
+  def interact
+    service = FirecrawlService.new
+    result = service.interact(
+      params.require(:url),
+      params.require(:prompt),
+      follow_up: params[:followUp]
+    )
+    render json: result
+  end
+end
+```
+
+<div id="add-routes">
+  ## Añadir rutas
+</div>
+
+En `config/routes.rb`:
+
+```ruby
+Rails.application.routes.draw do
+  post "api/search", to: "firecrawl#search"
+  post "api/scrape", to: "firecrawl#scrape"
+  post "api/interact", to: "firecrawl#interact"
+end
+```
+
+<div id="test-it">
+  ## Pruébalo
+</div>
+
+```bash
+rails server
+
+# Buscar en la web
+curl -X POST http://localhost:3000/api/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "firecrawl web scraping"}'
+
+# Hacer scraping de una página
+curl -X POST http://localhost:3000/api/scrape \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}'
+
+# Interactuar con una página
+curl -X POST http://localhost:3000/api/interact \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.amazon.com", "prompt": "Search for iPhone 16 Pro Max", "followUp": "Click on the first result and tell me the price"}'
+```
+
+<div id="next-steps">
+  ## Próximos pasos
+</div>
+
+<CardGroup cols={2}>
+  <Card title="Documentación de Search" icon="magnifying-glass" href="/es/features/search">
+    Buscar en la web y obtener el contenido completo de la página
+  </Card>
+
+  <Card title="Documentación de scraping" icon="file-lines" href="/es/features/scrape">
+    Todas las opciones de scraping, incluidos formatos, acciones y proxies
+  </Card>
+
+  <Card title="Documentación de Interact" icon="hand-pointer" href="/es/features/interact">
+    Haz clic, completa formularios y extrae contenido dinámico
+  </Card>
+
+  <Card title="Referencia de la API" icon="code" href="/es/api-reference/v2-introduction">
+    Documentación completa de la API REST
+  </Card>
+</CardGroup>

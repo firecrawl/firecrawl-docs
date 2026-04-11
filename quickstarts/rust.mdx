@@ -1,0 +1,131 @@
+---
+title: "Rust"
+description: "Get started with Firecrawl in Rust. Search, scrape, and interact with web data using the firecrawl crate."
+og:title: "Rust Quickstart | Firecrawl"
+og:description: "Get started with Firecrawl in Rust. Search, scrape, and interact with web data using the firecrawl crate."
+---
+
+## Prerequisites
+
+- Rust 1.70+ with Cargo
+- A Firecrawl API key — [get one free](https://www.firecrawl.dev/app/api-keys)
+
+## Install the crate
+
+Add `firecrawl` to your `Cargo.toml`:
+
+```toml
+[dependencies]
+firecrawl = "1"
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["json"] }
+```
+
+## Search the web
+
+```rust
+use firecrawl::v2::Client;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = Client::new("fc-YOUR-API-KEY")?;
+    let results = client.search("firecrawl web scraping", None).await?;
+
+    for result in &results {
+        println!("{} - {}", result.title.as_deref().unwrap_or(""), result.url.as_deref().unwrap_or(""));
+    }
+    Ok(())
+}
+```
+
+## Scrape a page
+
+```rust
+let doc = client.scrape("https://example.com", None).await?;
+println!("{}", doc.markdown.unwrap_or_default());
+```
+
+<Accordion title="Example response">
+```json
+{
+  "markdown": "# Example Domain\n\nThis domain is for use in illustrative examples...",
+  "metadata": {
+    "title": "Example Domain",
+    "sourceURL": "https://example.com"
+  }
+}
+```
+</Accordion>
+
+## Interact with a page
+
+The interact API uses prompt-based commands over HTTP. Scrape a page to get a `scrapeId`, then send prompts to control the browser session:
+
+```rust
+use reqwest::Client as HttpClient;
+use serde_json::json;
+
+let api_key = "fc-YOUR-API-KEY";
+let http = HttpClient::new();
+
+// 1. Scrape to open a browser session
+let scrape_res: serde_json::Value = http
+    .post("https://api.firecrawl.dev/v2/scrape")
+    .bearer_auth(api_key)
+    .json(&json!({ "url": "https://www.amazon.com", "formats": ["markdown"] }))
+    .send().await?
+    .json().await?;
+
+let scrape_id = scrape_res["data"]["metadata"]["scrapeId"]
+    .as_str().unwrap();
+
+// 2. Send prompts to interact
+http.post(format!("https://api.firecrawl.dev/v2/scrape/{scrape_id}/interact"))
+    .bearer_auth(api_key)
+    .json(&json!({ "prompt": "Search for iPhone 16 Pro Max" }))
+    .send().await?;
+
+let interact_res: serde_json::Value = http
+    .post(format!("https://api.firecrawl.dev/v2/scrape/{scrape_id}/interact"))
+    .bearer_auth(api_key)
+    .json(&json!({ "prompt": "Click on the first result and tell me the price" }))
+    .send().await?
+    .json().await?;
+
+println!("{}", interact_res);
+
+// 3. Close the session
+http.delete(format!("https://api.firecrawl.dev/v2/scrape/{scrape_id}/interact"))
+    .bearer_auth(api_key)
+    .send().await?;
+```
+
+## Environment variable
+
+Set `FIRECRAWL_API_KEY` instead of passing the key directly:
+
+```bash
+export FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+```
+
+<Note>
+The `firecrawl` crate also supports the v1 API via `FirecrawlApp`. See the [Rust SDK docs](/sdks/rust) for the full API surface.
+</Note>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Search docs" icon="magnifying-glass" href="/features/search">
+    Search the web and get full page content
+  </Card>
+  <Card title="Scrape docs" icon="file-lines" href="/features/scrape">
+    All scrape options including formats, actions, and proxies
+  </Card>
+  <Card title="Interact docs" icon="hand-pointer" href="/features/interact">
+    Click, fill forms, and extract dynamic content
+  </Card>
+  <Card title="Rust SDK reference" icon="rust" href="/sdks/rust">
+    Full SDK reference with crawl, map, and more
+  </Card>
+</CardGroup>

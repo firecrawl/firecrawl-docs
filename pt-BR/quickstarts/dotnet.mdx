@@ -1,0 +1,233 @@
+---
+title: ".NET"
+description: "Comece a usar o Firecrawl com .NET. Faça scraping, buscas e interaja com dados da web usando a API REST."
+og:title: "Guia de início rápido do .NET | Firecrawl"
+og:description: "Comece a usar o Firecrawl com .NET. Faça scraping, buscas e interaja com dados da web usando a API REST."
+---
+
+<div id="prerequisites">
+  ## Pré-requisitos
+</div>
+
+* .NET 6.0+
+* Uma chave de API do Firecrawl — [obtenha uma gratuitamente](https://www.firecrawl.dev/app/api-keys)
+
+<div id="search-the-web">
+  ## Fazer uma busca na web
+</div>
+
+O Firecrawl funciona com .NET por meio da API REST, usando `HttpClient`.
+
+```csharp
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
+
+var apiKey = Environment.GetEnvironmentVariable("FIRECRAWL_API_KEY");
+var client = new HttpClient();
+client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+var content = new StringContent(
+    JsonSerializer.Serialize(new { query = "firecrawl web scraping", limit = 5 }),
+    Encoding.UTF8,
+    "application/json"
+);
+
+var response = await client.PostAsync("https://api.firecrawl.dev/v2/search", content);
+var json = await response.Content.ReadAsStringAsync();
+Console.WriteLine(json);
+```
+
+<Accordion title="Exemplo de resposta">
+  ```json
+  {
+    "success": true,
+    "data": {
+      "web": [
+        {
+          "url": "https://docs.firecrawl.dev",
+          "title": "Firecrawl Documentation",
+          "markdown": "# Firecrawl\n\nFirecrawl is a web scraping API..."
+        }
+      ]
+    }
+  }
+  ```
+</Accordion>
+
+<div id="scrape-a-page">
+  ## Fazer scraping em uma página
+</div>
+
+```csharp
+var scrapeContent = new StringContent(
+    JsonSerializer.Serialize(new { url = "https://example.com" }),
+    Encoding.UTF8,
+    "application/json"
+);
+
+var scrapeResponse = await client.PostAsync("https://api.firecrawl.dev/v2/scrape", scrapeContent);
+var scrapeJson = await scrapeResponse.Content.ReadAsStringAsync();
+
+using var doc = JsonDocument.Parse(scrapeJson);
+var markdown = doc.RootElement.GetProperty("data").GetProperty("markdown").GetString();
+Console.WriteLine(markdown);
+```
+
+<Accordion title="Exemplo de resposta">
+  ```json
+  {
+    "success": true,
+    "data": {
+      "markdown": "# Example Domain\n\nThis domain is for use in illustrative examples...",
+      "metadata": {
+        "title": "Example Domain",
+        "sourceURL": "https://example.com"
+      }
+    }
+  }
+  ```
+</Accordion>
+
+<div id="interact-with-a-page">
+  ## Interaja com uma página
+</div>
+
+Inicie uma sessão no navegador, interaja com a página usando comandos em linguagem natural e, em seguida, encerre a sessão.
+
+<div id="step-1-scrape-to-start-a-session">
+  ### Etapa 1 — Faça scraping para iniciar uma sessão
+</div>
+
+```csharp
+var sessionContent = new StringContent(
+    JsonSerializer.Serialize(new { url = "https://www.amazon.com", formats = new[] { "markdown" } }),
+    Encoding.UTF8,
+    "application/json"
+);
+
+var sessionResponse = await client.PostAsync("https://api.firecrawl.dev/v2/scrape", sessionContent);
+var sessionJson = await sessionResponse.Content.ReadAsStringAsync();
+
+using var sessionDoc = JsonDocument.Parse(sessionJson);
+var scrapeId = sessionDoc.RootElement
+    .GetProperty("data")
+    .GetProperty("metadata")
+    .GetProperty("scrapeId")
+    .GetString();
+
+Console.WriteLine($"scrapeId: {scrapeId}");
+```
+
+<div id="step-2-send-interactions">
+  ### Etapa 2 — Enviar interações
+</div>
+
+```csharp
+var interactUrl = $"https://api.firecrawl.dev/v2/scrape/{scrapeId}/interact";
+
+// Buscar um produto
+var searchBody = new StringContent(
+    JsonSerializer.Serialize(new { prompt = "Search for iPhone 16 Pro Max" }),
+    Encoding.UTF8,
+    "application/json"
+);
+
+var searchResult = await client.PostAsync(interactUrl, searchBody);
+Console.WriteLine(await searchResult.Content.ReadAsStringAsync());
+
+// Clicar no primeiro resultado
+var clickBody = new StringContent(
+    JsonSerializer.Serialize(new { prompt = "Click on the first result and tell me the price" }),
+    Encoding.UTF8,
+    "application/json"
+);
+
+var clickResult = await client.PostAsync(interactUrl, clickBody);
+Console.WriteLine(await clickResult.Content.ReadAsStringAsync());
+```
+
+<div id="step-3-stop-the-session">
+  ### Etapa 3 — Encerre a sessão
+</div>
+
+```csharp
+await client.DeleteAsync(interactUrl);
+Console.WriteLine("Sessão encerrada");
+```
+
+<div id="reusable-client-class">
+  ## Classe de cliente reutilizável
+</div>
+
+Para reutilização, encapsule a API em um cliente tipado:
+
+```csharp
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
+
+public class FirecrawlClient
+{
+    private readonly HttpClient _http;
+    private const string BaseUrl = "https://api.firecrawl.dev/v2";
+
+    public FirecrawlClient(string apiKey)
+    {
+        _http = new HttpClient();
+        _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+    }
+
+    private async Task<JsonDocument> PostAsync(string endpoint, object payload)
+    {
+        var content = new StringContent(
+            JsonSerializer.Serialize(payload),
+            Encoding.UTF8,
+            "application/json"
+        );
+
+        var response = await _http.PostAsync($"{BaseUrl}{endpoint}", content);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync();
+        return JsonDocument.Parse(json);
+    }
+
+    public async Task<JsonDocument> ScrapeAsync(string url)
+    {
+        return await PostAsync("/scrape", new { url });
+    }
+
+    public async Task<JsonDocument> SearchAsync(string query, int limit = 5)
+    {
+        return await PostAsync("/search", new { query, limit });
+    }
+}
+
+// Uso
+var firecrawl = new FirecrawlClient(Environment.GetEnvironmentVariable("FIRECRAWL_API_KEY")!);
+var result = await firecrawl.SearchAsync("firecrawl web scraping");
+Console.WriteLine(result.RootElement);
+```
+
+<div id="next-steps">
+  ## Próximos passos
+</div>
+
+<CardGroup cols={2}>
+  <Card title="Documentação de busca" icon="magnifying-glass" href="/pt-BR/features/search">
+    Faça uma busca na web e obtenha o conteúdo completo da página
+  </Card>
+
+  <Card title="Documentação de scraping" icon="file-lines" href="/pt-BR/features/scrape">
+    Todas as opções de scraping, incluindo formatos, ações e proxies
+  </Card>
+
+  <Card title="Documentação de interação" icon="hand-pointer" href="/pt-BR/features/interact">
+    Clique, preencha formulários e extraia conteúdo dinâmico
+  </Card>
+
+  <Card title="Referência da API" icon="code" href="/pt-BR/api-reference/v2-introduction">
+    Documentação completa da API REST
+  </Card>
+</CardGroup>

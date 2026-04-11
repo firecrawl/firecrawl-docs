@@ -1,0 +1,138 @@
+---
+title: "AWS Lambda"
+description: "在 AWS Lambda 无服务器函数中使用 Firecrawl，进行搜索、抓取并与网页数据交互。"
+og:title: "AWS Lambda 快速入门 | Firecrawl"
+og:description: "在 AWS Lambda 无服务器函数中使用 Firecrawl，进行搜索、抓取并与网页数据交互。"
+---
+
+<div id="prerequisites">
+  ## 前提条件
+</div>
+
+* 拥有 Lambda 访问权限的 AWS 账户
+* 一个 Firecrawl API 密钥——[免费获取](https://www.firecrawl.dev/app/api-keys)
+
+<div id="setup">
+  ## 配置
+</div>
+
+```bash
+mkdir firecrawl-lambda && cd firecrawl-lambda
+npm init -y
+npm install @mendable/firecrawl-js
+```
+
+<div id="search-the-web">
+  ## 进行网页搜索
+</div>
+
+创建包含搜索处理程序的 `index.mjs`：
+
+```javascript
+import Firecrawl from "@mendable/firecrawl-js";
+
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+
+export async function handler(event) {
+  const body = JSON.parse(event.body || "{}");
+
+  if (body.action === "search") {
+    const results = await firecrawl.search(body.query, { limit: 5 });
+    return {
+      statusCode: 200,
+      body: JSON.stringify(results),
+    };
+  }
+
+  return { statusCode: 400, body: JSON.stringify({ error: "Unknown action" }) };
+}
+```
+
+<div id="scrape-a-page">
+  ## 抓取页面
+</div>
+
+向同一个处理程序中添加一个 `scrape` action：
+
+```javascript
+if (body.action === "scrape") {
+  const result = await firecrawl.scrape(body.url);
+  return {
+    statusCode: 200,
+    body: JSON.stringify(result),
+  };
+}
+```
+
+<div id="interact-with-a-page">
+  ## 与页面交互
+</div>
+
+添加一个 `interact` 操作，以控制实时浏览器会话——点击按钮、填写表单并提取动态内容：
+
+```javascript
+if (body.action === "interact") {
+  const result = await firecrawl.scrape("https://www.amazon.com", {
+    formats: ["markdown"],
+  });
+  const scrapeId = result.metadata?.scrapeId;
+
+  await firecrawl.interact(scrapeId, {
+    prompt: "Search for iPhone 16 Pro Max",
+  });
+  const response = await firecrawl.interact(scrapeId, {
+    prompt: "Click on the first result and tell me the price",
+  });
+
+  await firecrawl.stopInteraction(scrapeId);
+  return {
+    statusCode: 200,
+    body: JSON.stringify({ output: response.output }),
+  };
+}
+```
+
+<div id="deploy">
+  ## 部署
+</div>
+
+使用 AWS CLI 进行打包和部署：
+
+```bash
+zip -r function.zip index.mjs node_modules/
+
+aws lambda create-function \
+  --function-name firecrawl-scraper \
+  --runtime nodejs20.x \
+  --handler index.handler \
+  --zip-file fileb://function.zip \
+  --role arn:aws:iam::YOUR_ACCOUNT:role/lambda-role \
+  --environment Variables="{FIRECRAWL_API_KEY=fc-YOUR-API-KEY}" \
+  --timeout 60
+```
+
+<Note>
+  将 Lambda 的超时时间设置为至少 30 秒。抓取动态页面和交互会话所需的时间可能会超过默认的 3 秒超时时间。
+</Note>
+
+<div id="next-steps">
+  ## 后续步骤
+</div>
+
+<CardGroup cols={2}>
+  <Card title="搜索文档" icon="magnifying-glass" href="/zh/features/search">
+    进行网页搜索并获取完整页面内容
+  </Card>
+
+  <Card title="抓取文档" icon="file-lines" href="/zh/features/scrape">
+    所有抓取选项，包括 formats、actions 和代理
+  </Card>
+
+  <Card title="交互文档" icon="hand-pointer" href="/zh/features/interact">
+    点击、填写表单并提取动态内容
+  </Card>
+
+  <Card title="Node SDK 参考" icon="node" href="/zh/sdks/node">
+    完整的 SDK 参考，涵盖爬取、map、批量抓取等
+  </Card>
+</CardGroup>

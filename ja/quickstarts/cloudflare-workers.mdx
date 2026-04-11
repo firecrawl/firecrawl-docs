@@ -1,0 +1,139 @@
+---
+title: "Cloudflare Workers"
+description: "Cloudflare Workers で Firecrawl を使い、エッジで Web データを検索、スクレイピング、Interact します。"
+og:title: "Cloudflare Workers クイックスタート | Firecrawl"
+og:description: "Cloudflare Workers で Firecrawl を使い、エッジで Web データを検索、スクレイピング、Interact します。"
+---
+
+<div id="prerequisites">
+  ## 前提条件
+</div>
+
+* Wrangler CLI (`npm install -g wrangler`)
+* Firecrawl APIキー — [無料で取得する](https://www.firecrawl.dev/app/api-keys)
+
+<div id="setup">
+  ## セットアップ
+</div>
+
+```bash
+npm create cloudflare@latest my-scraper
+cd my-scraper
+npm install @mendable/firecrawl-js
+```
+
+APIキーをシークレットとして追加します:
+
+```bash
+wrangler secret put FIRECRAWL_API_KEY
+```
+
+<div id="search-the-web">
+  ## Webを検索する
+</div>
+
+Webを検索し、ページ全体のコンテンツを含む結果を返すハンドラーを作成します。
+
+`src/index.ts` を編集します:
+
+```typescript
+import Firecrawl from "@mendable/firecrawl-js";
+
+export interface Env {
+  FIRECRAWL_API_KEY: string;
+}
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const firecrawl = new Firecrawl({ apiKey: env.FIRECRAWL_API_KEY });
+    const url = new URL(request.url);
+
+    if (request.method === "POST" && url.pathname === "/search") {
+      const { query } = (await request.json()) as { query: string };
+      const results = await firecrawl.search(query, { limit: 5 });
+      return Response.json(results);
+    }
+
+    return new Response("Not found", { status: 404 });
+  },
+};
+```
+
+<div id="scrape-a-page">
+  ## ページをスクレイピングする
+</div>
+
+任意のURLからクリーンなMarkdownを抽出するため、`/scrape` ルートを追加します。
+
+```typescript
+if (request.method === "POST" && url.pathname === "/scrape") {
+  const { url: targetUrl } = (await request.json()) as { url: string };
+  const result = await firecrawl.scrape(targetUrl);
+  return Response.json(result);
+}
+```
+
+<div id="interact-with-a-page">
+  ## ページを Interact で操作する
+</div>
+
+実行中のブラウザセッションを操作するための `/interact` ルートを追加します。ボタンをクリックしたり、フォームに入力したり、動的なコンテンツを抽出したりできます。
+
+```typescript
+if (request.method === "POST" && url.pathname === "/interact") {
+  const result = await firecrawl.scrape("https://www.amazon.com", {
+    formats: ["markdown"],
+  });
+  const scrapeId = result.metadata?.scrapeId;
+
+  await firecrawl.interact(scrapeId, {
+    prompt: "Search for iPhone 16 Pro Max",
+  });
+  const response = await firecrawl.interact(scrapeId, {
+    prompt: "Click on the first result and tell me the price",
+  });
+
+  await firecrawl.stopInteraction(scrapeId);
+  return Response.json({ output: response.output });
+}
+```
+
+<div id="deploy">
+  ## デプロイ
+</div>
+
+```bash
+wrangler deploy
+```
+
+<div id="test-it">
+  ## 試してみる
+</div>
+
+```bash
+curl -X POST https://my-scraper.<your-subdomain>.workers.dev/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "firecrawl web scraping"}'
+```
+
+<div id="next-steps">
+  ## 次のステップ
+</div>
+
+<CardGroup cols={2}>
+  <Card title="Search ドキュメント" icon="magnifying-glass" href="/ja/features/search">
+    Web を検索し、ページ全体のコンテンツを取得
+  </Card>
+
+  <Card title="スクレイピング ドキュメント" icon="file-lines" href="/ja/features/scrape">
+    フォーマット、アクション、プロキシなど、スクレイピングのオプションをすべて掲載
+  </Card>
+
+  <Card title="Interact ドキュメント" icon="hand-pointer" href="/ja/features/interact">
+    クリック、フォーム入力、動的コンテンツの抽出
+  </Card>
+
+  <Card title="Node SDK リファレンス" icon="node" href="/ja/sdks/node">
+    クロール、map、バッチスクレイプなどを網羅した SDK リファレンス
+  </Card>
+</CardGroup>

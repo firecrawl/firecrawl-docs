@@ -1,0 +1,157 @@
+---
+title: "FastAPI"
+description: "使用 Firecrawl 和 FastAPI 在 Python 中构建异步网页抓取与搜索 API。"
+og:title: "FastAPI 快速入门 | Firecrawl"
+og:description: "使用 Firecrawl 和 FastAPI 在 Python 中构建异步网页抓取与搜索 API。"
+---
+
+<div id="prerequisites">
+  ## 前提条件
+</div>
+
+* Python 3.8+
+* 一个 Firecrawl API 密钥——[免费获取](https://www.firecrawl.dev/app/api-keys)
+
+<div id="setup">
+  ## 设置
+</div>
+
+```bash
+pip install fastapi uvicorn firecrawl-py
+```
+
+将 API 密钥添加到 `.env` 中：
+
+```bash
+FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+```
+
+<div id="create-the-api">
+  ## 编写 API
+</div>
+
+创建 `main.py`：
+
+```python
+import os
+from fastapi import FastAPI
+from pydantic import BaseModel
+from firecrawl import Firecrawl
+
+app = FastAPI()
+firecrawl = Firecrawl(api_key=os.environ["FIRECRAWL_API_KEY"])
+
+
+class SearchRequest(BaseModel):
+    query: str
+    limit: int = 5
+
+
+class ScrapeRequest(BaseModel):
+    url: str
+
+
+class InteractRequest(BaseModel):
+    scrape_id: str
+    prompt: str
+
+
+@app.post("/search")
+async def search(req: SearchRequest):
+    results = firecrawl.search(req.query, limit=req.limit)
+    return [{"title": r.title, "url": r.url} for r in results.web]
+
+
+@app.post("/scrape")
+async def scrape(req: ScrapeRequest):
+    result = firecrawl.scrape(req.url)
+    return {"markdown": result.markdown, "metadata": result.metadata}
+
+
+@app.post("/interact/start")
+async def interact_start(req: ScrapeRequest):
+    result = firecrawl.scrape(req.url, formats=["markdown"])
+    return {"scrape_id": result.metadata.scrape_id}
+
+
+@app.post("/interact")
+async def interact(req: InteractRequest):
+    response = firecrawl.interact(req.scrape_id, prompt=req.prompt)
+    return {"output": response.output}
+
+
+@app.post("/interact/stop")
+async def interact_stop(req: InteractRequest):
+    firecrawl.stop_interaction(req.scrape_id)
+    return {"status": "stopped"}
+```
+
+<div id="run-it">
+  ## 运行
+</div>
+
+```bash
+uvicorn main:app --reload
+```
+
+<div id="test-it">
+  ## 试一下
+</div>
+
+```bash
+# 进行网页搜索
+curl -X POST http://localhost:8000/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "firecrawl web scraping", "limit": 5}'
+
+# 抓取页面
+curl -X POST http://localhost:8000/scrape \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}'
+
+# 启动交互会话，然后发送 prompt
+curl -X POST http://localhost:8000/interact/start \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.amazon.com"}'
+```
+
+FastAPI 会自动在 `http://localhost:8000/docs` 生成交互式文档。
+
+<div id="async-variant">
+  ## 异步变体
+</div>
+
+为在高负载下获得更好的并发性能，请使用 `AsyncFirecrawl`：
+
+```python
+from firecrawl import AsyncFirecrawl
+
+async_firecrawl = AsyncFirecrawl(api_key=os.environ["FIRECRAWL_API_KEY"])
+
+@app.post("/scrape-async")
+async def scrape_async(req: ScrapeRequest):
+    result = await async_firecrawl.scrape(req.url)
+    return {"markdown": result.markdown}
+```
+
+<div id="next-steps">
+  ## 后续步骤
+</div>
+
+<CardGroup cols={2}>
+  <Card title="抓取文档" icon="file-lines" href="/zh/features/scrape">
+    所有抓取选项，包括 formats、actions 和代理
+  </Card>
+
+  <Card title="搜索文档" icon="magnifying-glass" href="/zh/features/search">
+    进行网页搜索并获取完整页面内容
+  </Card>
+
+  <Card title="交互文档" icon="hand-pointer" href="/zh/features/interact">
+    点击、填写表单并提取动态内容
+  </Card>
+
+  <Card title="Python SDK 参考" icon="python" href="/zh/sdks/python">
+    完整的 SDK 参考，涵盖爬取、map、异步 等功能
+  </Card>
+</CardGroup>

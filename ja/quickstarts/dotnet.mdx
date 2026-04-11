@@ -1,0 +1,233 @@
+---
+title: ".NET"
+description: ".NET で Firecrawl を使い始めましょう。REST API を使ってウェブデータをスクレイピング、検索、操作できます。"
+og:title: ".NET クイックスタート | Firecrawl"
+og:description: ".NET で Firecrawl を使い始めましょう。REST API を使ってウェブデータをスクレイピング、検索、操作できます。"
+---
+
+<div id="prerequisites">
+  ## 前提条件
+</div>
+
+* .NET 6.0+
+* Firecrawl APIキー — [無料で取得できます](https://www.firecrawl.dev/app/api-keys)
+
+<div id="search-the-web">
+  ## Webを検索
+</div>
+
+Firecrawl は、`HttpClient` を使って REST API 経由で .NET から利用できます。
+
+```csharp
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
+
+var apiKey = Environment.GetEnvironmentVariable("FIRECRAWL_API_KEY");
+var client = new HttpClient();
+client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+var content = new StringContent(
+    JsonSerializer.Serialize(new { query = "firecrawl web scraping", limit = 5 }),
+    Encoding.UTF8,
+    "application/json"
+);
+
+var response = await client.PostAsync("https://api.firecrawl.dev/v2/search", content);
+var json = await response.Content.ReadAsStringAsync();
+Console.WriteLine(json);
+```
+
+<Accordion title="レスポンス例">
+  ```json
+  {
+    "success": true,
+    "data": {
+      "web": [
+        {
+          "url": "https://docs.firecrawl.dev",
+          "title": "Firecrawl Documentation",
+          "markdown": "# Firecrawl\n\nFirecrawl is a web scraping API..."
+        }
+      ]
+    }
+  }
+  ```
+</Accordion>
+
+<div id="scrape-a-page">
+  ## ページをスクレイピング
+</div>
+
+```csharp
+var scrapeContent = new StringContent(
+    JsonSerializer.Serialize(new { url = "https://example.com" }),
+    Encoding.UTF8,
+    "application/json"
+);
+
+var scrapeResponse = await client.PostAsync("https://api.firecrawl.dev/v2/scrape", scrapeContent);
+var scrapeJson = await scrapeResponse.Content.ReadAsStringAsync();
+
+using var doc = JsonDocument.Parse(scrapeJson);
+var markdown = doc.RootElement.GetProperty("data").GetProperty("markdown").GetString();
+Console.WriteLine(markdown);
+```
+
+<Accordion title="レスポンス例">
+  ```json
+  {
+    "success": true,
+    "data": {
+      "markdown": "# Example Domain\n\nThis domain is for use in illustrative examples...",
+      "metadata": {
+        "title": "Example Domain",
+        "sourceURL": "https://example.com"
+      }
+    }
+  }
+  ```
+</Accordion>
+
+<div id="interact-with-a-page">
+  ## ページをInteractする
+</div>
+
+ブラウザセッションを開始し、自然言語のプロンプトでページをInteractした後、セッションを終了します。
+
+<div id="step-1-scrape-to-start-a-session">
+  ### ステップ1 — セッションを開始するためにスクレイピングする
+</div>
+
+```csharp
+var sessionContent = new StringContent(
+    JsonSerializer.Serialize(new { url = "https://www.amazon.com", formats = new[] { "markdown" } }),
+    Encoding.UTF8,
+    "application/json"
+);
+
+var sessionResponse = await client.PostAsync("https://api.firecrawl.dev/v2/scrape", sessionContent);
+var sessionJson = await sessionResponse.Content.ReadAsStringAsync();
+
+using var sessionDoc = JsonDocument.Parse(sessionJson);
+var scrapeId = sessionDoc.RootElement
+    .GetProperty("data")
+    .GetProperty("metadata")
+    .GetProperty("scrapeId")
+    .GetString();
+
+Console.WriteLine($"scrapeId: {scrapeId}");
+```
+
+<div id="step-2-send-interactions">
+  ### ステップ 2 — 操作を送信
+</div>
+
+```csharp
+var interactUrl = $"https://api.firecrawl.dev/v2/scrape/{scrapeId}/interact";
+
+// 商品を検索する
+var searchBody = new StringContent(
+    JsonSerializer.Serialize(new { prompt = "Search for iPhone 16 Pro Max" }),
+    Encoding.UTF8,
+    "application/json"
+);
+
+var searchResult = await client.PostAsync(interactUrl, searchBody);
+Console.WriteLine(await searchResult.Content.ReadAsStringAsync());
+
+// 最初の結果をクリックする
+var clickBody = new StringContent(
+    JsonSerializer.Serialize(new { prompt = "Click on the first result and tell me the price" }),
+    Encoding.UTF8,
+    "application/json"
+);
+
+var clickResult = await client.PostAsync(interactUrl, clickBody);
+Console.WriteLine(await clickResult.Content.ReadAsStringAsync());
+```
+
+<div id="step-3-stop-the-session">
+  ### ステップ 3 — セッションを停止する
+</div>
+
+```csharp
+await client.DeleteAsync(interactUrl);
+Console.WriteLine("セッションが停止しました");
+```
+
+<div id="reusable-client-class">
+  ## 再利用可能なクライアントクラス
+</div>
+
+繰り返し使う場合は、API を型付きクライアントとしてラップします。
+
+```csharp
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
+
+public class FirecrawlClient
+{
+    private readonly HttpClient _http;
+    private const string BaseUrl = "https://api.firecrawl.dev/v2";
+
+    public FirecrawlClient(string apiKey)
+    {
+        _http = new HttpClient();
+        _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+    }
+
+    private async Task<JsonDocument> PostAsync(string endpoint, object payload)
+    {
+        var content = new StringContent(
+            JsonSerializer.Serialize(payload),
+            Encoding.UTF8,
+            "application/json"
+        );
+
+        var response = await _http.PostAsync($"{BaseUrl}{endpoint}", content);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync();
+        return JsonDocument.Parse(json);
+    }
+
+    public async Task<JsonDocument> ScrapeAsync(string url)
+    {
+        return await PostAsync("/scrape", new { url });
+    }
+
+    public async Task<JsonDocument> SearchAsync(string query, int limit = 5)
+    {
+        return await PostAsync("/search", new { query, limit });
+    }
+}
+
+// 使用例
+var firecrawl = new FirecrawlClient(Environment.GetEnvironmentVariable("FIRECRAWL_API_KEY")!);
+var result = await firecrawl.SearchAsync("firecrawl web scraping");
+Console.WriteLine(result.RootElement);
+```
+
+<div id="next-steps">
+  ## 次のステップ
+</div>
+
+<CardGroup cols={2}>
+  <Card title="検索ドキュメント" icon="magnifying-glass" href="/ja/features/search">
+    Webを検索してページ全体のコンテンツを取得
+  </Card>
+
+  <Card title="スクレイピングのドキュメント" icon="file-lines" href="/ja/features/scrape">
+    フォーマット、アクション、プロキシなど、スクレイピングのオプションを網羅
+  </Card>
+
+  <Card title="Interact ドキュメント" icon="hand-pointer" href="/ja/features/interact">
+    クリックやフォーム入力で動的コンテンツを抽出
+  </Card>
+
+  <Card title="API リファレンス" icon="code" href="/ja/api-reference/v2-introduction">
+    REST APIの完全なドキュメント
+  </Card>
+</CardGroup>
