@@ -1,8 +1,8 @@
 ---
 title: "Spring Boot"
-description: "Use Firecrawl with Spring Boot to scrape, search, and interact with web data using the official Java SDK."
+description: "Use Firecrawl with Spring Boot to search, scrape, and interact with web data using the official Java SDK."
 og:title: "Spring Boot Quickstart | Firecrawl"
-og:description: "Use Firecrawl with Spring Boot to scrape, search, and interact with web data using the official Java SDK."
+og:description: "Use Firecrawl with Spring Boot to search, scrape, and interact with web data using the official Java SDK."
 ---
 
 ## Prerequisites
@@ -77,8 +77,11 @@ import com.firecrawl.client.FirecrawlClient;
 import com.firecrawl.models.Document;
 import com.firecrawl.models.SearchData;
 import com.firecrawl.models.SearchOptions;
+import com.firecrawl.models.ScrapeOptions;
+import com.firecrawl.models.BrowserExecuteResponse;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -91,6 +94,16 @@ public class FirecrawlController {
         this.firecrawl = firecrawl;
     }
 
+    @PostMapping("/search")
+    public SearchData search(@RequestBody Map<String, Object> body) {
+        return firecrawl.search(
+            (String) body.get("query"),
+            SearchOptions.builder()
+                .limit((int) body.getOrDefault("limit", 5))
+                .build()
+        );
+    }
+
     @PostMapping("/scrape")
     public Map<String, Object> scrape(@RequestBody Map<String, String> body) {
         Document doc = firecrawl.scrape(body.get("url"));
@@ -100,14 +113,19 @@ public class FirecrawlController {
         );
     }
 
-    @PostMapping("/search")
-    public SearchData search(@RequestBody Map<String, Object> body) {
-        return firecrawl.search(
-            (String) body.get("query"),
-            SearchOptions.builder()
-                .limit((int) body.getOrDefault("limit", 5))
-                .build()
-        );
+    @PostMapping("/interact")
+    public Map<String, Object> interact(@RequestBody Map<String, String> body) {
+        Document doc = firecrawl.scrape(body.get("url"),
+            ScrapeOptions.builder().formats(List.of((Object) "markdown")).build());
+        String scrapeId = (String) doc.getMetadata().get("scrapeId");
+
+        firecrawl.interact(scrapeId, body.get("prompt"), "node", 60);
+        BrowserExecuteResponse response = firecrawl.interact(scrapeId,
+            body.getOrDefault("followUp", "Describe what you see"), "node", 60);
+
+        firecrawl.stopInteraction(scrapeId);
+
+        return Map.of("result", response.getStdout());
     }
 }
 ```
@@ -121,19 +139,30 @@ public class FirecrawlController {
 ## Test it
 
 ```bash
+# Search the web
+curl -X POST http://localhost:8080/api/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "firecrawl web scraping"}'
+
+# Scrape a page
 curl -X POST http://localhost:8080/api/scrape \
   -H "Content-Type: application/json" \
   -d '{"url": "https://example.com"}'
+
+# Interact with a page
+curl -X POST http://localhost:8080/api/interact \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.amazon.com", "prompt": "Search for iPhone 16 Pro Max", "followUp": "Click on the first result and tell me the price"}'
 ```
 
 ## Next steps
 
 <CardGroup cols={2}>
-  <Card title="Scrape docs" icon="file-lines" href="/features/scrape">
-    All scrape options including formats, actions, and proxies
-  </Card>
   <Card title="Search docs" icon="magnifying-glass" href="/features/search">
     Search the web and get full page content
+  </Card>
+  <Card title="Scrape docs" icon="file-lines" href="/features/scrape">
+    All scrape options including formats, actions, and proxies
   </Card>
   <Card title="Interact docs" icon="hand-pointer" href="/features/interact">
     Click, fill forms, and extract dynamic content

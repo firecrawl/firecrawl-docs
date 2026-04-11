@@ -1,8 +1,8 @@
 ---
 title: "Laravel"
-description: "Use Firecrawl with Laravel to scrape, search, and interact with web data using the REST API."
+description: "Use Firecrawl with Laravel to search, scrape, and interact with web data using the REST API."
 og:title: "Laravel Quickstart | Firecrawl"
-og:description: "Use Firecrawl with Laravel to scrape, search, and interact with web data using the REST API."
+og:description: "Use Firecrawl with Laravel to search, scrape, and interact with web data using the REST API."
 ---
 
 ## Prerequisites
@@ -49,14 +49,6 @@ class FirecrawlService
         $this->baseUrl = config('services.firecrawl.base_url');
     }
 
-    public function scrape(string $url, array $options = []): array
-    {
-        $response = Http::withToken($this->apiKey)
-            ->post("{$this->baseUrl}/scrape", array_merge(['url' => $url], $options));
-
-        return $response->json();
-    }
-
     public function search(string $query, int $limit = 5): array
     {
         $response = Http::withToken($this->apiKey)
@@ -66,6 +58,42 @@ class FirecrawlService
             ]);
 
         return $response->json();
+    }
+
+    public function scrape(string $url, array $options = []): array
+    {
+        $response = Http::withToken($this->apiKey)
+            ->post("{$this->baseUrl}/scrape", array_merge(['url' => $url], $options));
+
+        return $response->json();
+    }
+
+    public function interact(string $url, string $prompt, ?string $followUp = null): array
+    {
+        // 1. Scrape to open a browser session
+        $scrapeResult = $this->scrape($url, ['formats' => ['markdown']]);
+        $scrapeId = $scrapeResult['data']['metadata']['scrapeId'];
+
+        // 2. Send first prompt
+        Http::withToken($this->apiKey)
+            ->post("{$this->baseUrl}/scrape/{$scrapeId}/interact", [
+                'prompt' => $prompt,
+            ]);
+
+        // 3. Send follow-up prompt
+        $result = null;
+        if ($followUp) {
+            $result = Http::withToken($this->apiKey)
+                ->post("{$this->baseUrl}/scrape/{$scrapeId}/interact", [
+                    'prompt' => $followUp,
+                ])->json();
+        }
+
+        // 4. Close the session
+        Http::withToken($this->apiKey)
+            ->delete("{$this->baseUrl}/scrape/{$scrapeId}/interact");
+
+        return $result ?? $scrapeResult;
     }
 }
 ```
@@ -86,17 +114,32 @@ class FirecrawlController extends Controller
 {
     public function __construct(private FirecrawlService $firecrawl) {}
 
+    public function search(Request $request)
+    {
+        $validated = $request->validate(['query' => 'required|string']);
+        return response()->json(
+            $this->firecrawl->search($validated['query'], $request->input('limit', 5))
+        );
+    }
+
     public function scrape(Request $request)
     {
         $validated = $request->validate(['url' => 'required|url']);
         return response()->json($this->firecrawl->scrape($validated['url']));
     }
 
-    public function search(Request $request)
+    public function interact(Request $request)
     {
-        $validated = $request->validate(['query' => 'required|string']);
+        $validated = $request->validate([
+            'url' => 'required|url',
+            'prompt' => 'required|string',
+        ]);
         return response()->json(
-            $this->firecrawl->search($validated['query'], $request->input('limit', 5))
+            $this->firecrawl->interact(
+                $validated['url'],
+                $validated['prompt'],
+                $request->input('followUp')
+            )
         );
     }
 }
@@ -109,8 +152,9 @@ In `routes/api.php`:
 ```php
 use App\Http\Controllers\FirecrawlController;
 
-Route::post('/scrape', [FirecrawlController::class, 'scrape']);
 Route::post('/search', [FirecrawlController::class, 'search']);
+Route::post('/scrape', [FirecrawlController::class, 'scrape']);
+Route::post('/interact', [FirecrawlController::class, 'interact']);
 ```
 
 ## Test it
@@ -118,53 +162,35 @@ Route::post('/search', [FirecrawlController::class, 'search']);
 ```bash
 php artisan serve
 
+# Search the web
+curl -X POST http://localhost:8000/api/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "firecrawl web scraping"}'
+
+# Scrape a page
 curl -X POST http://localhost:8000/api/scrape \
   -H "Content-Type: application/json" \
   -d '{"url": "https://example.com"}'
-```
 
-## Artisan command
-
-Use Firecrawl from the command line. Create a command with `php artisan make:command ScrapeUrl`:
-
-```php
-<?php
-
-namespace App\Console\Commands;
-
-use App\Services\FirecrawlService;
-use Illuminate\Console\Command;
-
-class ScrapeUrl extends Command
-{
-    protected $signature = 'scrape:url {url}';
-    protected $description = 'Scrape a URL and output markdown';
-
-    public function handle(FirecrawlService $firecrawl): void
-    {
-        $result = $firecrawl->scrape($this->argument('url'));
-        $this->line($result['data']['markdown'] ?? 'No content');
-    }
-}
-```
-
-```bash
-php artisan scrape:url https://example.com
+# Interact with a page
+curl -X POST http://localhost:8000/api/interact \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.amazon.com", "prompt": "Search for iPhone 16 Pro Max", "followUp": "Click on the first result and tell me the price"}'
 ```
 
 ## Next steps
 
 <CardGroup cols={2}>
-  <Card title="Scrape docs" icon="file-lines" href="/features/scrape">
-    All scrape options including formats, actions, and proxies
-  </Card>
   <Card title="Search docs" icon="magnifying-glass" href="/features/search">
     Search the web and get full page content
   </Card>
-  <Card title="API Reference" icon="code" href="/api-reference/v2-introduction">
-    Complete REST API documentation
+  <Card title="Scrape docs" icon="file-lines" href="/features/scrape">
+    All scrape options including formats, actions, and proxies
   </Card>
   <Card title="Interact docs" icon="hand-pointer" href="/features/interact">
     Click, fill forms, and extract dynamic content
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/v2-introduction">
+    Complete REST API documentation
   </Card>
 </CardGroup>

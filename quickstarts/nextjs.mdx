@@ -24,9 +24,46 @@ Add your API key to `.env.local`:
 FIRECRAWL_API_KEY=fc-YOUR-API-KEY
 ```
 
-## Server-side scraping
+## Search the web
 
-Use Firecrawl in a Server Component or Route Handler. The SDK should only run server-side since it requires your API key.
+The SDK should only run server-side since it requires your API key.
+
+### Route Handler
+
+Create `app/api/search/route.ts`:
+
+```typescript
+import { NextResponse } from "next/server";
+import Firecrawl from "@mendable/firecrawl-js";
+
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+
+export async function POST(request: Request) {
+  const { query } = await request.json();
+  const results = await firecrawl.search(query, { limit: 5 });
+
+  return NextResponse.json(results);
+}
+```
+
+### Server Action
+
+Create `app/actions.ts` for use from Client Components:
+
+```typescript
+"use server";
+
+import Firecrawl from "@mendable/firecrawl-js";
+
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+
+export async function searchWeb(query: string) {
+  const results = await firecrawl.search(query, { limit: 5 });
+  return results.map((r) => ({ title: r.title, url: r.url }));
+}
+```
+
+## Scrape a page
 
 ### Route Handler
 
@@ -36,11 +73,11 @@ Create `app/api/scrape/route.ts`:
 import { NextResponse } from "next/server";
 import Firecrawl from "@mendable/firecrawl-js";
 
-const app = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
 
 export async function POST(request: Request) {
   const { url } = await request.json();
-  const result = await app.scrape(url);
+  const result = await firecrawl.scrape(url);
 
   return NextResponse.json(result);
 }
@@ -53,10 +90,10 @@ Fetch data directly in a Server Component at `app/page.tsx`:
 ```tsx
 import Firecrawl from "@mendable/firecrawl-js";
 
-const app = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
 
 export default async function Page() {
-  const result = await app.scrape("https://example.com");
+  const result = await firecrawl.scrape("https://example.com");
 
   return (
     <article>
@@ -67,25 +104,32 @@ export default async function Page() {
 }
 ```
 
-## Server Action
+## Interact with a page
 
-Create `app/actions.ts` for use from Client Components:
+Use interact to control a live browser session — click buttons, fill forms, and extract dynamic content.
+
+### Route Handler
+
+Create `app/api/interact/route.ts`:
 
 ```typescript
-"use server";
-
+import { NextResponse } from "next/server";
 import Firecrawl from "@mendable/firecrawl-js";
 
-const app = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
 
-export async function scrapeUrl(url: string) {
-  const result = await app.scrape(url);
-  return result.markdown;
-}
+export async function POST(request: Request) {
+  const { url, prompts } = await request.json();
 
-export async function searchWeb(query: string) {
-  const results = await app.search(query, { limit: 5 });
-  return results.map((r) => ({ title: r.title, url: r.url }));
+  const result = await firecrawl.scrape(url, { formats: ['markdown'] });
+  const scrapeId = result.metadata?.scrapeId;
+
+  await firecrawl.interact(scrapeId, { prompt: 'Search for iPhone 16 Pro Max' });
+  const response = await firecrawl.interact(scrapeId, { prompt: 'Click on the first result and tell me the price' });
+
+  await firecrawl.stopInteraction(scrapeId);
+
+  return NextResponse.json({ output: response.output });
 }
 ```
 

@@ -22,27 +22,48 @@ Add your API key to `.env`:
 FIRECRAWL_API_KEY=fc-YOUR-API-KEY
 ```
 
-## Server endpoint
+## Search the web
 
-Create `src/routes/api/scrape/+server.ts`:
+Create a form action in `src/routes/search/+page.server.ts`:
 
 ```typescript
-import { json } from "@sveltejs/kit";
 import Firecrawl from "@mendable/firecrawl-js";
 import { FIRECRAWL_API_KEY } from "$env/static/private";
 
 const firecrawl = new Firecrawl({ apiKey: FIRECRAWL_API_KEY });
 
-export async function POST({ request }) {
-  const { url } = await request.json();
-  const result = await firecrawl.scrape(url);
-  return json(result);
-}
+export const actions = {
+  default: async ({ request }) => {
+    const data = await request.formData();
+    const query = data.get("query") as string;
+    const results = await firecrawl.search(query, { limit: 5 });
+    return { results: results.map((r) => ({ title: r.title, url: r.url })) };
+  },
+};
 ```
 
-## Server load function
+Wire it up in `src/routes/search/+page.svelte`:
 
-Fetch data in a `+page.server.ts` load function:
+```svelte
+<script>
+  export let form;
+</script>
+
+<form method="POST">
+  <input name="query" placeholder="Search the web..." />
+  <button>Search</button>
+</form>
+
+{#if form?.results}
+  {#each form.results as result}
+    <div><a href={result.url}>{result.title}</a></div>
+  {/each}
+{/if}
+```
+
+## Scrape a page
+
+Fetch data in a load function at `src/routes/scrape/+page.server.ts`:
 
 ```typescript
 import Firecrawl from "@mendable/firecrawl-js";
@@ -59,43 +80,50 @@ export async function load({ url }) {
 }
 ```
 
-## Form action
+Display it in `src/routes/scrape/+page.svelte`:
 
-Handle scrape requests through SvelteKit form actions:
+```svelte
+<script>
+  export let data;
+</script>
+
+{#if data.markdown}
+  <pre>{data.markdown}</pre>
+{:else}
+  <p>Pass ?url= to scrape a page</p>
+{/if}
+```
+
+## Interact with a page
+
+Create a server endpoint at `src/routes/api/interact/+server.ts`:
 
 ```typescript
-// src/routes/search/+page.server.ts
+import { json } from "@sveltejs/kit";
 import Firecrawl from "@mendable/firecrawl-js";
 import { FIRECRAWL_API_KEY } from "$env/static/private";
 
 const firecrawl = new Firecrawl({ apiKey: FIRECRAWL_API_KEY });
 
-export const actions = {
-  default: async ({ request }) => {
-    const data = await request.formData();
-    const query = data.get("query") as string;
-    const results = await firecrawl.search(query, { limit: 5 });
-    return { results: results.map((r) => ({ title: r.title, url: r.url })) };
-  },
-};
-```
+export async function POST() {
+  const result = await firecrawl.scrape("https://www.amazon.com", {
+    formats: ["markdown"],
+  });
 
-```svelte
-<!-- src/routes/search/+page.svelte -->
-<script>
-  export let form;
-</script>
+  const scrapeId = result.metadata?.scrapeId;
 
-<form method="POST">
-  <input name="query" placeholder="Search the web..." />
-  <button>Search</button>
-</form>
+  await firecrawl.interact(scrapeId, {
+    prompt: "Search for iPhone 16 Pro Max",
+  });
 
-{#if form?.results}
-  {#each form.results as result}
-    <div><a href={result.url}>{result.title}</a></div>
-  {/each}
-{/if}
+  const response = await firecrawl.interact(scrapeId, {
+    prompt: "Click on the first result and tell me the price",
+  });
+
+  await firecrawl.stopInteraction(scrapeId);
+
+  return json({ output: response.output });
+}
 ```
 
 ## Next steps

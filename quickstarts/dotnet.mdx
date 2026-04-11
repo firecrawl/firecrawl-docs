@@ -10,7 +10,7 @@ og:description: "Get started with Firecrawl in .NET. Scrape, search, and interac
 - .NET 6.0+
 - A Firecrawl API key — [get one free](https://www.firecrawl.dev/app/api-keys)
 
-## Scrape a page
+## Search the web
 
 Firecrawl works with .NET through the REST API using `HttpClient`.
 
@@ -24,15 +24,44 @@ var client = new HttpClient();
 client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
 var content = new StringContent(
+    JsonSerializer.Serialize(new { query = "firecrawl web scraping", limit = 5 }),
+    Encoding.UTF8,
+    "application/json"
+);
+
+var response = await client.PostAsync("https://api.firecrawl.dev/v2/search", content);
+var json = await response.Content.ReadAsStringAsync();
+Console.WriteLine(json);
+```
+
+<Accordion title="Example response">
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "url": "https://docs.firecrawl.dev",
+      "title": "Firecrawl Documentation",
+      "markdown": "# Firecrawl\n\nFirecrawl is a web scraping API..."
+    }
+  ]
+}
+```
+</Accordion>
+
+## Scrape a page
+
+```csharp
+var scrapeContent = new StringContent(
     JsonSerializer.Serialize(new { url = "https://example.com" }),
     Encoding.UTF8,
     "application/json"
 );
 
-var response = await client.PostAsync("https://api.firecrawl.dev/v2/scrape", content);
-var json = await response.Content.ReadAsStringAsync();
+var scrapeResponse = await client.PostAsync("https://api.firecrawl.dev/v2/scrape", scrapeContent);
+var scrapeJson = await scrapeResponse.Content.ReadAsStringAsync();
 
-using var doc = JsonDocument.Parse(json);
+using var doc = JsonDocument.Parse(scrapeJson);
 var markdown = doc.RootElement.GetProperty("data").GetProperty("markdown").GetString();
 Console.WriteLine(markdown);
 ```
@@ -52,18 +81,63 @@ Console.WriteLine(markdown);
 ```
 </Accordion>
 
-## Search the web
+## Interact with a page
+
+Start a browser session, interact with the page using natural-language prompts, then close the session.
+
+### Step 1 — Scrape to start a session
 
 ```csharp
-var searchContent = new StringContent(
-    JsonSerializer.Serialize(new { query = "firecrawl web scraping", limit = 5 }),
+var sessionContent = new StringContent(
+    JsonSerializer.Serialize(new { url = "https://www.amazon.com", formats = new[] { "markdown" } }),
     Encoding.UTF8,
     "application/json"
 );
 
-var searchResponse = await client.PostAsync("https://api.firecrawl.dev/v2/search", searchContent);
-var searchJson = await searchResponse.Content.ReadAsStringAsync();
-Console.WriteLine(searchJson);
+var sessionResponse = await client.PostAsync("https://api.firecrawl.dev/v2/scrape", sessionContent);
+var sessionJson = await sessionResponse.Content.ReadAsStringAsync();
+
+using var sessionDoc = JsonDocument.Parse(sessionJson);
+var scrapeId = sessionDoc.RootElement
+    .GetProperty("data")
+    .GetProperty("metadata")
+    .GetProperty("scrapeId")
+    .GetString();
+
+Console.WriteLine($"scrapeId: {scrapeId}");
+```
+
+### Step 2 — Send interactions
+
+```csharp
+var interactUrl = $"https://api.firecrawl.dev/v2/scrape/{scrapeId}/interact";
+
+// Search for a product
+var searchBody = new StringContent(
+    JsonSerializer.Serialize(new { prompt = "Search for iPhone 16 Pro Max" }),
+    Encoding.UTF8,
+    "application/json"
+);
+
+var searchResult = await client.PostAsync(interactUrl, searchBody);
+Console.WriteLine(await searchResult.Content.ReadAsStringAsync());
+
+// Click on the first result
+var clickBody = new StringContent(
+    JsonSerializer.Serialize(new { prompt = "Click on the first result and tell me the price" }),
+    Encoding.UTF8,
+    "application/json"
+);
+
+var clickResult = await client.PostAsync(interactUrl, clickBody);
+Console.WriteLine(await clickResult.Content.ReadAsStringAsync());
+```
+
+### Step 3 — Stop the session
+
+```csharp
+await client.DeleteAsync(interactUrl);
+Console.WriteLine("Session stopped");
 ```
 
 ## Reusable client class
@@ -114,23 +188,23 @@ public class FirecrawlClient
 
 // Usage
 var firecrawl = new FirecrawlClient(Environment.GetEnvironmentVariable("FIRECRAWL_API_KEY")!);
-var result = await firecrawl.ScrapeAsync("https://example.com");
-Console.WriteLine(result.RootElement.GetProperty("data").GetProperty("markdown").GetString());
+var result = await firecrawl.SearchAsync("firecrawl web scraping");
+Console.WriteLine(result.RootElement);
 ```
 
 ## Next steps
 
 <CardGroup cols={2}>
-  <Card title="Scrape docs" icon="file-lines" href="/features/scrape">
-    All scrape options including formats, actions, and proxies
-  </Card>
   <Card title="Search docs" icon="magnifying-glass" href="/features/search">
     Search the web and get full page content
   </Card>
-  <Card title="API Reference" icon="code" href="/api-reference/v2-introduction">
-    Complete REST API documentation
+  <Card title="Scrape docs" icon="file-lines" href="/features/scrape">
+    All scrape options including formats, actions, and proxies
   </Card>
   <Card title="Interact docs" icon="hand-pointer" href="/features/interact">
     Click, fill forms, and extract dynamic content
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/v2-introduction">
+    Complete REST API documentation
   </Card>
 </CardGroup>

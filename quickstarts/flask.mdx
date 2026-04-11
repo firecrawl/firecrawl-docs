@@ -35,6 +35,13 @@ app = Flask(__name__)
 firecrawl = Firecrawl(api_key=os.environ["FIRECRAWL_API_KEY"])
 
 
+@app.post("/search")
+def search():
+    data = request.get_json()
+    results = firecrawl.search(data["query"], limit=data.get("limit", 5))
+    return jsonify([{"title": r.title, "url": r.url} for r in results])
+
+
 @app.post("/scrape")
 def scrape():
     data = request.get_json()
@@ -42,11 +49,25 @@ def scrape():
     return jsonify(markdown=result.markdown, metadata=result.metadata)
 
 
-@app.post("/search")
-def search():
+@app.post("/interact/start")
+def interact_start():
     data = request.get_json()
-    results = firecrawl.search(data["query"], limit=data.get("limit", 5))
-    return jsonify([{"title": r.title, "url": r.url} for r in results])
+    result = firecrawl.scrape(data["url"], formats=["markdown"])
+    return jsonify(scrape_id=result.metadata.scrape_id)
+
+
+@app.post("/interact")
+def interact():
+    data = request.get_json()
+    response = firecrawl.interact(data["scrape_id"], prompt=data["prompt"])
+    return jsonify(output=response.output)
+
+
+@app.post("/interact/stop")
+def interact_stop():
+    data = request.get_json()
+    firecrawl.stop_interaction(data["scrape_id"])
+    return jsonify(status="stopped")
 
 
 if __name__ == "__main__":
@@ -62,9 +83,20 @@ flask run
 ## Test it
 
 ```bash
+# Search the web
+curl -X POST http://localhost:5000/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "firecrawl web scraping", "limit": 5}'
+
+# Scrape a page
 curl -X POST http://localhost:5000/scrape \
   -H "Content-Type: application/json" \
   -d '{"url": "https://example.com"}'
+
+# Start an interactive session
+curl -X POST http://localhost:5000/interact/start \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.amazon.com"}'
 ```
 
 ## Next steps

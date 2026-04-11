@@ -22,9 +22,9 @@ Add your API key to your Django settings or environment:
 export FIRECRAWL_API_KEY=fc-YOUR-API-KEY
 ```
 
-## Create a view
+## Create views
 
-Add a scrape view to your Django app. In `views.py`:
+Add search, scrape, and interact views to your Django app. In `views.py`:
 
 ```python
 import json
@@ -35,6 +35,17 @@ from django.views.decorators.http import require_POST
 from firecrawl import Firecrawl
 
 firecrawl = Firecrawl(api_key=os.environ["FIRECRAWL_API_KEY"])
+
+
+@csrf_exempt
+@require_POST
+def search_view(request):
+    body = json.loads(request.body)
+    results = firecrawl.search(body["query"], limit=body.get("limit", 5))
+    return JsonResponse(
+        [{"title": r.title, "url": r.url} for r in results],
+        safe=False,
+    )
 
 
 @csrf_exempt
@@ -50,13 +61,26 @@ def scrape_view(request):
 
 @csrf_exempt
 @require_POST
-def search_view(request):
+def interact_start_view(request):
     body = json.loads(request.body)
-    results = firecrawl.search(body["query"], limit=body.get("limit", 5))
-    return JsonResponse(
-        [{"title": r.title, "url": r.url} for r in results],
-        safe=False,
-    )
+    result = firecrawl.scrape(body["url"], formats=["markdown"])
+    return JsonResponse({"scrape_id": result.metadata.scrape_id})
+
+
+@csrf_exempt
+@require_POST
+def interact_view(request):
+    body = json.loads(request.body)
+    response = firecrawl.interact(body["scrape_id"], prompt=body["prompt"])
+    return JsonResponse({"output": response.output})
+
+
+@csrf_exempt
+@require_POST
+def interact_stop_view(request):
+    body = json.loads(request.body)
+    firecrawl.stop_interaction(body["scrape_id"])
+    return JsonResponse({"status": "stopped"})
 ```
 
 ## Wire up URLs
@@ -68,8 +92,11 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
-    path("api/scrape/", views.scrape_view),
     path("api/search/", views.search_view),
+    path("api/scrape/", views.scrape_view),
+    path("api/interact/start/", views.interact_start_view),
+    path("api/interact/", views.interact_view),
+    path("api/interact/stop/", views.interact_stop_view),
 ]
 ```
 
@@ -78,9 +105,20 @@ urlpatterns = [
 ```bash
 python manage.py runserver
 
+# Search the web
+curl -X POST http://localhost:8000/api/search/ \
+  -H "Content-Type: application/json" \
+  -d '{"query": "firecrawl web scraping", "limit": 5}'
+
+# Scrape a page
 curl -X POST http://localhost:8000/api/scrape/ \
   -H "Content-Type: application/json" \
   -d '{"url": "https://example.com"}'
+
+# Start an interactive session
+curl -X POST http://localhost:8000/api/interact/start/ \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.amazon.com"}'
 ```
 
 ## Management command

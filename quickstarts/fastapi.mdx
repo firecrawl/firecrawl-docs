@@ -36,13 +36,24 @@ app = FastAPI()
 firecrawl = Firecrawl(api_key=os.environ["FIRECRAWL_API_KEY"])
 
 
+class SearchRequest(BaseModel):
+    query: str
+    limit: int = 5
+
+
 class ScrapeRequest(BaseModel):
     url: str
 
 
-class SearchRequest(BaseModel):
-    query: str
-    limit: int = 5
+class InteractRequest(BaseModel):
+    scrape_id: str
+    prompt: str
+
+
+@app.post("/search")
+async def search(req: SearchRequest):
+    results = firecrawl.search(req.query, limit=req.limit)
+    return [{"title": r.title, "url": r.url} for r in results]
 
 
 @app.post("/scrape")
@@ -51,10 +62,22 @@ async def scrape(req: ScrapeRequest):
     return {"markdown": result.markdown, "metadata": result.metadata}
 
 
-@app.post("/search")
-async def search(req: SearchRequest):
-    results = firecrawl.search(req.query, limit=req.limit)
-    return [{"title": r.title, "url": r.url} for r in results]
+@app.post("/interact/start")
+async def interact_start(req: ScrapeRequest):
+    result = firecrawl.scrape(req.url, formats=["markdown"])
+    return {"scrape_id": result.metadata.scrape_id}
+
+
+@app.post("/interact")
+async def interact(req: InteractRequest):
+    response = firecrawl.interact(req.scrape_id, prompt=req.prompt)
+    return {"output": response.output}
+
+
+@app.post("/interact/stop")
+async def interact_stop(req: InteractRequest):
+    firecrawl.stop_interaction(req.scrape_id)
+    return {"status": "stopped"}
 ```
 
 ## Run it
@@ -66,9 +89,20 @@ uvicorn main:app --reload
 ## Test it
 
 ```bash
+# Search the web
+curl -X POST http://localhost:8000/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "firecrawl web scraping", "limit": 5}'
+
+# Scrape a page
 curl -X POST http://localhost:8000/scrape \
   -H "Content-Type: application/json" \
   -d '{"url": "https://example.com"}'
+
+# Start an interactive session, then send prompts
+curl -X POST http://localhost:8000/interact/start \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.amazon.com"}'
 ```
 
 FastAPI auto-generates interactive docs at `http://localhost:8000/docs`.

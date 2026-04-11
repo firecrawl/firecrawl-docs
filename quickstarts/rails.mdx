@@ -1,8 +1,8 @@
 ---
 title: "Rails"
-description: "Use Firecrawl with Ruby on Rails to scrape, search, and interact with web data using the REST API."
+description: "Use Firecrawl with Ruby on Rails to search, scrape, and interact with web data using the REST API."
 og:title: "Rails Quickstart | Firecrawl"
-og:description: "Use Firecrawl with Ruby on Rails to scrape, search, and interact with web data using the REST API."
+og:description: "Use Firecrawl with Ruby on Rails to search, scrape, and interact with web data using the REST API."
 ---
 
 ## Prerequisites
@@ -34,12 +34,32 @@ class FirecrawlService
     @api_key = api_key
   end
 
+  def search(query, limit: 5)
+    post("/search", { query: query, limit: limit })
+  end
+
   def scrape(url, **options)
     post("/scrape", { url: url }.merge(options))
   end
 
-  def search(query, limit: 5)
-    post("/search", { query: query, limit: limit })
+  def interact(url, prompt, follow_up: nil)
+    # 1. Scrape to open a browser session
+    scrape_result = scrape(url, formats: ["markdown"])
+    scrape_id = scrape_result.dig("data", "metadata", "scrapeId")
+
+    # 2. Send first prompt
+    post("/scrape/#{scrape_id}/interact", { prompt: prompt })
+
+    # 3. Send follow-up prompt
+    result = nil
+    if follow_up
+      result = post("/scrape/#{scrape_id}/interact", { prompt: follow_up })
+    end
+
+    # 4. Close the session
+    delete("/scrape/#{scrape_id}/interact")
+
+    result || scrape_result
   end
 
   private
@@ -57,6 +77,16 @@ class FirecrawlService
 
     JSON.parse(response.body)
   end
+
+  def delete(endpoint)
+    uri = URI("#{BASE_URL}#{endpoint}")
+    request = Net::HTTP::Delete.new(uri)
+    request["Authorization"] = "Bearer #{@api_key}"
+
+    Net::HTTP.start(uri.hostname, uri.port, use_ssl: true) do |http|
+      http.request(request)
+    end
+  end
 end
 ```
 
@@ -65,7 +95,7 @@ end
 Generate a controller:
 
 ```bash
-rails generate controller Firecrawl scrape search --skip-routes
+rails generate controller Firecrawl search scrape interact --skip-routes
 ```
 
 Edit `app/controllers/firecrawl_controller.rb`:
@@ -74,15 +104,25 @@ Edit `app/controllers/firecrawl_controller.rb`:
 class FirecrawlController < ApplicationController
   skip_before_action :verify_authenticity_token
 
+  def search
+    service = FirecrawlService.new
+    result = service.search(params.require(:query), limit: params.fetch(:limit, 5).to_i)
+    render json: result
+  end
+
   def scrape
     service = FirecrawlService.new
     result = service.scrape(params.require(:url))
     render json: result
   end
 
-  def search
+  def interact
     service = FirecrawlService.new
-    result = service.search(params.require(:query), limit: params.fetch(:limit, 5).to_i)
+    result = service.interact(
+      params.require(:url),
+      params.require(:prompt),
+      follow_up: params[:followUp]
+    )
     render json: result
   end
 end
@@ -94,8 +134,9 @@ In `config/routes.rb`:
 
 ```ruby
 Rails.application.routes.draw do
-  post "api/scrape", to: "firecrawl#scrape"
   post "api/search", to: "firecrawl#search"
+  post "api/scrape", to: "firecrawl#scrape"
+  post "api/interact", to: "firecrawl#interact"
 end
 ```
 
@@ -104,40 +145,35 @@ end
 ```bash
 rails server
 
+# Search the web
+curl -X POST http://localhost:3000/api/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "firecrawl web scraping"}'
+
+# Scrape a page
 curl -X POST http://localhost:3000/api/scrape \
   -H "Content-Type: application/json" \
   -d '{"url": "https://example.com"}'
-```
 
-## Rake task
-
-Use Firecrawl from the command line. Create `lib/tasks/scrape.rake`:
-
-```ruby
-desc "Scrape a URL and print the markdown"
-task :scrape, [:url] => :environment do |_t, args|
-  result = FirecrawlService.new.scrape(args[:url])
-  puts result.dig("data", "markdown")
-end
-```
-
-```bash
-rails scrape["https://example.com"]
+# Interact with a page
+curl -X POST http://localhost:3000/api/interact \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.amazon.com", "prompt": "Search for iPhone 16 Pro Max", "followUp": "Click on the first result and tell me the price"}'
 ```
 
 ## Next steps
 
 <CardGroup cols={2}>
-  <Card title="Scrape docs" icon="file-lines" href="/features/scrape">
-    All scrape options including formats, actions, and proxies
-  </Card>
   <Card title="Search docs" icon="magnifying-glass" href="/features/search">
     Search the web and get full page content
   </Card>
-  <Card title="API Reference" icon="code" href="/api-reference/v2-introduction">
-    Complete REST API documentation
+  <Card title="Scrape docs" icon="file-lines" href="/features/scrape">
+    All scrape options including formats, actions, and proxies
   </Card>
   <Card title="Interact docs" icon="hand-pointer" href="/features/interact">
     Click, fill forms, and extract dynamic content
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/v2-introduction">
+    Complete REST API documentation
   </Card>
 </CardGroup>
