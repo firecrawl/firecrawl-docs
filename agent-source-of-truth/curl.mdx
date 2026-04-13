@@ -3,7 +3,7 @@ title: "Curl Source of Truth"
 description: "Canonical Firecrawl curl source of truth for agents using key endpoints like search, scrape, and interact."
 ---
 
-Canonical Firecrawl curl source of truth for agents. Generated from SDK source and the v2 OpenAPI spec.
+Canonical Firecrawl curl source of truth for agents. Aligned with `api-reference/v2-openapi.json` (server base URL `https://api.firecrawl.dev/v2`).
 
 ## Authenticate
 
@@ -23,7 +23,7 @@ export FIRECRAWL_API_KEY="fc-your-api-key"
 
 Use search to discover relevant pages from a query, then pick URLs to scrape or interact with. You can constrain results to a site with `site:`, for example `site:docs.firecrawl.dev crawl webhooks`.
 
-### Preferred SDK method
+### Endpoint
 
 `POST /search`
 
@@ -46,8 +46,8 @@ curl -X POST "https://api.firecrawl.dev/v2/search" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "site:docs.firecrawl.dev crawl webhooks",
-    "sources": ["web", "news"],
-    "categories": ["research"],
+    "sources": [{"type": "web"}, {"type": "news"}],
+    "categories": [{"type": "research"}],
     "limit": 10,
     "tbs": "qdr:m",
     "location": "San Francisco,California,United States",
@@ -69,33 +69,42 @@ curl -X POST "https://api.firecrawl.dev/v2/search" \
   }'
 ```
 
+### Response
+
+Successful responses include `success`, `data`, optional `warning`, `id`, and `creditsUsed`.
+
+- `data.web`, `data.images`, `data.news`: result arrays; which keys appear depends on `sources` (by default only `data.web` is populated).
+- Web and news items include fields such as `title`, `url`, and (when `scrapeOptions` / formats request it) `markdown`, `html`, `rawHtml`, `links`, `screenshot`, `audio`, and `metadata`.
+- Image items include fields such as `imageUrl`, `url`, and dimensions when available.
+- `warning`: optional human-readable notice.
+- `id`: search job id string.
+- `creditsUsed`: integer credits charged for the call.
+
 ### Parameters
 
 - `query`
-  - Type: string
+  - Type: string (required, max length 500)
   - Use when: you need a search query.
   - Notes: use `site:example.com` to limit results to a domain.
 
 - `sources`
-  - Type: array of source names or typed source objects
+  - Type: array of typed source objects
   - Use when: you want to control which sources are searched.
-  - Confirmed values:
-    - `"web"`: web index results
-    - `"news"`: news results
-    - `"images"`: image results
-    - `{ "type": "web" | "news" | "images" }`: typed source object form
+  - Confirmed object shapes:
+    - `{ "type": "web" }` with optional per-source `tbs` and `location`
+    - `{ "type": "news" }`
+    - `{ "type": "images" }`
 
 - `categories`
-  - Type: array of category names or typed category objects
+  - Type: array of typed category objects
   - Use when: you want to filter results by category.
-  - Confirmed values:
-    - `"github"`: GitHub-focused results
-    - `"research"`: research and academic results
-    - `"pdf"`: PDF-focused results
-    - `{ "type": "github" | "research" | "pdf" }`: typed category object form
+  - Confirmed object shapes:
+    - `{ "type": "github" }`
+    - `{ "type": "research" }`
+    - `{ "type": "pdf" }`
 
 - `limit`
-  - Type: number
+  - Type: integer (minimum 1, maximum 100, default 5)
   - Use when: you want to cap results.
 
 - `tbs`
@@ -107,21 +116,21 @@ curl -X POST "https://api.firecrawl.dev/v2/search" \
   - Use when: you want localized results.
 
 - `country`
-  - Type: string
+  - Type: string (default `"US"`)
   - Use when: you want ISO 3166-1 alpha-2 targeting (for example `"US"`).
 
 - `ignoreInvalidURLs`
-  - Type: boolean
+  - Type: boolean (default false)
   - Use when: you want to drop URLs that cannot be scraped by other endpoints.
 
 - `timeout`
-  - Type: number
+  - Type: integer (milliseconds, default 60000)
   - Use when: you need a request timeout in milliseconds.
 
 - `enterprise`
-  - Type: array of strings
+  - Type: array of strings (`"anon"` or `"zdr"` per item)
   - Use when: you need enterprise search controls.
-  - Confirmed values:
+  - Values:
     - `"zdr"`: end-to-end zero data retention
     - `"anon"`: anonymized zero data retention
 
@@ -135,7 +144,7 @@ curl -X POST "https://api.firecrawl.dev/v2/search" \
 
 Use scrape when you already have a URL and want structured content in one or more formats.
 
-### Preferred SDK method
+### Endpoint
 
 `POST /scrape`
 
@@ -186,6 +195,16 @@ curl -X POST "https://api.firecrawl.dev/v2/scrape" \
     "zeroDataRetention": false
   }'
 ```
+
+### Response
+
+Successful responses include `success` and `data`. Common `data` fields (depending on `formats` and options):
+
+- `markdown`, `summary`, `html`, `rawHtml`, `screenshot`, `audio`, `links`
+- `actions`: when the request included scrape-time `actions`, contains ordered results such as `screenshots`, `scrapes`, `javascriptReturns`, and `pdfs`
+- `metadata`: page metadata (`title`, `sourceURL`, `url`, `statusCode`, `error`, and other extracted fields)
+- `warning`: optional extraction or formatting notice
+- `changeTracking`: present when the `changeTracking` format is requested
 
 ### Parameters
 
@@ -243,11 +262,9 @@ curl -X POST "https://api.firecrawl.dev/v2/scrape" \
   - Use when: you want a mobile viewport.
 
 - `parsers`
-  - Type: array of parser strings or objects
+  - Type: array of objects
   - Use when: you need file parsing controls.
-  - Confirmed values:
-    - `"pdf"`
-    - `{ "type": "pdf", "mode": "fast" | "auto" | "ocr", "maxPages": number }`
+  - Confirmed shape: `{ "type": "pdf", "mode": "fast" | "auto" | "ocr", "maxPages": number }` (`type` required; other fields optional with defaults per spec)
 
 - `actions`
   - Type: array of action objects
@@ -258,7 +275,7 @@ curl -X POST "https://api.firecrawl.dev/v2/scrape" \
     - `click`: `selector` required, `all` optional
     - `write`: `text` required (click to focus the input first)
     - `press`: `key` required
-    - `scroll`: `direction` (`up` or `down`) required, `selector` optional
+    - `scroll`: `type` required; `direction` (`up` or `down`, default `down`); optional `selector`
     - `scrape`: no additional fields
     - `executeJavascript`: `script` required
     - `pdf`: `format` (A0, A1, A2, A3, A4, A5, A6, Letter, Legal, Tabloid, Ledger), `landscape`, `scale` optional
@@ -310,7 +327,7 @@ curl -X POST "https://api.firecrawl.dev/v2/scrape" \
 
 Use interact when a page requires browser actions or code execution after a scrape starts.
 
-### Preferred SDK method
+### Endpoint
 
 `POST /scrape/{jobId}/interact`
 
@@ -321,9 +338,7 @@ curl -X POST "https://api.firecrawl.dev/v2/scrape/<jobId>/interact" \
   -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "code": "console.log(await page.title());",
-    "language": "node",
-    "timeout": 60
+    "code": "console.log(await page.title());"
   }'
 ```
 
@@ -334,38 +349,51 @@ curl -X POST "https://api.firecrawl.dev/v2/scrape/<jobId>/interact" \
   -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "prompt": "Click the pricing tab and summarize the plans.",
+    "code": "const title = await page.title();\nconst h1 = await page.locator(\"h1\").first().textContent().catch(() => null);\nconsole.log(JSON.stringify({ title, h1 }));",
     "language": "node",
-    "timeout": 60
+    "timeout": 120
   }'
 ```
 
 ### Parameters
 
-- `jobId`
-  - Type: string
-  - Use when: you have a scrape job ID.
+- `jobId` (path)
+  - Type: string (UUID)
+  - Use when: you have the scrape job id for the live browser session.
 
-- `code`
-  - Type: string
-  - Use when: you want to run code in the browser session.
+- `code` (JSON body)
+  - Type: string (required in OpenAPI; min length 1, max length 100000)
+  - Use when: you want to run code in the scrape-bound browser sandbox.
 
-- `prompt`
-  - Type: string
-  - Use when: you want the browser agent to follow a natural-language instruction.
-
-- `language`
+- `language` (JSON body)
   - Type: string
   - Use when: you need a specific runtime.
-  - Confirmed values: `"python"`, `"node"`, `"bash"`
+  - Confirmed values: `"python"`, `"node"`, `"bash"` (default `"node"`)
 
-- `timeout`
-  - Type: number
-  - Use when: you need an execution timeout in seconds.
+- `timeout` (JSON body)
+  - Type: integer (seconds; minimum 1, maximum 300, default 30)
+  - Use when: you need an execution timeout.
+
+### Response
+
+Successful responses include `success` plus execution fields such as `stdout`, `result` (alias of stdout), `stderr`, `exitCode`, `killed`, and `error` (nullable).
+
+### DELETE /scrape/{jobId}/interact
+
+### Example
+
+```bash
+curl -X DELETE "https://api.firecrawl.dev/v2/scrape/<jobId>/interact" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY"
+```
+
+No JSON body. A successful response includes `success`.
 
 ## Notes
 
-- Use `interact` for multi-step browser workflows; scrape `actions` are best for small pre-scrape steps.
+- Search result rows are nested under `data.web`, `data.images`, or `data.news`, not as a flat `data` array.
+- Use `POST /scrape/{jobId}/interact` for multi-step browser workflows; scrape `actions` are best for small pre-scrape steps.
+- The published OpenAPI schema requires `code` for interact. Some SDKs and clients also accept a `prompt` field for natural-language instructions; that alias is not in `v2-openapi.json`.
 
 ## Source Of Truth
 

@@ -3,7 +3,7 @@ title: "Node.js Source of Truth"
 description: "Canonical Firecrawl Node.js source of truth for agents using key endpoints like search, scrape, and interact."
 ---
 
-Canonical Firecrawl Node.js source of truth for agents. Generated from SDK source and the v2 OpenAPI spec.
+Canonical Firecrawl Node.js source of truth for agents. Aligned with `@mendable/firecrawl-js` **v4.18.2** (`firecrawl/apps/js-sdk/firecrawl`) and the v2 OpenAPI spec. Method names, parameters, and types match the SDK public API.
 
 ## Install
 
@@ -18,7 +18,7 @@ import Firecrawl from "@mendable/firecrawl-js";
 
 const client = new Firecrawl({
   apiKey: process.env.FIRECRAWL_API_KEY,
-  // apiUrl: "https://api.firecrawl.dev" // optional for self-hosted
+  // apiUrl: "https://api.firecrawl.dev" // optional; falls back to FIRECRAWL_API_URL or cloud default
 });
 ```
 
@@ -26,7 +26,7 @@ const client = new Firecrawl({
 
 - `search`: use when you start with a query and need discovery.
 - `scrape`: use when you already have a URL and want page content.
-- `interact`: use when the page needs clicks, forms, or post-scrape browser actions.
+- `interact`: use when the page needs clicks, forms, or other browser actions after a scrape has created a session. For multi-step interactive flows, prefer `interact` over scrape-time `actions`.
 
 ## Search
 
@@ -36,7 +36,7 @@ Use search to discover relevant pages from a query, then pick URLs to scrape or 
 
 ### Preferred SDK method
 
-`client.search(query, options?)`
+`client.search(query, options?)` → `Promise<SearchData>`
 
 ### Simple Example
 
@@ -69,12 +69,23 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
 });
 ```
 
+### Return value
+
+`SearchData` is an object with optional arrays (each entry is either a lightweight result object or a full `Document` when `scrapeOptions` hydrated the hit):
+
+- `web`: web index hits
+- `news`: news hits
+- `images`: image hits
+
 ### Parameters
 
 - `query`
   - Type: string
   - Use when: you need a search query.
   - Notes: use `site:example.com` to limit results to a domain.
+
+- `options` (optional; second argument defaults to `{}`)
+  - Type: `Omit<SearchRequest, "query">`
 
 - `options.sources`
   - Type: array of source names or typed source objects
@@ -115,8 +126,8 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
   - Use when: you need a request timeout in milliseconds.
 
 - `options.scrapeOptions`
-  - Type: ScrapeOptions
-  - Use when: you want to scrape each search result (see Scrape parameters for fields).
+  - Type: `ScrapeOptions`
+  - Use when: you want to scrape each search result (see Scrape parameters for fields). The SDK runs the same validation as for `scrape` (for example plain string `"json"` in `formats` is rejected).
 
 ## Scrape
 
@@ -126,7 +137,7 @@ Use scrape when you already have a URL and want structured content in one or mor
 
 ### Preferred SDK method
 
-`client.scrape(url, options?)`
+`client.scrape(url, options?)` → `Promise<Document>`
 
 ### Simple Example
 
@@ -180,7 +191,7 @@ const doc = await client.scrape("https://example.com/pricing", {
 - `options.formats`
   - Type: array of format strings or format objects
   - Use when: you want multiple output formats.
-  - Confirmed format strings:
+  - Plain string formats (the `FormatString` union also includes `"json"`, but the SDK rejects `"json"` as a plain string — use a `json` object below):
     - `"markdown"`: markdown content
     - `"html"`: cleaned HTML
     - `"rawHtml"`: raw HTML
@@ -188,20 +199,21 @@ const doc = await client.scrape("https://example.com/pricing", {
     - `"images"`: image URLs
     - `"screenshot"`: screenshot output
     - `"summary"`: summary output
-    - `"changeTracking"`: change tracking output
-    - `"json"`: JSON extraction
-    - `"attributes"`: attribute extraction
+    - `"changeTracking"`: change tracking output (for options like `modes`, use `{ type: "changeTracking", modes: [...] }` — `modes` is required on that object in typings)
+    - `"attributes"`: attribute extraction (use `{ type: "attributes", selectors: [...] }` when passing selectors)
     - `"branding"`: branding profile output
     - `"audio"`: audio extraction
-    - `"query"`: question-answer output
-  - Format object fields:
-    - `type`: one of the format strings above
-    - `prompt`: required for `type: "query"`; required for `type: "json"` unless `schema` is provided
-    - `schema`: JSON schema (or Zod schema) for `type: "json"` or for change tracking JSON mode
-    - `modes`: array of `"git-diff"` or `"json"` for `type: "changeTracking"`
-    - `tag`: change tracking tag for `type: "changeTracking"`
-    - `fullPage`, `quality`, `viewport`: screenshot options for `type: "screenshot"`
-    - `selectors`: array of `{ selector, attribute }` for `type: "attributes"`
+  - Object-only format types (at minimum `type` as shown):
+    - `{ type: "json", prompt?: string, schema?: JSON schema or Zod schema }`: at least one of `prompt` or `schema` is required (SDK validation).
+    - `{ type: "query", prompt: string }`: question-answer style extraction.
+    - `{ type: "screenshot", fullPage?, quality?, viewport? }`: same options as the string form but as an object.
+    - `{ type: "changeTracking", modes: ("git-diff" | "json")[], schema?, prompt?, tag? }`: `modes` is required.
+    - `{ type: "attributes", selectors: Array<{ selector, attribute }> }`
+  - Shared object fields where applicable:
+    - `schema`: JSON schema or Zod schema for `json`, or for `changeTracking` in `json` mode (Zod is converted to JSON Schema by the SDK).
+    - `modes`: for `changeTracking` only: `"git-diff"` and/or `"json"`.
+    - `tag`: optional change-tracking branch tag.
+    - `fullPage`, `quality`, `viewport`: screenshot options.
 
 - `options.headers`
   - Type: record of string to string
@@ -302,11 +314,11 @@ const doc = await client.scrape("https://example.com/pricing", {
 
 ### Why use it
 
-Use interact when a page requires browser actions or code execution after a scrape starts.
+Use `interact` for code or natural-language control of the browser session tied to a scrape job (via `metadata.scrapeId`). The SDK requires at least one of `code` or `prompt`. For flows that go beyond quick pre-scrape tweaks, prefer `interact` over scrape-time `actions`.
 
 ### Preferred SDK method
 
-`client.interact(jobId, args)`
+`client.interact(jobId, args)` → `Promise<ScrapeExecuteResponse>`
 
 ### Simple Example
 
@@ -338,30 +350,56 @@ const result = await client.interact("<scrapeJobId>", {
 
 - `args.code`
   - Type: string
-  - Use when: you want to run code in the browser session.
+  - Use when: you want to run code in the browser session (for example Playwright `page` usage in the `node` runtime).
 
 - `args.prompt`
   - Type: string
   - Use when: you want the browser agent to follow a natural-language instruction.
 
+- At least one of `args.code` or `args.prompt` must be non-empty (SDK throws otherwise).
+
 - `args.language`
   - Type: string
   - Use when: you need a specific runtime.
   - Confirmed values: `"python"`, `"node"`, `"bash"`
+  - Default when omitted: `"node"` (set by the SDK on the request body).
 
 - `args.timeout`
   - Type: number
   - Use when: you need an execution timeout in seconds.
 
+### Return value (`interact`)
+
+`ScrapeExecuteResponse` matches `BrowserExecuteResponse`. Confirmed fields include:
+
+- `success`: boolean
+- `output`: string (aggregated output when present)
+- `stdout`: string
+- `result`: string (alias-style field alongside stdout in typings)
+- `stderr`: string
+- `exitCode`: number
+- `killed`: boolean
+- `liveViewUrl`: string
+- `interactiveLiveViewUrl`: string
+- `error`: string
+
+### Stop session
+
+`client.stopInteraction(jobId)` → `Promise<ScrapeBrowserDeleteResponse>`
+
+- `jobId`: scrape job id (same id used for `interact`).
+- Response fields in typings include `success`, `sessionDurationMs`, `creditsBilled`, `error`.
+
 ## Notes
 
-- Deprecated aliases: `scrapeExecute`, `stopInteractiveBrowser`, and `deleteScrapeBrowser` map to `interact` and `stopInteraction`.
+- Deprecated client aliases: `scrapeExecute` → `interact`; `stopInteractiveBrowser` and `deleteScrapeBrowser` → `stopInteraction`.
 - The default `Firecrawl` export is the v2 client; v1 remains under `client.v1`.
 - Zod schemas passed to `formats` (for `json` or `changeTracking`) are converted to JSON Schema by the SDK.
+- The package declares **Node.js >= 22** in `engines`.
 
 ## Source Of Truth
 
-- `firecrawl/apps/js-sdk/firecrawl/package.json`
+- `firecrawl/apps/js-sdk/firecrawl/package.json` (name `@mendable/firecrawl-js`, version)
 - `firecrawl/apps/js-sdk/firecrawl/src/index.ts`
 - `firecrawl/apps/js-sdk/firecrawl/src/v2/client.ts`
 - `firecrawl/apps/js-sdk/firecrawl/src/v2/types.ts`
