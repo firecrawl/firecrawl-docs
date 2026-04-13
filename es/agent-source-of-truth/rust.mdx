@@ -13,6 +13,8 @@ Fuente canónica de Firecrawl para Rust para agentes. Generada a partir del cód
 cargo add firecrawl
 ```
 
+Crate: **`firecrawl`** en crates.io. El `Cargo.toml` del monorepo de Firecrawl para este SDK es actualmente **1.4.0** (verifica la última versión en crates.io antes de fijarla).
+
 <div id="authenticate">
   ## Autenticación
 </div>
@@ -21,7 +23,8 @@ cargo add firecrawl
 use firecrawl::v2::Client;
 
 let client = Client::new("fc-your-api-key")?;
-// let client = Client::new_selfhosted("https://api.firecrawl.dev", Some("fc-your-api-key"))?;
+// Ejemplo autogestionado:
+// let client = Client::new_selfhosted("http://localhost:3002", Some("fc-your-api-key"))?;
 ```
 
 <div id="when-to-use-what">
@@ -46,7 +49,7 @@ Usa búsqueda para descubrir páginas relevantes a partir de una consulta y lueg
   ### Método recomendado del SDK
 </div>
 
-`client.search(query, options)`
+`client.search(query, options)` → `Result<SearchResponse, FirecrawlError>`
 
 <div id="simple-example">
   ### Ejemplo simple
@@ -94,12 +97,27 @@ let results = client
     .await?;
 ```
 
+<div id="return-type">
+  ### Tipo de retorno
+</div>
+
+`client.search(...)` devuelve `Result<SearchResponse, FirecrawlError>`.
+
+* `SearchResponse`
+  * `success: bool`
+  * `data: SearchData`
+  * `warning: Option<String>`
+* `SearchData`
+  * `web: Option<Vec<SearchResultOrDocument>>` — cada elemento es `SearchResultOrDocument::WebResult(SearchResultWeb)` (url, título, descripción, …) o `SearchResultOrDocument::Document(Document)` cuando la API devolvió contenido extraído para ese resultado (se detecta cuando hay markdown, html, rawHtml o metadata).
+  * `news: Option<Vec<SearchResultNews>>`
+  * `images: Option<Vec<SearchResultImage>>`
+
 <div id="parameters">
   ### Parámetros
 </div>
 
 * `query`
-  * Tipo: &amp;str
+  * Tipo: `impl AsRef<str>`
   * Úsalo cuando: necesites una consulta de búsqueda.
   * Notas: usa `site:example.com` para limitar los resultados a un dominio.
 
@@ -137,6 +155,11 @@ let results = client
   * Tipo: `ScrapeOptions`
   * Úsalo cuando: quieras hacer scraping de cada resultado de búsqueda (consulta los parámetros de scraping para ver los campos).
 
+* `options.integration`
+  * Tipo: `Option<String>`
+  * Úsalo cuando: necesites un identificador de integración para el seguimiento del lado del servidor.
+  * Notas: omítelo en ejemplos orientados a agentes, a menos que tu producto lo configure intencionalmente.
+
 <div id="scrape">
   ## Scraping
 </div>
@@ -151,7 +174,7 @@ Usa scraping si ya tienes una URL y quieres contenido estructurado en uno o vari
   ### Método recomendado del SDK
 </div>
 
-`client.scrape(url, options)`
+`client.scrape(url, options)` → `Result<Document, FirecrawlError>` (el campo `data` de la respuesta HTTP se extrae en el SDK).
 
 <div id="simple-example">
   ### Ejemplo simple
@@ -226,7 +249,7 @@ let doc = client
 </div>
 
 * `url`
-  * Tipo: &amp;str
+  * Tipo: `impl AsRef<str>`
   * Úsalo cuando: quieras hacer scraping de una página concreta.
 
 * `options.formats`
@@ -326,6 +349,11 @@ let doc = client
   * Úsalo cuando: quieras un perfil de navegador persistente compartido entre procesos de scraping e interacciones.
   * Campos confirmados: `name`, `save_changes`
 
+* `options.integration`
+  * Tipo: `Option<String>`
+  * Úsalo cuando: necesites un identificador de integración para el seguimiento en el servidor.
+  * Notas: omítelo en ejemplos orientados a agentes, a menos que tu producto lo establezca intencionadamente.
+
 * `options.json_options`
   * Tipo: `JsonOptions`
   * Úsalo cuando: quieras configurar la extracción JSON.
@@ -361,6 +389,8 @@ Usa interact cuando una página requiere acciones del navegador o la ejecución 
 </div>
 
 `client.interact(job_id, options)`
+
+Para cerrar la sesión del navegador, usa `client.stop_interaction(job_id)` (HTTP `DELETE` en `/v2/scrape/{jobId}/interact`).
 
 <div id="simple-example">
   ### Ejemplo simple
@@ -400,20 +430,29 @@ let result = client
     .await?;
 ```
 
+<div id="stop-session">
+  ### Finalizar sesión
+</div>
+
+```rust
+let stopped = client.stop_interaction("<scrapeJobId>").await?;
+// stopped: ScrapeBrowserDeleteResponse { success, session_duration_ms, credits_billed, error, ... }
+```
+
 <div id="parameters">
   ### Parámetros
 </div>
 
 * `job_id`
-  * Tipo: &amp;str
+  * Tipo: `impl AsRef<str>`
   * Úsalo cuando: tengas un ID de trabajo de scraping.
 
 * `options.code`
-  * Tipo: String
+  * Tipo: `Option<String>`
   * Úsalo cuando: quieras ejecutar código en la sesión del navegador.
 
 * `options.prompt`
-  * Tipo: String
+  * Tipo: `Option<String>`
   * Úsalo cuando: quieras que el agente del navegador siga una instrucción en lenguaje natural.
 
 * `options.language`
@@ -426,18 +465,39 @@ let result = client
   * Tipo: u32
   * Úsalo cuando: necesites un tiempo de espera de ejecución en segundos.
 
+* `options.origin`
+  * Tipo: `Option<String>`
+  * Úsalo cuando: necesites una etiqueta de origen opcional para la telemetría de ejecución.
+  * Notas: omítelo en ejemplos orientados a agentes, a menos que tu producto lo establezca intencionalmente.
+
+Al menos uno de `options.code` o `options.prompt` no debe estar vacío; de lo contrario, el SDK devuelve `FirecrawlError::Missuse` antes de llamar a la API.
+
+<div id="response-types">
+  ### Tipos de respuesta
+</div>
+
+* `interact` → `Result<ScrapeExecuteResponse, FirecrawlError>`
+  * `success: bool` siempre está presente; `live_view_url`, `interactive_live_view_url`, `output`, `stdout`, `result`, `stderr`, `exit_code`, `killed` y `error` son campos `Option` de la estructura.
+* `stop_interaction` → `Result<ScrapeBrowserDeleteResponse, FirecrawlError>`
+  * `success: bool` siempre está presente; `session_duration_ms`, `credits_billed` y `error` son opcionales.
+
+Actualmente, la especificación OpenAPI v2 modela el cuerpo de la solicitud de `interact` con `code` como obligatorio; el SDK de Rust se ajusta al comportamiento del servidor al aceptar **o bien** `code` **o** `prompt` (consulta `ScrapeExecuteOptions` en `scrape.rs`).
+
 <div id="notes">
   ## Notas
 </div>
 
 * Alias en desuso: `scrape_execute`, `stop_interactive_browser` y `delete_scrape_browser` corresponden a `interact` y `stop_interaction`.
 * `ScrapeOptions` incluye `json_options`, `screenshot_options` y `change_tracking_options` específicos para formatos avanzados.
+* `search_and_scrape(query, limit)` es un helper práctico: llama a `search` con `ScrapeOptions` predeterminado y devuelve `Vec<Document>` a partir de las entradas `SearchResultOrDocument::Document` de `data.web` (ver `search.rs`).
 
 <div id="source-of-truth">
   ## Fuente canónica
 </div>
 
 * `firecrawl/apps/rust-sdk/Cargo.toml`
+* `firecrawl/apps/rust-sdk/src/lib.rs`
+* `firecrawl/apps/rust-sdk/src/v2/mod.rs`
 * `firecrawl/apps/rust-sdk/src/v2/client.rs`
 * `firecrawl/apps/rust-sdk/src/v2/search.rs`
 * `firecrawl/apps/rust-sdk/src/v2/scrape.rs`

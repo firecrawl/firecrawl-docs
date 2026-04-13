@@ -3,7 +3,7 @@ title: "Node.js 权威来源"
 description: "适用于使用 search、scrape 和 interact 等关键端点的代理的 Firecrawl Node.js 权威来源。"
 ---
 
-面向代理的 Firecrawl Node.js 权威来源。根据 SDK 源代码和 v2 OpenAPI 规范生成。
+面向代理的 Firecrawl Node.js 权威来源。与 `@mendable/firecrawl-js` **v4.18.2** (`firecrawl/apps/js-sdk/firecrawl`) 及 v2 OpenAPI 规范保持一致。方法名称、参数和类型均与 SDK 的公共 API 一致。
 
 <div id="install">
   ## 安装
@@ -22,7 +22,7 @@ import Firecrawl from "@mendable/firecrawl-js";
 
 const client = new Firecrawl({
   apiKey: process.env.FIRECRAWL_API_KEY,
-  // apiUrl: "https://api.firecrawl.dev" // 可选，用于自托管实例
+  // apiUrl: "https://api.firecrawl.dev" // 可选；未设置时回退到 FIRECRAWL_API_URL 或云端默认值
 });
 ```
 
@@ -32,7 +32,7 @@ const client = new Firecrawl({
 
 * `search`：当你从查询出发、需要先发现目标时使用。
 * `scrape`：当你已经有 URL，想获取页面内容时使用。
-* `interact`：当页面需要点击、填写表单或抓取后的浏览器 actions 时使用。
+* `interact`：当页面在 `scrape` 创建会话后需要点击、填写表单或其他浏览器操作时使用。对于多步骤交互流程，优先使用 `interact`，而不是抓取时的 `actions`。
 
 <div id="search">
   ## Search
@@ -43,10 +43,10 @@ const client = new Firecrawl({
 使用 search 根据查询发现相关页面，然后选择要抓取或交互的 URL。你可以使用 `site:` 将结果限定在某个站点范围内，例如 `site:docs.firecrawl.dev crawl webhooks`。
 
 <div id="preferred-sdk-method">
-  ### 推荐的 SDK 方法
+  ### 首选 SDK 方法
 </div>
 
-`client.search(query, options?)`
+`client.search(query, options?)` → `Promise<SearchData>`
 
 <div id="simple-example">
   ### 简单示例
@@ -83,6 +83,16 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
 });
 ```
 
+<div id="return-value">
+  ### 返回值
+</div>
+
+`SearchData` 是一个对象，包含可选数组 (每一项要么是轻量级结果对象，要么是当 `scrapeOptions` 对命中结果进行 hydration 后返回的完整 `Document`) ：
+
+* `web`：网页索引命中结果
+* `news`：新闻命中结果
+* `images`：图片命中结果
+
 <div id="parameters">
   ### 参数
 </div>
@@ -91,6 +101,9 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
   * 类型: string
   * 使用场景：需要提供搜索查询时。
   * 说明：使用 `site:example.com` 可将结果限制在某个域名下。
+
+* `options` (可选；第二个参数默认值为 `{}`)
+  * 类型: `Omit<SearchRequest, "query">`
 
 * `options.sources`
   * 类型: 来源名称数组或带类型的来源对象数组
@@ -131,8 +144,8 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
   * 使用场景：你需要以毫秒为单位设置请求超时时间。
 
 * `options.scrapeOptions`
-  * 类型: ScrapeOptions
-  * 使用场景：你想抓取每条搜索结果 (字段请参见 Scrape 参数) 。
+  * 类型: `ScrapeOptions`
+  * 使用场景：你想抓取每条搜索结果 (字段请参见 Scrape 参数) 。SDK 会执行与 `scrape` 相同的校验 (例如，`formats` 中的普通字符串 `"json"` 会被拒绝)。
 
 <div id="scrape">
   ## 抓取
@@ -142,9 +155,11 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
 
 当你已经有一个 URL，并且希望获取一种或多种 formats 的结构化内容时，请使用 `scrape`。
 
-### 首选 SDK 方法
+<div id="preferred-sdk-method">
+  ### 首选 SDK 方法
+</div>
 
-`client.scrape(url, options?)`
+`client.scrape(url, options?)` → `Promise<Document>`
 
 <div id="simple-example">
   ### 简单示例
@@ -204,7 +219,7 @@ const doc = await client.scrape("https://example.com/pricing", {
 * `options.formats`
   * Type: 格式字符串或格式对象数组
   * 使用场景：需要多种输出格式时。
-  * 已确认的格式字符串：
+  * 纯字符串格式 (`FormatString` 联合类型也包含 `"json"`，但 SDK 会拒绝将 `"json"` 作为纯字符串——请改用下方的 `json` 对象) ：
     * `"markdown"`: markdown 内容
     * `"html"`: 清理后的 HTML
     * `"rawHtml"`: 原始 HTML
@@ -212,20 +227,21 @@ const doc = await client.scrape("https://example.com/pricing", {
     * `"images"`: 图片 URL
     * `"screenshot"`: screenshot 输出
     * `"summary"`: 摘要输出
-    * `"changeTracking"`: 变更追踪输出
-    * `"json"`: JSON 提取
-    * `"attributes"`: 属性提取
+    * `"changeTracking"`: 变更追踪输出 (如需使用 `modes` 等选项，请使用 `{ type: "changeTracking", modes: [...] }`——在类型定义中，该对象的 `modes` 为必填)
+    * `"attributes"`: 属性提取 (传入 `selectors` 时，请使用 `{ type: "attributes", selectors: [...] }`)
     * `"branding"`: 品牌资料输出
     * `"audio"`: 音频提取
-    * `"query"`: 问答输出
-  * 格式对象字段：
-    * `type`: 上述格式字符串之一
-    * `prompt`: `type: "query"` 时为必填；`type: "json"` 时除非提供了 `schema`，否则为必填
-    * `schema`: 用于 `type: "json"` 或变更追踪 JSON 模式的 JSON schema (或 Zod schema)
-    * `modes`: `type: "changeTracking"` 时，为由 `"git-diff"` 或 `"json"` 组成的数组
-    * `tag`: `type: "changeTracking"` 时使用的变更追踪标签
-    * `fullPage`, `quality`, `viewport`: `type: "screenshot"` 的 screenshot 选项
-    * `selectors`: `type: "attributes"` 时为 `{ selector, attribute }` 数组
+  * 仅支持对象的格式类型 (至少需要包含如下所示的 `type`) ：
+    * `{ type: "json", prompt?: string, schema?: JSON schema or Zod schema }`: `prompt` 或 `schema` 至少需要提供一个 (SDK 验证) 。
+    * `{ type: "query", prompt: string }`: 问答式提取。
+    * `{ type: "screenshot", fullPage?, quality?, viewport? }`: 与字符串形式相同的选项，但以对象形式传递。
+    * `{ type: "changeTracking", modes: ("git-diff" | "json")[], schema?, prompt?, tag? }`: `modes` 为必填。
+    * `{ type: "attributes", selectors: Array<{ selector, attribute }> }`
+  * 适用时的共享对象字段：
+    * `schema`: 用于 `json` 的 JSON schema 或 Zod schema，或用于 `changeTracking` 的 `json` 模式 (Zod 会由 SDK 转换为 JSON Schema) 。
+    * `modes`: 仅用于 `changeTracking`：`"git-diff"` 和/或 `"json"`。
+    * `tag`: 可选的变更追踪分支标签。
+    * `fullPage`, `quality`, `viewport`: screenshot 选项。
 
 * `options.headers`
   * 类型：键和值均为字符串的记录
@@ -327,14 +343,16 @@ const doc = await client.scrape("https://example.com/pricing", {
 </div>
 
 <div id="why-use-it">
-  ### 为什么使用它
+  ### 为什么要用它
 </div>
 
-当页面在开始抓取后需要执行浏览器 actions 或运行代码时，请使用 interact。
+使用 `interact` 可通过代码或自然语言控制与抓取任务关联的浏览器会话 (通过 `metadata.scrapeId`) 。SDK 要求至少提供 `code` 或 `prompt` 之一。对于不只是抓取前快速调整的流程，优先使用 `interact`，而不是抓取时的 `actions`。
 
-### 首选 SDK 方法
+<div id="preferred-sdk-method">
+  ### 首选 SDK 方法
+</div>
 
-`client.interact(jobId, args)`
+`client.interact(jobId, args)` → `Promise<ScrapeExecuteResponse>`
 
 <div id="simple-example">
   ### 简单示例
@@ -372,34 +390,64 @@ const result = await client.interact("<scrapeJobId>", {
 
 * `args.code`
   * 类型：string
-  * 适用场景：你想在浏览器会话中运行代码。
+  * 适用场景：你想在浏览器会话中运行代码 (例如在 `node` 运行时中使用 Playwright 的 `page`) 。
 
 * `args.prompt`
   * 类型：string
   * 适用场景：你希望浏览器代理按自然语言指令执行。
 
+* `args.code` 或 `args.prompt` 中至少有一个必须非空 (否则 SDK 会抛出异常) 。
+
 * `args.language`
   * 类型：string
   * 适用场景：你需要指定特定的运行时。
   * 可用值：`"python"`、`"node"`、`"bash"`
+  * 省略时默认值：`"node"` (由 SDK 在请求体中设置) 。
 
 * `args.timeout`
   * 类型：number
   * 适用场景：你需要设置以秒为单位的执行超时时间。
 
+<div id="return-value-interact">
+  ### 返回值 (`interact`)
+</div>
+
+`ScrapeExecuteResponse` 与 `BrowserExecuteResponse` 保持一致。已确认的字段包括：
+
+* `success`: 布尔值
+* `output`: 字符串 (存在时为汇总输出) 
+* `stdout`: 字符串
+* `result`: 字符串 (类型定义中与 stdout 并列的别名字段) 
+* `stderr`: 字符串
+* `exitCode`: 数值
+* `killed`: 布尔值
+* `liveViewUrl`: 字符串
+* `interactiveLiveViewUrl`: 字符串
+* `error`: 字符串
+
+<div id="stop-session">
+  ### 停止会话
+</div>
+
+`client.stopInteraction(jobId)` → `Promise<ScrapeBrowserDeleteResponse>`
+
+* `jobId`：抓取任务 ID (与 `interact` 使用的 ID 相同) 。
+* 类型定义中的响应字段包括 `success`、`sessionDurationMs`、`creditsBilled` 和 `error`。
+
 <div id="notes">
   ## 说明
 </div>
 
-* 已弃用的别名：`scrapeExecute`、`stopInteractiveBrowser` 和 `deleteScrapeBrowser` 对应 `interact` 和 `stopInteraction`。
+* 已弃用的客户端别名：`scrapeExecute` → `interact`；`stopInteractiveBrowser` 和 `deleteScrapeBrowser` → `stopInteraction`。
 * 默认导出的 `Firecrawl` 是 v2 客户端；v1 仍可通过 `client.v1` 使用。
 * 传递给 `formats` (用于 `json` 或 `changeTracking`) 的 Zod schema 会被 SDK 转换为 JSON Schema。
+* 该软件包在 `engines` 中声明 **Node.js &gt;= 22**。
 
 <div id="source-of-truth">
   ## 权威来源
 </div>
 
-* `firecrawl/apps/js-sdk/firecrawl/package.json`
+* `firecrawl/apps/js-sdk/firecrawl/package.json` (名称 `@mendable/firecrawl-js`，版本) 
 * `firecrawl/apps/js-sdk/firecrawl/src/index.ts`
 * `firecrawl/apps/js-sdk/firecrawl/src/v2/client.ts`
 * `firecrawl/apps/js-sdk/firecrawl/src/v2/types.ts`

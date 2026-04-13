@@ -3,7 +3,7 @@ title: "source de référence Python"
 description: "source de référence Python officielle de Firecrawl pour les agents qui utilisent des points de terminaison clés comme search, scrape et interact."
 ---
 
-source de référence Python officielle de Firecrawl pour les agents. Générée à partir du code source du SDK et de la spécification OpenAPI v2."
+source de référence Python officielle de Firecrawl pour les agents. Générée à partir du code source du SDK (`firecrawl-py` / `firecrawl` **4.22.1**) et de la spécification OpenAPI v2. Les noms de méthode, les paramètres et les types de retour correspondent à ceux du client v2 dans `firecrawl/v2/client.py`, sauf indication contraire.
 
 <div id="install">
   ## Installation
@@ -47,7 +47,19 @@ Utilisez la recherche pour découvrir des pages pertinentes à partir d&#39;une 
   ### Méthode recommandée du SDK
 </div>
 
-`client.search(query, **options)`
+`client.search(query, **options)` → `SearchData` (`firecrawl.v2.types`)
+
+<div id="return-value">
+  ### Valeur de retour
+</div>
+
+Renvoie un modèle `SearchData` avec des listes facultatives :
+
+* `web` — résultats web (`SearchResultWeb` ou `Document` complet lorsque `scrape_options` hydrate le contenu)
+* `news` — résultats d’actualité (`SearchResultNews` ou `Document`)
+* `images` — résultats d’images (`SearchResultImages` ou `Document`)
+
+Les groupes omis valent `None` lorsque l’API n’a pas renvoyé cette clé.
 
 <div id="simple-example">
   ### Exemple simple
@@ -55,6 +67,8 @@ Utilisez la recherche pour découvrir des pages pertinentes à partir d&#39;une 
 
 ```py
 results = client.search("site:docs.firecrawl.dev webhook retries")
+for item in results.web or []:
+    print(getattr(item, "url", None), getattr(item, "title", None))
 ```
 
 <div id="complex-example">
@@ -157,7 +171,7 @@ Utilisez scrape si vous avez déjà une URL et souhaitez un contenu structuré d
   ### Méthode recommandée du SDK
 </div>
 
-`client.scrape(url, **options)`
+`client.scrape(url, **options)` → `Document` (`firecrawl.v2.types`)
 
 <div id="simple-example">
   ### Exemple simple
@@ -222,14 +236,15 @@ doc = client.scrape(
     * `"screenshot"`: sortie de capture d’écran
     * `"summary"`: sortie de résumé
     * `"changeTracking"` ou `"change_tracking"`: sortie de suivi des modifications
-    * `"json"`: extraction JSON
     * `"attributes"`: extraction d’attributs
     * `"branding"`: sortie du profil de branding
     * `"audio"`: extraction audio
-    * `"query"`: sortie de questions-réponses
+  * Types de format uniquement sous forme d’objet :
+    * `{"type": "json", ...}`: extraction JSON. Utilisez un objet, et non la chaîne simple `"json"`.
+    * `{"type": "query", "prompt": "..."}`: sortie de questions-réponses. Utilisez un objet, et non la chaîne simple `"query"`.
   * Champs de l’objet de format :
-    * `type`: l’une des chaînes de format ci-dessus
-    * `prompt`: pour `type: "json"` ou `type: "query"`
+    * `type`: l’une des chaînes de format ci-dessus, ou `"json"` / `"query"` pour les formats uniquement sous forme d’objet
+    * `prompt`: pour `type: "query"` et facultatif pour `type: "json"`
     * `schema`: schéma JSON pour `type: "json"` ou pour le mode JSON du suivi des modifications
     * `modes`: tableau de `"git-diff"` ou `"json"` pour `type: "changeTracking"`
     * `tag`: balise de suivi des modifications pour `type: "changeTracking"`
@@ -317,7 +332,7 @@ doc = client.scrape(
 * `min_age`
   * Type : int
   * À utiliser si : vous souhaitez des données en cache uniquement si elles ont au moins cet âge (en millisecondes).
-  * Remarques : disponible dans `ScrapeOptions` (par exemple dans `scrape_options`) ; ce n’est pas un paramètre direct de `client.scrape`.
+  * Remarques : uniquement dans `ScrapeOptions` passé comme `scrape_options` à `client.search`. La méthode `client.scrape` n’accepte pas `min_age`.
 
 * `store_in_cache`
   * Type : bool
@@ -339,7 +354,9 @@ Utilisez interact lorsqu’une page nécessite des actions dans le navigateur ou
   ### Méthode recommandée du SDK
 </div>
 
-`client.interact(job_id, code=None, prompt=None, language="node", timeout=None)`
+`client.interact(job_id, code=None, *, prompt=None, language="node", timeout=None)`
+
+`prompt` doit être passé comme argument nommé : appelez `client.interact(job_id, prompt="...")` ou `client.interact(job_id, code="...")`. Au moins l’un de `code` ou `prompt` doit être renseigné (validation effectuée dans `firecrawl/v2/methods/scrape.py`).
 
 <div id="simple-example">
   ### Exemple simple
@@ -367,6 +384,12 @@ result = client.interact(
 )
 ```
 
+<div id="stop-session">
+  ### Arrêter la session
+</div>
+
+`client.stop_interaction(job_id)` met fin à la session de navigateur associée au scrape. Renvoie `BrowserDeleteResponse` (`success`, optional `session_duration_ms`, `credits_billed`, `error`).
+
 <div id="parameters">
   ### Paramètres
 </div>
@@ -377,11 +400,11 @@ result = client.interact(
 
 * `code`
   * Type : str
-  * À utiliser lorsque : vous souhaitez exécuter du code dans la session de navigateur.
+  * À utiliser lorsque : vous souhaitez exécuter du code dans la session de navigateur (facultatif si `prompt` est défini).
 
 * `prompt`
   * Type : str
-  * À utiliser lorsque : vous souhaitez que l’agent du navigateur suive une instruction en langage naturel.
+  * À utiliser lorsque : vous souhaitez que l’agent du navigateur suive une instruction en langage naturel (facultatif si `code` est défini).
 
 * `language`
   * Type : str
@@ -393,12 +416,19 @@ result = client.interact(
   * Type : int
   * À utiliser lorsque : vous avez besoin d’un délai d’exécution maximal en secondes.
 
+<div id="return-value">
+  ### Valeur de retour
+</div>
+
+Renvoie `BrowserExecuteResponse` : `success`, `live_view_url` (facultatif), `interactive_live_view_url`, `output`, `stdout`, `result`, `stderr`, `exit_code`, `killed`, `error` (le camelCase de l’API est normalisé en snake&#95;case dans le modèle).
+
 <div id="notes">
   ## Remarques
 </div>
 
-* Alias dépréciés : `scrape_execute`, `stop_interactive_browser` et `delete_scrape_browser` renvoient à `interact` et `stop_interaction`.
+* Alias dépréciés : `scrape_execute` → `interact` ; `stop_interactive_browser` et `delete_scrape_browser` → `stop_interaction`.
 * Le client `Firecrawl` principal expose directement les méthodes v2 ; la v1 reste disponible sous `client.v1`.
+* Il est possible que l’extrait OpenAPI v2 fourni pour `POST /v2/scrape/{jobId}/interact` ne documente que `code` ; le Python SDK et le serveur acceptent `code` ou `prompt` pour ce point de terminaison.
 
 <div id="source-of-truth">
   ## Source de référence
