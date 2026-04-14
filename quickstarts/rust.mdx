@@ -1,8 +1,8 @@
 ---
 title: "Rust"
-description: "Get started with Firecrawl in Rust. Search, scrape, and interact with web data using the firecrawl crate."
+description: "Get started with Firecrawl in Rust. Search, scrape, and interact with web data using the official SDK."
 og:title: "Rust Quickstart | Firecrawl"
-og:description: "Get started with Firecrawl in Rust. Search, scrape, and interact with web data using the firecrawl crate."
+og:description: "Get started with Firecrawl in Rust. Search, scrape, and interact with web data using the official SDK."
 ---
 
 ## Prerequisites
@@ -16,24 +16,31 @@ Add `firecrawl` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-firecrawl = "1"
+firecrawl = "2"
 tokio = { version = "1", features = ["full"] }
 serde_json = "1"
-reqwest = { version = "0.12", features = ["json"] }
 ```
 
 ## Search the web
 
 ```rust
-use firecrawl::v2::Client;
+use firecrawl::{Client, SearchOptions};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::new("fc-YOUR-API-KEY")?;
-    let results = client.search("firecrawl web scraping", None).await?;
 
-    for result in &results {
-        println!("{} - {}", result.title.as_deref().unwrap_or(""), result.url.as_deref().unwrap_or(""));
+    let results = client.search(
+        "firecrawl web scraping",
+        SearchOptions { limit: Some(5), ..Default::default() },
+    ).await?;
+
+    if let Some(web) = results.data.web {
+        for item in web {
+            if let firecrawl::SearchResultOrDocument::WebResult(r) = item {
+                println!("{} - {}", r.url, r.title.unwrap_or_default());
+            }
+        }
     }
     Ok(())
 }
@@ -60,45 +67,45 @@ println!("{}", doc.markdown.unwrap_or_default());
 
 ## Interact with a page
 
-The interact API uses prompt-based commands over HTTP. Scrape a page to get a `scrapeId`, then send prompts to control the browser session:
+Scrape a page to get a `scrapeId`, then use the interact API to control the browser session:
 
 ```rust
-use reqwest::Client as HttpClient;
-use serde_json::json;
+use firecrawl::{Client, ScrapeOptions, Format, ScrapeExecuteOptions};
 
-let api_key = "fc-YOUR-API-KEY";
-let http = HttpClient::new();
+let doc = client.scrape(
+    "https://www.amazon.com",
+    ScrapeOptions {
+        formats: Some(vec![Format::Markdown]),
+        ..Default::default()
+    },
+).await?;
 
-// 1. Scrape to open a browser session
-let scrape_res: serde_json::Value = http
-    .post("https://api.firecrawl.dev/v2/scrape")
-    .bearer_auth(api_key)
-    .json(&json!({ "url": "https://www.amazon.com", "formats": ["markdown"] }))
-    .send().await?
-    .json().await?;
+let scrape_id = doc.metadata
+    .as_ref()
+    .and_then(|m| m.scrape_id.as_deref())
+    .expect("scrapeId not found");
 
-let scrape_id = scrape_res["data"]["metadata"]["scrapeId"]
-    .as_str().unwrap();
+// Send a prompt to interact with the page
+let run = client.interact(
+    scrape_id,
+    ScrapeExecuteOptions {
+        prompt: Some("Search for iPhone 16 Pro Max".to_string()),
+        ..Default::default()
+    },
+).await?;
 
-// 2. Send prompts to interact
-http.post(format!("https://api.firecrawl.dev/v2/scrape/{scrape_id}/interact"))
-    .bearer_auth(api_key)
-    .json(&json!({ "prompt": "Search for iPhone 16 Pro Max" }))
-    .send().await?;
+let run = client.interact(
+    scrape_id,
+    ScrapeExecuteOptions {
+        prompt: Some("Click on the first result and tell me the price".to_string()),
+        ..Default::default()
+    },
+).await?;
 
-let interact_res: serde_json::Value = http
-    .post(format!("https://api.firecrawl.dev/v2/scrape/{scrape_id}/interact"))
-    .bearer_auth(api_key)
-    .json(&json!({ "prompt": "Click on the first result and tell me the price" }))
-    .send().await?
-    .json().await?;
+println!("{:?}", run.output);
 
-println!("{}", interact_res);
-
-// 3. Close the session
-http.delete(format!("https://api.firecrawl.dev/v2/scrape/{scrape_id}/interact"))
-    .bearer_auth(api_key)
-    .send().await?;
+// Close the session
+client.stop_interaction(scrape_id).await?;
 ```
 
 ## Environment variable
@@ -109,9 +116,10 @@ Set `FIRECRAWL_API_KEY` instead of passing the key directly:
 export FIRECRAWL_API_KEY=fc-YOUR-API-KEY
 ```
 
-<Note>
-The `firecrawl` crate also supports the v1 API via `FirecrawlApp`. See the [Rust SDK docs](/sdks/rust) for the full API surface.
-</Note>
+```rust
+let api_key = std::env::var("FIRECRAWL_API_KEY")?;
+let client = Client::new(api_key)?;
+```
 
 ## Next steps
 
@@ -126,6 +134,6 @@ The `firecrawl` crate also supports the v1 API via `FirecrawlApp`. See the [Rust
     Click, fill forms, and extract dynamic content
   </Card>
   <Card title="Rust SDK reference" icon="rust" href="/sdks/rust">
-    Full SDK reference with crawl, map, and more
+    Full SDK reference with crawl, map, batch scrape, and more
   </Card>
 </CardGroup>
