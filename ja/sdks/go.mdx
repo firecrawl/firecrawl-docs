@@ -1,80 +1,570 @@
 ---
-title: 'Go'
-description: 'Firecrawl Go SDK を使用すると、任意の Go アプリケーションから Web サイトのスクレイピング、クロール、マッピングを行えます。'
-icon: 'golang'
+title: "Go"
+description: "Firecrawl Go SDK は、Web サイトを簡単に Markdown に変換するための Firecrawl API のラッパーです。"
+icon: "golang"
 og:title: "Go SDK | Firecrawl"
-og:description: "Firecrawl Go SDK を使用すると、任意の Go アプリケーションから Web サイトのスクレイピング、クロール、マッピングを行えます。"
+og:description: "Firecrawl Go SDK は、Web サイトを簡単に Markdown に変換するための Firecrawl API のラッパーです。"
 ---
-
-import InstallGoSDK from "/snippets/ja/v1/installation/go.mdx";
-import ScrapeAndCrawlGoExample from "/snippets/ja/v1/scrape-and-crawl/go.mdx";
-import ScrapeGoShort from "/snippets/ja/v1/scrape/short/go.mdx";
-import CrawlGoShort from "/snippets/ja/v1/crawl/short/go.mdx";
-import CheckCrawlStatusGoShort from "/snippets/ja/v1/crawl-status/short/go.mdx";
-import MapGoShort from "/snippets/ja/v1/map/short/go.mdx";
-
-<Warning>
-  この SDK は現在、最新ではない Firecrawl API の **v1** を使用しています (v2 が利用可能です) 。一部の機能や改善は v2 のみで利用できる場合があります。
-</Warning>
-
-Firecrawl Go SDK を使うと、任意の Go アプリケーションから Web サイトをスクレイピング、クロール、マッピングできます。数回のメソッド呼び出しで、整形された Markdown、構造化データ、またはスクリーンショットを取得できます。
 
 <div id="installation">
   ## インストール
 </div>
 
+公式の Go SDK は、Firecrawl のモノレポ内の [apps/go-sdk](https://github.com/firecrawl/firecrawl/tree/main/apps/go-sdk) で管理されています。
+
 Firecrawl Go SDK をインストールするには、次を実行します。
 
-<InstallGoSDK />
+```bash
+go get github.com/firecrawl/firecrawl/apps/go-sdk
+```
+
+<Note>Go 1.23以降が必要です。</Note>
 
 <div id="usage">
-  ## 使い方
+  ## 使用方法
 </div>
 
-1. [firecrawl.dev](https://firecrawl.dev) から API キーを取得します。
-2. `FirecrawlApp` インスタンスの作成時に API キーを渡します。
-3. 必要に応じて `apiUrl` (デフォルトは `https://api.firecrawl.dev`) と `version` (デフォルトは `v1`) を設定します。
+1. [firecrawl.dev](https://firecrawl.dev)でAPIキーを取得します
+2. APIキーを `FIRECRAWL_API_KEY` という名前の環境変数に設定するか、`option.WithAPIKey(...)` で渡します
 
-エラーハンドリングを含む完全な例は次のとおりです:
+以下は、現在のSDK APIを使った簡単な例です。
 
-<ScrapeAndCrawlGoExample />
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+
+	firecrawl "github.com/firecrawl/firecrawl/apps/go-sdk"
+	"github.com/firecrawl/firecrawl/apps/go-sdk/option"
+)
+
+func main() {
+	// クライアントを作成する（環境変数から FIRECRAWL_API_KEY を読み込む）
+	client, err := firecrawl.NewClient()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// または API キーを直接指定する
+	client, err = firecrawl.NewClient(
+		option.WithAPIKey("fc-your-api-key"),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ctx := context.Background()
+
+	// 単一ページをスクレイピングする
+	doc, err := client.Scrape(ctx, "https://firecrawl.dev", &firecrawl.ScrapeOptions{
+		Formats: []string{"markdown"},
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(doc.Markdown)
+
+	// Web サイトをクロールする
+	job, err := client.Crawl(ctx, "https://firecrawl.dev", &firecrawl.CrawlOptions{
+		Limit: firecrawl.Int(5),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("Crawled pages: %d\n", len(job.Data))
+}
+```
 
 <div id="scraping-a-url">
-  ### URLのスクレイピング
+  ### URLをスクレイピングする
 </div>
 
-エラー処理付きで単一のURLをスクレイピングするには、`ScrapeURL` メソッドを使用します。URLを引数に取り、取得したデータをディクショナリとして返します。
+単一のURLをスクレイピングするには、`Scrape`メソッドを使用します。
 
-<ScrapeGoShort />
+```go
+doc, err := client.Scrape(ctx, "https://firecrawl.dev", &firecrawl.ScrapeOptions{
+	Formats:         []string{"markdown", "html"},
+	OnlyMainContent: firecrawl.Bool(true),
+	WaitFor:         firecrawl.Int(5000),
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Println(doc.Markdown)
+fmt.Println(doc.Metadata["title"])
+```
+
+<div id="json-extraction">
+  #### JSON抽出
+</div>
+
+`Scrape` エンドポイントで `JsonOptions` を使用して、構造化されたJSONを抽出します:
+
+```go
+doc, err := client.Scrape(ctx, "https://example.com/product", &firecrawl.ScrapeOptions{
+	Formats: []string{"json"},
+	JsonOptions: &firecrawl.JsonOptions{
+		Prompt: "Extract the product name and price",
+		Schema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"name":  map[string]interface{}{"type": "string"},
+				"price": map[string]interface{}{"type": "number"},
+			},
+		},
+	},
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Println(doc.JSON)
+```
 
 <div id="crawling-a-website">
-  ### ウェブサイトをクロールする
+  ### Web サイトをクロールする
 </div>
 
-ウェブサイトをクロールするには、`CrawlUrl` メソッドを使用します。開始URLと任意のパラメータを引数に取ります。`params` 引数では、クロールする最大ページ数、許可ドメイン、出力フォーマットなど、クロールジョブの追加オプションを指定できます。
+Web サイトをクロールして完了を待つには、`Crawl` を使用します。
 
-<CrawlGoShort />
+```go
+job, err := client.Crawl(ctx, "https://firecrawl.dev", &firecrawl.CrawlOptions{
+	Limit:             firecrawl.Int(50),
+	MaxDiscoveryDepth: firecrawl.Int(3),
+	ScrapeOptions: &firecrawl.ScrapeOptions{
+		Formats: []string{"markdown"},
+	},
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Printf("Status: %s\n", job.Status)
+fmt.Printf("Progress: %d/%d\n", job.Completed, job.Total)
+
+for _, page := range job.Data {
+	fmt.Println(page.Metadata["sourceURL"])
+}
+```
+
+<div id="start-a-crawl">
+  ### クロールを開始する
+</div>
+
+`StartCrawl` を使用すると、待機せずにジョブを開始できます。
+
+```go
+resp, err := client.StartCrawl(ctx, "https://firecrawl.dev", &firecrawl.CrawlOptions{
+	Limit: firecrawl.Int(100),
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Printf("Job ID: %s\n", resp.ID)
+```
 
 <div id="checking-crawl-status">
-  ### クロールステータスの確認
+  ### クロールのステータスを確認する
 </div>
 
-クロールジョブのステータスを確認するには、`CheckCrawlStatus` メソッドを使用します。ジョブ ID を引数に取り、クロールジョブの現在のステータスを返します。
+`GetCrawlStatus`でクロールの進行状況を確認します。
 
-<CheckCrawlStatusGoShort />
+```go
+status, err := client.GetCrawlStatus(ctx, resp.ID)
+if err != nil {
+	log.Fatal(err)
+}
 
-<div id="map-a-website">
-  ### ウェブサイトをマップする
+fmt.Printf("Status: %s\n", status.Status)
+fmt.Printf("Progress: %d/%d\n", status.Completed, status.Total)
+```
+
+<div id="cancelling-a-crawl">
+  ### クロールをキャンセルする
 </div>
 
-`MapUrl` を使って、ウェブサイト内の URL 一覧を生成します。`params` 引数で、サブドメインの除外やサイトマップの活用など、マッピング処理をカスタマイズできます。
+実行中のクロールは `CancelCrawl` でキャンセルできます。
 
-<MapGoShort />
+```go
+result, err := client.CancelCrawl(ctx, resp.ID)
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Println(result)
+```
+
+<div id="mapping-a-website">
+  ### Web サイトのマッピング
+</div>
+
+`Map` を使ってサイト内のリンクを見つけます。
+
+```go
+mapData, err := client.Map(ctx, "https://firecrawl.dev", &firecrawl.MapOptions{
+	Limit:             firecrawl.Int(100),
+	Search:            firecrawl.String("blog"),
+	IncludeSubdomains: firecrawl.Bool(true),
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+for _, link := range mapData.Links {
+	fmt.Println(link["url"], "-", link["title"])
+}
+```
+
+<div id="searching-the-web">
+  ### ウェブを検索する
+</div>
+
+`Search` を使うと、任意の検索設定で検索できます。
+
+```go
+results, err := client.Search(ctx, "firecrawl web scraping", &firecrawl.SearchOptions{
+	Limit: firecrawl.Int(10),
+	ScrapeOptions: &firecrawl.ScrapeOptions{
+		Formats: []string{"markdown"},
+	},
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+for _, result := range results.Web {
+	fmt.Println(result["title"], "-", result["url"])
+}
+```
+
+<div id="batch-scraping">
+  ### バッチスクレイピング
+</div>
+
+`BatchScrape`を使って複数のURLを並列にスクレイピングします。
+
+```go
+urls := []string{
+	"https://firecrawl.dev",
+	"https://firecrawl.dev/blog",
+}
+
+job, err := client.BatchScrape(ctx, urls, &firecrawl.BatchScrapeOptions{
+	ScrapeOptions: &firecrawl.ScrapeOptions{
+		Formats: []string{"markdown"},
+	},
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+for _, doc := range job.Data {
+	fmt.Println(doc.Markdown)
+}
+```
+
+<div id="agent">
+  ### Agent
+</div>
+
+`Agent` を使用して、AI エージェントを実行します。
+
+```go
+status, err := client.Agent(ctx, &firecrawl.AgentOptions{
+	Prompt: "Find the pricing plans for Firecrawl and compare them",
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Println(status.Data)
+```
+
+構造化された出力に JSON schema を使用する場合:
+
+```go
+status, err := client.Agent(ctx, &firecrawl.AgentOptions{
+	Prompt: "Extract pricing plan details",
+	URLs:   []string{"https://firecrawl.dev"},
+	Schema: map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"plans": map[string]interface{}{
+				"type": "array",
+				"items": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"name":  map[string]interface{}{"type": "string"},
+						"price": map[string]interface{}{"type": "string"},
+					},
+				},
+			},
+		},
+	},
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Println(status.Data)
+```
+
+<div id="usage-metrics">
+  ### 使用量 &amp; メトリクス
+</div>
+
+並行実行数と残りのクレジットを確認するには:
+
+```go
+concurrency, err := client.GetConcurrency(ctx)
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Printf("Concurrency: %d/%d\n", concurrency.Concurrency, concurrency.MaxConcurrency)
+
+credits, err := client.GetCreditUsage(ctx)
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Printf("Remaining credits: %d\n", credits.RemainingCredits)
+```
+
+<div id="browser">
+  ## Browser
+</div>
+
+Go SDK には、ブラウザサンドボックスを扱うためのヘルパーが含まれています。
+
+<div id="create-a-session">
+  ### セッションを作成する
+</div>
+
+```go
+session, err := client.Browser(ctx, &firecrawl.BrowserOptions{
+	TTL:           firecrawl.Int(300),
+	StreamWebView: firecrawl.Bool(true),
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Println(session.ID)
+fmt.Println(session.CDPUrl)
+fmt.Println(session.LiveViewURL)
+```
+
+<div id="execute-code">
+  ### コードの実行
+</div>
+
+```go
+result, err := client.BrowserExecute(ctx, session.ID,
+	`await page.goto("https://example.com"); console.log(await page.title());`,
+	&firecrawl.BrowserExecuteParams{
+		Language: "node",
+		Timeout:  firecrawl.Int(60),
+	},
+)
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Println(result.Stdout)
+fmt.Println(*result.ExitCode)
+```
+
+<div id="scrape-bound-interactive-session">
+  ### スクレイピングに紐づいた対話型セッション
+</div>
+
+スクレイピングジョブIDを使うと、同じ再生コンテキスト内で後続のブラウザコードを実行できます。
+
+* `Interact(...)` は、スクレイピングに紐づいたブラウザセッションでコードを実行します (初回使用時に初期化されます) 。
+* `StopInteractiveBrowser(...)` は、完了後に対話型セッションを明示的に停止します。
+
+```go
+scrapeJobID := "550e8400-e29b-41d4-a716-446655440000"
+
+execResp, err := client.Interact(ctx, scrapeJobID, "console.log(page.url())", &firecrawl.InteractParams{
+	Language: "node",
+	Timeout:  firecrawl.Int(60),
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Println(execResp.Stdout)
+
+deleteResp, err := client.StopInteractiveBrowser(ctx, scrapeJobID)
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Printf("Deleted: %v\n", deleteResp.Success)
+```
+
+<div id="list-close-sessions">
+  ### セッションの一覧表示 &amp; 終了
+</div>
+
+```go
+active, err := client.ListBrowsers(ctx, "active")
+if err != nil {
+	log.Fatal(err)
+}
+
+for _, s := range active.Sessions {
+	fmt.Printf("%s - %s\n", s.ID, s.Status)
+}
+
+closed, err := client.DeleteBrowser(ctx, session.ID)
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Printf("Closed: %v\n", closed.Success)
+```
+
+<div id="configuration">
+  ## 設定
+</div>
+
+`firecrawl.NewClient()` では、関数オプションを指定できます。
+
+| Option                     | Type             | Default                                               | Description             |
+| -------------------------- | ---------------- | ----------------------------------------------------- | ----------------------- |
+| `option.WithAPIKey`        | `string`         | `FIRECRAWL_API_KEY` 環境変数                              | Firecrawl APIキー         |
+| `option.WithAPIURL`        | `string`         | `https://api.firecrawl.dev` (または `FIRECRAWL_API_URL`) | APIのベースURL              |
+| `option.WithTimeout`       | `time.Duration`  | `5 * time.Minute`                                     | HTTPクライアントのタイムアウト       |
+| `option.WithMaxRetries`    | `int`            | `3`                                                   | 一時的な障害発生時の自動リトライ        |
+| `option.WithBackoffFactor` | `float64`        | `0.5`                                                 | 秒単位の指数バックオフ係数           |
+| `option.WithHTTPClient`    | `*http.Client`   | タイムアウト設定から生成                                          | 事前設定済みのHTTPクライアントインスタンス |
+| `option.WithHeader`        | `string, string` | —                                                     | すべてのリクエストに追加ヘッダーを付与     |
+
+```go
+import (
+	"net/http"
+	"time"
+
+	firecrawl "github.com/firecrawl/firecrawl/apps/go-sdk"
+	"github.com/firecrawl/firecrawl/apps/go-sdk/option"
+)
+
+client, err := firecrawl.NewClient(
+	option.WithAPIKey("fc-your-api-key"),
+	option.WithAPIURL("https://api.firecrawl.dev"),
+	option.WithTimeout(5 * time.Minute),
+	option.WithMaxRetries(3),
+	option.WithBackoffFactor(0.5),
+)
+```
+
+<div id="custom-http-client">
+  ### カスタム HTTP クライアント
+</div>
+
+事前設定済みの `*http.Client` を渡すことで、トランスポート設定、プロキシ設定、TLS 設定などを制御できます。これを指定した場合、`WithTimeout` 設定は無視され、代わりにそのクライアント自身の設定が使用されます。
+
+```go
+import (
+	"crypto/tls"
+	"net"
+	"net/http"
+	"time"
+
+	firecrawl "github.com/firecrawl/firecrawl/apps/go-sdk"
+	"github.com/firecrawl/firecrawl/apps/go-sdk/option"
+)
+
+transport := &http.Transport{
+	TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+	DialContext: (&net.Dialer{
+		Timeout: 10 * time.Second,
+	}).DialContext,
+}
+
+custom := &http.Client{
+	Transport: transport,
+	Timeout:   60 * time.Second,
+}
+
+client, err := firecrawl.NewClient(
+	option.WithAPIKey("fc-your-api-key"),
+	option.WithHTTPClient(custom),
+)
+```
+
+<div id="context-support">
+  ## Context のサポート
+</div>
+
+すべてのメソッドは、キャンセルやデッドラインの制御のため、第1引数として `context.Context` を受け取ります。
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+defer cancel()
+
+doc, err := client.Scrape(ctx, "https://example.com", nil)
+```
 
 <div id="error-handling">
-  ## エラー処理
+  ## エラーハンドリング
 </div>
 
-SDK は Firecrawl API から返されるエラーを処理し、適切な例外をスローします。リクエスト中にエラーが発生した場合は、わかりやすいエラーメッセージ付きで例外がスローされます。
+SDK は、`firecrawl` パッケージ内で型付きエラーを使用します。
 
-> Firecrawl API キーが必要な AI Agent ですか？自動オンボーディング手順については、[firecrawl.dev/agent-onboarding/SKILL.md](https://www.firecrawl.dev/agent-onboarding/SKILL.md) を参照してください。
+```go
+import "errors"
+
+doc, err := client.Scrape(ctx, "https://example.com", nil)
+if err != nil {
+	var authErr *firecrawl.AuthenticationError
+	var rateErr *firecrawl.RateLimitError
+	var timeoutErr *firecrawl.JobTimeoutError
+	var fcErr *firecrawl.FirecrawlError
+
+	switch {
+	case errors.As(err, &authErr):
+		fmt.Println("Auth failed:", authErr.Message)
+	case errors.As(err, &rateErr):
+		fmt.Println("Rate limited:", rateErr.Message)
+	case errors.As(err, &timeoutErr):
+		fmt.Printf("Job %s timed out after %ds\n", timeoutErr.JobID, timeoutErr.TimeoutSeconds)
+	case errors.As(err, &fcErr):
+		fmt.Printf("Error %d: %s\n", fcErr.StatusCode, fcErr.Message)
+	default:
+		fmt.Println("Unexpected error:", err)
+	}
+}
+```
+
+<div id="retry-logic">
+  ### 再試行ロジック
+</div>
+
+SDK は一時的な障害に対して自動的に再試行を行います。
+
+* **再試行されるもの:** 408、409、5xx エラー、および接続エラー
+* **再試行されないもの:** 401、429、およびその他の 4xx エラー
+* **バックオフ:** 係数を設定できる指数バックオフ
+
+<div id="pointer-helpers">
+  ## ポインタヘルパー
+</div>
+
+SDK は、任意のポインタフィールド向けの便利な関数を提供します。
+
+```go
+firecrawl.Bool(true)     // *bool
+firecrawl.Int(50)        // *int
+firecrawl.Int64(1000)    // *int64
+firecrawl.String("test") // *string
+firecrawl.Float64(0.5)   // *float64
+```
+
+> Firecrawl API キーが必要な AI エージェントですか？自動オンボーディング手順については、[firecrawl.dev/agent-onboarding/SKILL.md](https://www.firecrawl.dev/agent-onboarding/SKILL.md) を参照してください。
