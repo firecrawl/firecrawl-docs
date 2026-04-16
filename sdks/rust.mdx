@@ -1,106 +1,499 @@
 ---
 title: 'Rust'
-description: 'Firecrawl Rust SDK is a library to help you easily scrape and crawl websites, and output the data in a format ready for use with language models (LLMs).'
+description: 'Firecrawl Rust SDK is a wrapper around the Firecrawl API to help you easily turn websites into markdown.'
 icon: 'rust'
 og:title: "Rust SDK | Firecrawl"
-og:description: "Firecrawl Rust SDK is a library to help you easily scrape and crawl websites, and output the data in a format ready for use with language models (LLMs)."
+og:description: "Firecrawl Rust SDK is a wrapper around the Firecrawl API to help you easily turn websites into markdown."
 ---
-
-import InstallationRust from '/snippets/v1/installation/rust.mdx'
-import ScrapeAndCrawlRustExample from '/snippets/v1/scrape-and-crawl/rust.mdx'
-import ScrapeRustShort from '/snippets/v1/scrape/short/rust.mdx'
-import CrawlRustShort from '/snippets/v1/crawl/short/rust.mdx'
-import CrawlSitemapOnlyRust from '/snippets/v2/crawl/sitemap-only/rust.mdx'
-import CrawlAsyncRustShort from '/snippets/v1/crawl-async/short/rust.mdx'
-import MapRustShort from '/snippets/v1/map/short/rust.mdx'
-import LLMExtractRust from '/snippets/v1/llm-extract/base/rust.mdx'
-
-<Warning>
-This SDK currently uses the **v1** version of the Firecrawl API, which is not the most recent (v2 is available). Some features and improvements may only be available in v2.
-</Warning>
 
 ## Installation
 
-To install the Firecrawl Rust SDK, add the following to your `Cargo.toml`:
+The official Rust SDK is maintained in the Firecrawl monorepo at [apps/rust-sdk](https://github.com/firecrawl/firecrawl/tree/main/apps/rust-sdk).
 
-<InstallationRust />
+To install the Firecrawl Rust SDK, add the dependency from [crates.io](https://crates.io/crates/firecrawl):
+
+```toml
+[dependencies]
+firecrawl = "2"
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+```
+
+Or install via Cargo:
+
+```bash
+cargo add firecrawl
+cargo add tokio --features full
+cargo add serde_json
+```
+
+<Note>Requires Rust 1.70 or later.</Note>
 
 ## Usage
 
-First, you need to obtain an API key from [firecrawl.dev](https://firecrawl.dev). Then, you need to initialize the `FirecrawlApp`. From there, you can access functions like `FirecrawlApp::scrape_url`, which let you use our API.
+1. Get an API key from [firecrawl.dev](https://firecrawl.dev)
+2. Set the API key as an environment variable named `FIRECRAWL_API_KEY`, or pass it directly to `Client::new(...)`
 
-Here's an example of how to use the SDK in Rust:
+Here is a quick example using the SDK:
 
-<ScrapeAndCrawlRustExample />
+```rust
+use firecrawl::{Client, CrawlOptions, ScrapeOptions, Format};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = Client::new("fc-YOUR-API-KEY")?;
+
+    let doc = client.scrape(
+        "https://firecrawl.dev",
+        ScrapeOptions {
+            formats: Some(vec![Format::Markdown]),
+            ..Default::default()
+        },
+    ).await?;
+
+    let job = client.crawl(
+        "https://firecrawl.dev",
+        CrawlOptions {
+            limit: Some(5),
+            ..Default::default()
+        },
+    ).await?;
+
+    println!("{}", doc.markdown.unwrap_or_default());
+    println!("Crawled pages: {}", job.data.len());
+    Ok(())
+}
+```
 
 ### Scraping a URL
 
-To scrape a single URL, use the `scrape_url` method. It takes the URL as a parameter and returns the scraped data as a `Document`.
+To scrape a single URL, use the `scrape` method.
 
-<ScrapeRustShort />
+```rust
+use firecrawl::{Client, ScrapeOptions, Format};
 
-### Scraping with Extract
+let doc = client.scrape(
+    "https://firecrawl.dev",
+    ScrapeOptions {
+        formats: Some(vec![Format::Markdown, Format::Html]),
+        only_main_content: Some(true),
+        wait_for: Some(5000),
+        ..Default::default()
+    },
+).await?;
 
-With Extract, you can easily extract structured data from any URL. You need to specify your schema in the JSON Schema format, using the `serde_json::json!` macro.
+println!("{}", doc.markdown.unwrap_or_default());
+if let Some(meta) = &doc.metadata {
+    println!("{:?}", meta.title);
+}
+```
 
-<LLMExtractRust />
+#### JSON Extraction
+
+Extract structured JSON using `scrape_with_schema`:
+
+```rust
+use firecrawl::Client;
+use serde_json::json;
+
+let schema = json!({
+    "type": "object",
+    "properties": {
+        "name": { "type": "string" },
+        "price": { "type": "number" }
+    }
+});
+
+let data = client.scrape_with_schema(
+    "https://example.com/product",
+    schema,
+    Some("Extract the product name and price"),
+).await?;
+
+println!("{}", serde_json::to_string_pretty(&data)?);
+```
+
+Or configure JSON extraction via `ScrapeOptions` directly:
+
+```rust
+use firecrawl::{Client, ScrapeOptions, Format, JsonOptions};
+use serde_json::json;
+
+let doc = client.scrape(
+    "https://example.com/product",
+    ScrapeOptions {
+        formats: Some(vec![Format::Json]),
+        json_options: Some(JsonOptions {
+            schema: Some(json!({
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string" },
+                    "price": { "type": "number" }
+                }
+            })),
+            prompt: Some("Extract the product name and price".to_string()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    },
+).await?;
+
+println!("{:?}", doc.json);
+```
 
 ### Crawling a Website
 
-To crawl a website, use the `crawl_url` method. This will wait for the crawl to complete, which may take a long time based on your starting URL and your options.
+To crawl a website and wait for completion, use `crawl`.
 
-<CrawlRustShort />
+```rust
+use firecrawl::{Client, CrawlOptions, ScrapeOptions, Format};
 
-### Sitemap-Only Crawl (v2 API)
+let job = client.crawl(
+    "https://firecrawl.dev",
+    CrawlOptions {
+        limit: Some(50),
+        max_discovery_depth: Some(3),
+        scrape_options: Some(ScrapeOptions {
+            formats: Some(vec![Format::Markdown]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    },
+).await?;
 
-The Rust SDK currently targets v1. To use `sitemap: "only"`, call the v2 endpoint directly:
+println!("Status: {:?}", job.status);
+println!("Progress: {}/{}", job.completed, job.total);
 
-<CrawlSitemapOnlyRust />
+for page in &job.data {
+    if let Some(meta) = &page.metadata {
+        println!("{:?}", meta.source_url);
+    }
+}
+```
 
-### Crawling Asynchronously
+### Start a Crawl
 
-To crawl without waiting for the result, use the `crawl_url_async` method. It accepts the same parameters as `crawl_url` but returns a `CrawlAsyncRespone` struct containing the crawl's ID. Pass that ID to `check_crawl_status` to poll progress at any time. Completed crawls are deleted after 24 hours.
+Start a job without waiting using `start_crawl`.
 
-<CrawlAsyncRustShort />
+```rust
+use firecrawl::{Client, CrawlOptions};
 
-### Map a URL
+let start = client.start_crawl(
+    "https://firecrawl.dev",
+    CrawlOptions {
+        limit: Some(100),
+        ..Default::default()
+    },
+).await?;
 
-Map all associated links from a starting URL.
+println!("Job ID: {}", start.id);
+```
 
-<MapRustShort />
+### Checking Crawl Status
 
-### Scrape-Bound Interactive Session (v2 API)
+Check crawl progress with `get_crawl_status`.
 
-The Rust SDK includes v2 scrape interaction helpers:
+```rust
+let status = client.get_crawl_status(&start.id).await?;
+println!("Status: {:?}", status.status);
+println!("Progress: {}/{}", status.completed, status.total);
+```
 
-- `interact(...)` runs code in the scrape-bound browser session.
-- The first `interact` call can initialize the session from the scrape context.
+### Cancelling a Crawl
+
+Cancel a running crawl with `cancel_crawl`.
+
+```rust
+let result = client.cancel_crawl(&start.id).await?;
+println!("{:?}", result);
+```
+
+### Checking Crawl Errors
+
+Retrieve errors from a crawl job with `get_crawl_errors`.
+
+```rust
+let errors = client.get_crawl_errors(&start.id).await?;
+println!("{:?}", errors);
+```
+
+### Mapping a Website
+
+Discover links on a site using `map`.
+
+```rust
+use firecrawl::{Client, MapOptions};
+
+let response = client.map(
+    "https://firecrawl.dev",
+    MapOptions {
+        limit: Some(100),
+        search: Some("blog".to_string()),
+        ..Default::default()
+    },
+).await?;
+
+for link in &response.links {
+    println!("{} - {}", link.url, link.title.as_deref().unwrap_or(""));
+}
+```
+
+For a simpler result with just URLs, use `map_urls`:
+
+```rust
+let urls = client.map_urls("https://firecrawl.dev", None).await?;
+for url in &urls {
+    println!("{}", url);
+}
+```
+
+### Searching the Web
+
+Search with optional settings using `search`.
+
+```rust
+use firecrawl::{Client, SearchOptions};
+
+let results = client.search(
+    "firecrawl web scraping",
+    SearchOptions {
+        limit: Some(10),
+        ..Default::default()
+    },
+).await?;
+
+if let Some(web) = results.data.web {
+    for item in web {
+        match item {
+            firecrawl::SearchResultOrDocument::WebResult(r) => {
+                println!("{} - {}", r.url, r.title.unwrap_or_default());
+            }
+            firecrawl::SearchResultOrDocument::Document(d) => {
+                println!("{}", d.markdown.unwrap_or_default());
+            }
+        }
+    }
+}
+```
+
+For a convenience method that returns scraped documents directly:
+
+```rust
+let docs = client.search_and_scrape("firecrawl web scraping", 5).await?;
+for doc in &docs {
+    println!("{}", doc.markdown.as_deref().unwrap_or(""));
+}
+```
+
+### Batch Scraping
+
+Scrape multiple URLs in parallel using `batch_scrape`.
+
+```rust
+use firecrawl::{Client, BatchScrapeOptions, ScrapeOptions, Format};
+
+let urls = vec![
+    "https://firecrawl.dev".to_string(),
+    "https://firecrawl.dev/blog".to_string(),
+];
+
+let job = client.batch_scrape(
+    urls,
+    BatchScrapeOptions {
+        options: Some(ScrapeOptions {
+            formats: Some(vec![Format::Markdown]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    },
+).await?;
+
+for doc in &job.data {
+    println!("{}", doc.markdown.as_deref().unwrap_or(""));
+}
+```
+
+### Agent
+
+Run an AI-powered agent with `agent`.
+
+```rust
+use firecrawl::{Client, AgentOptions};
+
+let result = client.agent(
+    AgentOptions {
+        prompt: "Find the pricing plans for Firecrawl and compare them".to_string(),
+        ..Default::default()
+    },
+).await?;
+
+println!("{:?}", result.data);
+```
+
+With a JSON schema for structured output:
+
+```rust
+use firecrawl::{Client, AgentOptions, AgentModel};
+use serde::Deserialize;
+use serde_json::json;
+
+#[derive(Debug, Deserialize)]
+struct PricingPlan {
+    name: String,
+    price: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PricingData {
+    plans: Vec<PricingPlan>,
+}
+
+let schema = json!({
+    "type": "object",
+    "properties": {
+        "plans": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string" },
+                    "price": { "type": "string" }
+                }
+            }
+        }
+    }
+});
+
+let result: Option<PricingData> = client.agent_with_schema(
+    vec!["https://firecrawl.dev".to_string()],
+    "Extract pricing plan details",
+    schema,
+).await?;
+
+if let Some(data) = result {
+    for plan in &data.plans {
+        println!("{}: {}", plan.name, plan.price);
+    }
+}
+```
+
+## Scrape-Bound Interactive Session
+
+Use a scrape job ID to run follow-up browser code in the same context:
+
+- `interact(...)` runs code or prompts in the scrape-bound browser session.
 - `stop_interaction(...)` stops the interactive session when you are done.
 
 ```rust
-use firecrawl::v2::{Client, ScrapeExecuteLanguage, ScrapeExecuteOptions};
+use firecrawl::{Client, ScrapeExecuteOptions, ScrapeExecuteLanguage};
 
-let client = Client::new("fc-YOUR-API-KEY")?;
-let job_id = "550e8400-e29b-41d4-a716-446655440000";
+let scrape_job_id = "550e8400-e29b-41d4-a716-446655440000";
 
-let run = client
-    .interact(
-        job_id,
-        ScrapeExecuteOptions {
-            code: "console.log(await page.url())".to_string(),
-            language: Some(ScrapeExecuteLanguage::Node),
-            timeout: Some(60),
-            origin: None,
-        },
-    )
-    .await?;
+// Run code in the browser session
+let run = client.interact(
+    scrape_job_id,
+    ScrapeExecuteOptions {
+        code: Some("console.log(await page.title())".to_string()),
+        language: Some(ScrapeExecuteLanguage::Node),
+        timeout: Some(60),
+        ..Default::default()
+    },
+).await?;
 
 println!("{:?}", run.stdout);
-client.stop_interaction(job_id).await?;
+
+// Or use a natural language prompt
+let run = client.interact(
+    scrape_job_id,
+    ScrapeExecuteOptions {
+        prompt: Some("Click the pricing tab and summarize the plans".to_string()),
+        ..Default::default()
+    },
+).await?;
+
+// Stop the session when done
+client.stop_interaction(scrape_job_id).await?;
+```
+
+## Configuration
+
+`Client::new(...)` and `Client::new_selfhosted(...)` create the client.
+
+| Option | Description |
+|--------|-------------|
+| `Client::new(api_key)` | Create a client for the Firecrawl cloud service (`https://api.firecrawl.dev`) |
+| `Client::new_selfhosted(api_url, api_key)` | Create a client for a self-hosted Firecrawl instance |
+
+```rust
+use firecrawl::Client;
+
+// Cloud service
+let client = Client::new("fc-your-api-key")?;
+
+// Self-hosted
+let client = Client::new_selfhosted(
+    "http://localhost:3002",
+    Some("fc-your-api-key"),
+)?;
+
+// Self-hosted without authentication
+let client = Client::new_selfhosted(
+    "http://localhost:3002",
+    None::<&str>,
+)?;
+```
+
+### Environment Variable
+
+Set the `FIRECRAWL_API_KEY` environment variable instead of passing the key directly:
+
+```bash
+export FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+```
+
+```rust
+let api_key = std::env::var("FIRECRAWL_API_KEY")
+    .expect("FIRECRAWL_API_KEY must be set");
+let client = Client::new(api_key)?;
+```
+
+### Poll Intervals
+
+Synchronous methods (`crawl`, `batch_scrape`, `agent`) poll until completion. You can customize the poll interval via the options struct:
+
+```rust
+use firecrawl::CrawlOptions;
+
+let options = CrawlOptions {
+    limit: Some(50),
+    poll_interval: Some(3000), // Poll every 3 seconds (default: 2000ms)
+    ..Default::default()
+};
 ```
 
 ## Error Handling
 
-The SDK handles errors returned by the Firecrawl API and by our dependencies, and combines them into the `FirecrawlError` enum, implementing `Error`, `Debug` and `Display`. All of our methods return a `Result<T, FirecrawlError>`.
+The SDK uses the `FirecrawlError` enum, which implements `Error`, `Debug`, and `Display`. All methods return `Result<T, FirecrawlError>`.
+
+```rust
+use firecrawl::{Client, FirecrawlError};
+
+match client.scrape("https://example.com", None).await {
+    Ok(doc) => println!("{}", doc.markdown.unwrap_or_default()),
+    Err(FirecrawlError::HttpRequestFailed(action, status, msg)) => {
+        eprintln!("HTTP {}: {} ({})", status, msg, action);
+    }
+    Err(FirecrawlError::APIError(action, api_err)) => {
+        eprintln!("API error ({}): {}", action, api_err.error);
+    }
+    Err(FirecrawlError::JobFailed(msg)) => {
+        eprintln!("Job failed: {}", msg);
+    }
+    Err(FirecrawlError::Misuse(msg)) => {
+        eprintln!("SDK misuse: {}", msg);
+    }
+    Err(e) => eprintln!("Error: {}", e),
+}
+```
 
 > Are you an AI agent that needs a Firecrawl API key? See [firecrawl.dev/agent-onboarding/SKILL.md](https://www.firecrawl.dev/agent-onboarding/SKILL.md) for automated onboarding instructions.
