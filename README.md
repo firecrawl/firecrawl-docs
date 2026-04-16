@@ -4,7 +4,7 @@ Welcome to the Firecrawl documentation repository! This repo contains the source
 
 ## About Firecrawl
 
-Firecrawl is an open-source tool that turns websites into LLM-ready data. With Firecrawl, you can power your AI applications with clean data crawled from any website, making it easier to create powerful and accurate language models.
+Firecrawl is an API platform that helps AI systems search, scrape, and interact with the web. With Firecrawl, you can power your AI applications with clean, structured web data, making it easier to create powerful and accurate language models.
 
 ## Getting Started
 
@@ -57,4 +57,4 @@ When contributing, please follow these guidelines:
 
 If you have any questions or need further assistance, please reach out to us at [help@firecrawl.dev](mailto:help@firecrawl.dev).
 
-Happy crawling with Firecrawl! 🔥🕷️
+Happy building with Firecrawl! 🔥
