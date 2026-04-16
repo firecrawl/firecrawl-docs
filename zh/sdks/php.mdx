@@ -1,0 +1,569 @@
+---
+title: "PHP"
+description: "Firecrawl PHP SDK 是对 Firecrawl API 的封装，可帮助你轻松将网站转换为 markdown。"
+icon: "php"
+og:title: "PHP SDK | Firecrawl"
+og:description: "Firecrawl PHP SDK 是对 Firecrawl API 的封装，可帮助你轻松将网站转换为 markdown。"
+---
+
+<div id="installation">
+  ## 安装
+</div>
+
+官方 PHP SDK 在 Firecrawl 的 monorepo 中维护，位于 [apps/php-sdk](https://github.com/firecrawl/firecrawl/tree/main/apps/php-sdk)。
+
+要安装 Firecrawl PHP SDK，请通过 Composer 添加此依赖：
+
+```bash
+composer require firecrawl/firecrawl-php
+```
+
+<Note>需要 PHP 8.1 或更高版本。</Note>
+
+<div id="laravel-integration">
+  ### Laravel 集成
+</div>
+
+该 SDK 提供对 Laravel 的原生支持，并支持自动发现。安装该软件包后，请发布配置文件：
+
+```bash
+php artisan vendor:publish --provider="Firecrawl\Laravel\FirecrawlServiceProvider"
+```
+
+然后将你的 API 密钥添加到 `.env` 文件中：
+
+```env
+FIRECRAWL_API_KEY=fc-your-api-key
+```
+
+支持以下环境变量：
+
+| 变量                         | 默认值                         | 描述                        |
+| -------------------------- | --------------------------- | ------------------------- |
+| `FIRECRAWL_API_KEY`        | —                           | 你的 Firecrawl API 密钥 (必填)  |
+| `FIRECRAWL_API_URL`        | `https://api.firecrawl.dev` | API 基础 URL                |
+| `FIRECRAWL_TIMEOUT`        | `300`                       | HTTP 请求超时时间 (秒)           |
+| `FIRECRAWL_MAX_RETRIES`    | `3`                         | 临时故障时的自动重试次数              |
+| `FIRECRAWL_BACKOFF_FACTOR` | `0.5`                       | 指数退避系数 (秒)                |
+
+<div id="usage">
+  ## 使用方式
+</div>
+
+1. 从 [firecrawl.dev](https://firecrawl.dev) 获取 API 密钥
+2. 将 API 密钥设置为名为 `FIRECRAWL_API_KEY` 的环境变量，或通过 `FirecrawlClient::create(apiKey: ...)` 传入 API 密钥
+
+以下是一个基于当前 SDK API 的简要示例：
+
+```php
+use Firecrawl\Client\FirecrawlClient;
+use Firecrawl\Models\CrawlOptions;
+use Firecrawl\Models\ScrapeOptions;
+
+$client = FirecrawlClient::fromEnv();
+
+$doc = $client->scrape(
+    'https://firecrawl.dev',
+    ScrapeOptions::with(formats: ['markdown'])
+);
+
+$crawl = $client->crawl(
+    'https://firecrawl.dev',
+    CrawlOptions::with(limit: 5)
+);
+
+echo $doc->getMarkdown();
+echo 'Crawled pages: ' . count($crawl->getData());
+```
+
+<div id="using-the-laravel-facade">
+  ### 使用 Laravel 门面
+</div>
+
+在 Laravel 应用中，可以使用 `Firecrawl` 门面，或通过依赖注入：
+
+```php
+use Firecrawl\Client\FirecrawlClient;
+use Firecrawl\Laravel\Facades\Firecrawl;
+
+// 通过 Facade
+$doc = Firecrawl::scrape('https://example.com');
+
+// 通过依赖注入
+class ScrapeController
+{
+    public function __construct(
+        private readonly FirecrawlClient $firecrawl,
+    ) {}
+
+    public function index()
+    {
+        $doc = $this->firecrawl->scrape('https://example.com');
+        return response()->json(['markdown' => $doc->getMarkdown()]);
+    }
+}
+```
+
+<div id="scraping-a-url">
+  ### 抓取 URL
+</div>
+
+如需抓取单个 URL，请使用 `scrape` 方法。
+
+```php
+use Firecrawl\Models\Document;
+use Firecrawl\Models\ScrapeOptions;
+
+$doc = $client->scrape(
+    'https://firecrawl.dev',
+    ScrapeOptions::with(
+        formats: ['markdown', 'html'],
+        onlyMainContent: true,
+        waitFor: 5000,
+    )
+);
+
+echo $doc->getMarkdown();
+echo $doc->getMetadata()['title'] ?? '';
+```
+
+<div id="json-extraction">
+  #### JSON 提取
+</div>
+
+通过 `scrape` 端点，使用 `JsonFormat` 提取结构化 JSON：
+
+```php
+use Firecrawl\Models\JsonFormat;
+use Firecrawl\Models\ScrapeOptions;
+
+$jsonFmt = JsonFormat::with(
+    prompt: 'Extract the product name and price',
+    schema: [
+        'type' => 'object',
+        'properties' => [
+            'name' => ['type' => 'string'],
+            'price' => ['type' => 'number'],
+        ],
+    ],
+);
+
+$doc = $client->scrape(
+    'https://example.com/product',
+    ScrapeOptions::with(formats: [$jsonFmt])
+);
+
+print_r($doc->getJson());
+```
+
+<div id="crawling-a-website">
+  ### 爬取网站
+</div>
+
+要爬取网站并等待其完成，请使用 `crawl`。
+
+```php
+use Firecrawl\Models\CrawlOptions;
+use Firecrawl\Models\ScrapeOptions;
+
+$job = $client->crawl(
+    'https://firecrawl.dev',
+    CrawlOptions::with(
+        limit: 50,
+        maxDiscoveryDepth: 3,
+        scrapeOptions: ScrapeOptions::with(formats: ['markdown']),
+    )
+);
+
+echo 'Status: ' . $job->getStatus();
+echo 'Progress: ' . $job->getCompleted() . '/' . $job->getTotal();
+
+foreach ($job->getData() as $page) {
+    echo $page->getMetadata()['sourceURL'] ?? '';
+}
+```
+
+<div id="start-a-crawl">
+  ### 开始爬取
+</div>
+
+使用 `startCrawl` 启动任务，无需等待。
+
+```php
+use Firecrawl\Models\CrawlOptions;
+
+$start = $client->startCrawl(
+    'https://firecrawl.dev',
+    CrawlOptions::with(limit: 100)
+);
+
+echo 'Job ID: ' . $start->getId();
+```
+
+<div id="checking-crawl-status">
+  ### 查看爬取状态
+</div>
+
+使用 `getCrawlStatus` 查看爬取进度。
+
+```php
+$status = $client->getCrawlStatus($start->getId());
+echo 'Status: ' . $status->getStatus();
+echo 'Progress: ' . $status->getCompleted() . '/' . $status->getTotal();
+```
+
+<div id="cancelling-a-crawl">
+  ### 取消爬取
+</div>
+
+使用 `cancelCrawl` 取消正在进行中的爬取。
+
+```php
+$result = $client->cancelCrawl($start->getId());
+print_r($result);
+```
+
+<div id="crawl-errors">
+  ### 爬取错误
+</div>
+
+使用 `getCrawlErrors` 获取爬取过程中的错误 (如有) 。
+
+```php
+$errors = $client->getCrawlErrors($start->getId());
+print_r($errors);
+```
+
+<div id="mapping-a-website">
+  ### 网站映射
+</div>
+
+使用 `map` 发现网站中的链接。
+
+```php
+use Firecrawl\Models\MapOptions;
+
+$data = $client->map(
+    'https://firecrawl.dev',
+    MapOptions::with(
+        limit: 100,
+        search: 'blog',
+    )
+);
+
+foreach ($data->getLinks() as $link) {
+    echo ($link['url'] ?? '') . ' - ' . ($link['title'] ?? '');
+}
+```
+
+<div id="searching-the-web">
+  ### 搜索网页
+</div>
+
+使用 `search` 并可选配搜索设置进行搜索。
+
+```php
+use Firecrawl\Models\SearchOptions;
+
+$results = $client->search(
+    'firecrawl web scraping',
+    SearchOptions::with(limit: 10)
+);
+
+foreach ($results->getWeb() as $result) {
+    echo ($result['title'] ?? '') . ' - ' . ($result['url'] ?? '');
+}
+```
+
+<div id="batch-scraping">
+  ### 批量抓取
+</div>
+
+使用 `batchScrape` 并行抓取多个 URL。
+
+```php
+use Firecrawl\Models\BatchScrapeOptions;
+use Firecrawl\Models\ScrapeOptions;
+
+$job = $client->batchScrape(
+    ['https://firecrawl.dev', 'https://firecrawl.dev/blog'],
+    BatchScrapeOptions::with(
+        options: ScrapeOptions::with(formats: ['markdown']),
+    )
+);
+
+foreach ($job->getData() as $doc) {
+    echo $doc->getMarkdown();
+}
+```
+
+如需手动控制异步流程，请使用 `startBatchScrape`、`getBatchScrapeStatus` 和 `cancelBatchScrape`：
+
+```php
+use Firecrawl\Models\BatchScrapeOptions;
+use Firecrawl\Models\ScrapeOptions;
+
+$start = $client->startBatchScrape(
+    ['https://firecrawl.dev', 'https://firecrawl.dev/blog'],
+    BatchScrapeOptions::with(
+        options: ScrapeOptions::with(formats: ['markdown']),
+    )
+);
+
+$status = $client->getBatchScrapeStatus($start->getId());
+echo 'Batch status: ' . $status->getStatus();
+
+$cancel = $client->cancelBatchScrape($start->getId());
+print_r($cancel);
+```
+
+<div id="agent">
+  ### 代理
+</div>
+
+使用 `agent` 运行 AI 代理。
+
+```php
+use Firecrawl\Models\AgentOptions;
+
+$result = $client->agent(
+    AgentOptions::with(
+        prompt: 'Find the pricing plans for Firecrawl and compare them',
+    )
+);
+
+print_r($result->getData());
+```
+
+使用结构化输出的 JSON schema：
+
+```php
+use Firecrawl\Models\AgentOptions;
+
+$result = $client->agent(
+    AgentOptions::with(
+        prompt: 'Extract pricing plan details',
+        urls: ['https://firecrawl.dev'],
+        schema: [
+            'type' => 'object',
+            'properties' => [
+                'plans' => [
+                    'type' => 'array',
+                    'items' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'name' => ['type' => 'string'],
+                            'price' => ['type' => 'string'],
+                        ],
+                    ],
+                ],
+            ],
+        ],
+    )
+);
+
+print_r($result->getData());
+```
+
+如需手动控制异步执行，请使用 `startAgent`、`getAgentStatus` 和 `cancelAgent`：
+
+```php
+use Firecrawl\Models\AgentOptions;
+
+$start = $client->startAgent(
+    AgentOptions::with(
+        prompt: 'Summarize what Firecrawl does in one sentence',
+        urls: ['https://firecrawl.dev'],
+    )
+);
+
+$status = $client->getAgentStatus($start->getId());
+echo 'Agent status: ' . $status->getStatus();
+
+$cancel = $client->cancelAgent($start->getId());
+print_r($cancel);
+```
+
+<div id="usage-metrics">
+  ### 使用方式与指标
+</div>
+
+查看并发数和剩余额度：
+
+```php
+use Firecrawl\Models\ConcurrencyCheck;
+use Firecrawl\Models\CreditUsage;
+
+$concurrency = $client->getConcurrency();
+echo 'Concurrency: ' . $concurrency->getConcurrency() . '/' . $concurrency->getMaxConcurrency();
+
+$credits = $client->getCreditUsage();
+echo 'Remaining credits: ' . $credits->getRemainingCredits();
+```
+
+<div id="browser">
+  ## 浏览器
+</div>
+
+PHP SDK 提供了 浏览器 Sandbox 辅助函数。
+
+<div id="create-a-session">
+  ### 创建会话
+</div>
+
+```php
+use Firecrawl\Models\BrowserCreateResponse;
+
+$session = $client->browser(ttl: 120, activityTtl: 60, streamWebView: true);
+echo $session->getId();
+echo $session->getCdpUrl();
+echo $session->getLiveViewUrl();
+```
+
+<div id="execute-code">
+  ### 执行代码
+</div>
+
+```php
+use Firecrawl\Models\BrowserExecuteResponse;
+
+$run = $client->browserExecute(
+    sessionId: $session->getId(),
+    code: 'await page.goto("https://example.com"); console.log(await page.title());',
+    language: 'node',
+    timeout: 60,
+);
+
+echo $run->getStdout();
+echo $run->getExitCode();
+```
+
+<div id="scrape-bound-interactive-session">
+  ### 与抓取任务绑定的交互式会话
+</div>
+
+使用抓取任务 ID，在同一重放上下文中运行后续浏览器代码：
+
+* `interact(...)` 会在与抓取任务绑定的浏览器会话中运行代码 (首次使用时会自动初始化该会话) 。
+* `stopInteractiveBrowser(...)` 会在你使用完毕后显式停止该交互式会话。
+
+```php
+use Firecrawl\Models\BrowserExecuteResponse;
+use Firecrawl\Models\BrowserDeleteResponse;
+use Firecrawl\Models\ScrapeOptions;
+
+$doc = $client->scrape(
+    'https://example.com',
+    ScrapeOptions::with(formats: ['markdown'])
+);
+
+$scrapeJobId = $doc->getMetadata()['scrapeId'] ?? null;
+if ($scrapeJobId === null) {
+    throw new RuntimeException('scrapeId not found in metadata');
+}
+
+$scrapeRun = $client->interact(
+    jobId: $scrapeJobId,
+    code: 'console.log(page.url());',
+    language: 'node',
+    timeout: 60,
+);
+
+echo $scrapeRun->getStdout();
+
+$deleted = $client->stopInteractiveBrowser($scrapeJobId);
+echo 'Deleted: ' . ($deleted->isSuccess() ? 'true' : 'false');
+```
+
+<div id="list-close-sessions">
+  ### 列出并关闭会话
+</div>
+
+```php
+use Firecrawl\Models\BrowserListResponse;
+use Firecrawl\Models\BrowserSession;
+
+$active = $client->listBrowsers('active');
+foreach ($active->getSessions() as $s) {
+    echo $s->getId() . ' - ' . $s->getStatus();
+}
+
+$closed = $client->deleteBrowser($session->getId());
+echo 'Closed: ' . ($closed->isSuccess() ? 'true' : 'false');
+```
+
+<div id="configuration">
+  ## 配置
+</div>
+
+`FirecrawlClient::create()` 支持以下选项：
+
+| 选项               | 类型                           | 默认值                                                  | 描述                      |
+| ---------------- | ---------------------------- | ---------------------------------------------------- | ----------------------- |
+| `apiKey`         | `string`                     | `FIRECRAWL_API_KEY` 环境变量                             | 你的 Firecrawl API 密钥     |
+| `apiUrl`         | `string`                     | `https://api.firecrawl.dev` (或 `FIRECRAWL_API_URL`)  | API 基础 URL              |
+| `timeoutSeconds` | `float`                      | `300`                                                | HTTP 请求超时时间 (秒)         |
+| `maxRetries`     | `int`                        | `3`                                                  | 发生临时故障时自动重试             |
+| `backoffFactor`  | `float`                      | `0.5`                                                | 指数退避系数 (秒)              |
+| `httpClient`     | `GuzzleHttp\ClientInterface` | 根据 timeout 构建                                        | 自定义的 Guzzle 兼容 HTTP 客户端 |
+
+```php
+use Firecrawl\Client\FirecrawlClient;
+
+$client = FirecrawlClient::create(
+    apiKey: 'fc-your-api-key',
+    apiUrl: 'https://api.firecrawl.dev',
+    timeoutSeconds: 300,
+    maxRetries: 3,
+    backoffFactor: 0.5,
+);
+```
+
+<div id="custom-http-client">
+  ### 自定义 HTTP 客户端
+</div>
+
+你可以传入一个预先配置的 `GuzzleHttp\ClientInterface` 实现，用于控制连接池、中间件、代理设置及其他 HTTP 功能。提供该实现后，`timeoutSeconds` 设置将被忽略，改为以客户端自身的配置为准。
+
+```php
+use Firecrawl\Client\FirecrawlClient;
+use GuzzleHttp\Client as GuzzleClient;
+
+$guzzle = new GuzzleClient([
+    'proxy' => 'http://proxy.example.com:8080',
+    'timeout' => 60,
+    'connect_timeout' => 10,
+]);
+
+$client = FirecrawlClient::create(
+    apiKey: 'fc-your-api-key',
+    httpClient: $guzzle,
+);
+```
+
+<div id="error-handling">
+  ## 错误处理
+</div>
+
+SDK 会抛出位于 `Firecrawl\Exceptions` 命名空间下的运行时异常。
+
+```php
+use Firecrawl\Exceptions\AuthenticationException;
+use Firecrawl\Exceptions\FirecrawlException;
+use Firecrawl\Exceptions\JobTimeoutException;
+use Firecrawl\Exceptions\RateLimitException;
+
+try {
+    $doc = $client->scrape('https://example.com');
+} catch (AuthenticationException $e) {
+    echo 'Auth failed: ' . $e->getMessage();
+} catch (RateLimitException $e) {
+    echo 'Rate limited: ' . $e->getMessage();
+} catch (JobTimeoutException $e) {
+    echo 'Job ' . $e->getJobId() . ' timed out after ' . $e->getTimeoutSeconds() . 's';
+} catch (FirecrawlException $e) {
+    echo 'Error ' . $e->getStatusCode() . ': ' . $e->getMessage();
+}
+```
+
+> 你是需要 Firecrawl API 密钥的 AI 代理吗？请参见 [firecrawl.dev/agent-onboarding/SKILL.md](https://www.firecrawl.dev/agent-onboarding/SKILL.md) 了解自动化接入说明。

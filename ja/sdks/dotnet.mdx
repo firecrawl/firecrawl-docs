@@ -1,0 +1,423 @@
+---
+title: ".NET"
+description: "Firecrawl .NET SDK は、Firecrawl API のラッパーで、Web サイトを簡単に Markdown に変換できます。"
+icon: "microsoft"
+og:title: ".NET SDK | Firecrawl"
+og:description: "Firecrawl .NET SDK は、Firecrawl API のラッパーで、Web サイトを簡単に Markdown に変換できます。"
+---
+
+<div id="installation">
+  ## インストール
+</div>
+
+公式の .NET SDK は、Firecrawl のモノレポ内の [apps/.net-sdk](https://github.com/firecrawl/firecrawl/tree/main/apps/.net-sdk) で管理されています。
+
+Firecrawl .NET SDK をインストールするには、NuGet パッケージを追加します。
+
+<Tabs>
+  <Tab title=".NET CLI">`bash dotnet add package firecrawl-sdk `</Tab>
+  <Tab title="パッケージ マネージャー">`powershell Install-Package firecrawl-sdk `</Tab>
+
+  <Tab title="PackageReference">
+    ```xml
+    <PackageReference Include="firecrawl-sdk" Version="1.0.0" />
+    ```
+  </Tab>
+</Tabs>
+
+<Note>.NET 8.0 以降が必要です。</Note>
+
+<div id="usage">
+  ## 使い方
+</div>
+
+1. [firecrawl.dev](https://firecrawl.dev)でAPIキーを取得します
+2. APIキーを `FIRECRAWL_API_KEY` という環境変数に設定するか、`FirecrawlClient` のコンストラクターに渡します
+
+以下は、現在のSDK APIでの簡単な例です。
+
+```csharp
+using Firecrawl;
+using Firecrawl.Models;
+
+var client = new FirecrawlClient("fc-your-api-key");
+
+// 単一ページをスクレイピング
+var doc = await client.ScrapeAsync("https://firecrawl.dev",
+    new ScrapeOptions { Formats = new List<object> { "markdown" } });
+
+// Web サイトをクロール
+var job = await client.CrawlAsync("https://firecrawl.dev",
+    new CrawlOptions { Limit = 5 });
+
+Console.WriteLine(doc.Markdown);
+Console.WriteLine($"Crawled pages: {job.Data?.Count ?? 0}");
+```
+
+<div id="scraping-a-url">
+  ### URLをスクレイピングする
+</div>
+
+単一のURLをスクレイピングするには、`ScrapeAsync`メソッドを使用します。
+
+```csharp
+using Firecrawl.Models;
+
+var doc = await client.ScrapeAsync("https://firecrawl.dev",
+    new ScrapeOptions
+    {
+        Formats = new List<object> { "markdown", "html" },
+        OnlyMainContent = true,
+        WaitFor = 5000
+    });
+
+Console.WriteLine(doc.Markdown);
+Console.WriteLine(doc.Metadata?["title"]);
+```
+
+<div id="json-extraction">
+  #### JSON抽出
+</div>
+
+`JsonFormat` を使用して、/scrape エンドポイントで構造化された JSON を抽出します。
+
+```csharp
+using Firecrawl.Models;
+
+var jsonFmt = new JsonFormat
+{
+    Prompt = "Extract the product name and price",
+    Schema = new Dictionary<string, object>
+    {
+        ["type"] = "object",
+        ["properties"] = new Dictionary<string, object>
+        {
+            ["name"] = new Dictionary<string, object> { ["type"] = "string" },
+            ["price"] = new Dictionary<string, object> { ["type"] = "number" }
+        }
+    }
+};
+
+var doc = await client.ScrapeAsync("https://example.com/product",
+    new ScrapeOptions
+    {
+        Formats = new List<object> { jsonFmt }
+    });
+
+Console.WriteLine(doc.Json);
+```
+
+<div id="crawling-a-website">
+  ### Web サイトのクロール
+</div>
+
+Web サイトをクロールして完了を待つには、`CrawlAsync` を使用します。このメソッドは、ポーリングとページネーションを自動的に処理します。
+
+```csharp
+using Firecrawl.Models;
+
+var job = await client.CrawlAsync("https://firecrawl.dev",
+    new CrawlOptions
+    {
+        Limit = 50,
+        MaxDiscoveryDepth = 3,
+        ScrapeOptions = new ScrapeOptions
+        {
+            Formats = new List<object> { "markdown" }
+        }
+    });
+
+Console.WriteLine($"Status: {job.Status}");
+Console.WriteLine($"Progress: {job.Completed}/{job.Total}");
+
+if (job.Data != null)
+{
+    foreach (var page in job.Data)
+    {
+        Console.WriteLine(page.Metadata?["sourceURL"]);
+    }
+}
+```
+
+<div id="start-a-crawl">
+  ### クロールを開始する
+</div>
+
+`StartCrawlAsync` を使用すると、待たずにジョブを開始できます。
+
+```csharp
+using Firecrawl.Models;
+
+var start = await client.StartCrawlAsync("https://firecrawl.dev",
+    new CrawlOptions { Limit = 100 });
+
+Console.WriteLine($"Job ID: {start.Id}");
+```
+
+<div id="checking-crawl-status">
+  ### クロールのステータスを確認する
+</div>
+
+`GetCrawlStatusAsync` でクロールの進行状況を確認します。
+
+```csharp
+var status = await client.GetCrawlStatusAsync(start.Id!);
+Console.WriteLine($"Status: {status.Status}");
+Console.WriteLine($"Progress: {status.Completed}/{status.Total}");
+```
+
+<div id="cancelling-a-crawl">
+  ### クロールをキャンセルする
+</div>
+
+実行中のクロールは `CancelCrawlAsync` でキャンセルできます。
+
+```csharp
+var result = await client.CancelCrawlAsync(start.Id!);
+Console.WriteLine(result);
+```
+
+<div id="mapping-a-website">
+  ### Web サイトのマッピング
+</div>
+
+`MapAsync` で Web サイト内のリンクを見つけます。
+
+```csharp
+using Firecrawl.Models;
+
+var data = await client.MapAsync("https://firecrawl.dev",
+    new MapOptions
+    {
+        Limit = 100,
+        Search = "blog"
+    });
+
+if (data.Links != null)
+{
+    foreach (var link in data.Links)
+    {
+        Console.WriteLine(link);
+    }
+}
+```
+
+<div id="searching-the-web">
+  ### Webを検索
+</div>
+
+任意の検索設定を指定して、`SearchAsync` で検索します。
+
+```csharp
+using Firecrawl.Models;
+
+var results = await client.SearchAsync("firecrawl web scraping",
+    new SearchOptions
+    {
+        Limit = 10,
+        Location = "US"
+    });
+
+if (results.Web != null)
+{
+    foreach (var hit in results.Web)
+    {
+        Console.WriteLine($"{hit.Title} - {hit.Url}");
+    }
+}
+```
+
+<div id="batch-scraping">
+  ### バッチスクレイプ
+</div>
+
+`BatchScrapeAsync` を使用すると、複数のURLを並列でスクレイピングできます。このメソッドは、ポーリングとページネーションを自動的に処理します。
+
+```csharp
+using Firecrawl.Models;
+
+var urls = new List<string>
+{
+    "https://firecrawl.dev",
+    "https://firecrawl.dev/blog"
+};
+
+var job = await client.BatchScrapeAsync(urls,
+    new BatchScrapeOptions
+    {
+        Options = new ScrapeOptions
+        {
+            Formats = new List<object> { "markdown" }
+        }
+    });
+
+if (job.Data != null)
+{
+    foreach (var doc in job.Data)
+    {
+        Console.WriteLine(doc.Markdown);
+    }
+}
+```
+
+<div id="batch-scrape-with-idempotency-key">
+  #### 冪等性キーを使ったバッチスクレイプ
+</div>
+
+重複したリクエストが処理されないようにするには、`IdempotencyKey` を渡します:
+
+```csharp
+var job = await client.BatchScrapeAsync(urls,
+    new BatchScrapeOptions
+    {
+        IdempotencyKey = "my-unique-key",
+        Options = new ScrapeOptions
+        {
+            Formats = new List<object> { "markdown" }
+        }
+    });
+```
+
+<div id="usage-metrics">
+  ### 使用状況 &amp; メトリクス
+</div>
+
+並行実行数と残りのクレジットを確認:
+
+```csharp
+using Firecrawl.Models;
+
+var concurrency = await client.GetConcurrencyAsync();
+Console.WriteLine($"Concurrency: {concurrency.Current}/{concurrency.MaxConcurrency}");
+
+var credits = await client.GetCreditUsageAsync();
+Console.WriteLine($"Remaining credits: {credits.RemainingCredits}");
+```
+
+<div id="async-support">
+  ## 非同期サポート
+</div>
+
+.NET SDK のすべてのメソッドは既定で非同期で、`Task<T>` を返します。協調的なキャンセルに対応するため、`CancellationToken` をサポートしています。
+
+```csharp
+using Firecrawl.Models;
+
+using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+var doc = await client.ScrapeAsync("https://example.com",
+    new ScrapeOptions
+    {
+        Formats = new List<object> { "markdown" }
+    },
+    cancellationToken: cts.Token);
+
+Console.WriteLine(doc.Markdown);
+```
+
+<div id="configuration">
+  ## 設定
+</div>
+
+`FirecrawlClient` コンストラクターは、以下のオプションをサポートしています。
+
+| Option          | Type          | Default                                              | Description               |
+| --------------- | ------------- | ---------------------------------------------------- | ------------------------- |
+| `apiKey`        | `string?`     | `FIRECRAWL_API_KEY` env var                          | Firecrawl APIキー           |
+| `apiUrl`        | `string?`     | `https://api.firecrawl.dev` (or `FIRECRAWL_API_URL`) | API のベース URL              |
+| `timeout`       | `TimeSpan?`   | 5 分                                                  | HTTP リクエストのタイムアウト         |
+| `maxRetries`    | `int`         | `3`                                                  | 一時的な障害に対する自動再試行           |
+| `backoffFactor` | `double`      | `0.5`                                                | 秒単位の指数バックオフ係数             |
+| `httpClient`    | `HttpClient?` | `timeout` から構築                                       | 事前設定済みの HttpClient インスタンス |
+
+```csharp
+using Firecrawl;
+
+var client = new FirecrawlClient(
+    apiKey: "fc-your-api-key",
+    apiUrl: "https://api.firecrawl.dev",
+    timeout: TimeSpan.FromMinutes(5),
+    maxRetries: 3,
+    backoffFactor: 0.5);
+```
+
+<div id="custom-http-client">
+  ### カスタム HTTP クライアント
+</div>
+
+接続プーリング、プロキシ、メッセージ ハンドラー、その他の `HttpClient` 機能を制御するために、事前設定済みの `HttpClient` を渡せます。これを指定すると、`timeout` の設定は無視され、代わりにクライアント自体の設定が使用されます。
+
+```csharp
+using Firecrawl;
+
+var handler = new HttpClientHandler
+{
+    Proxy = new WebProxy("http://proxy.example.com:8080"),
+    UseProxy = true
+};
+
+var httpClient = new HttpClient(handler)
+{
+    Timeout = TimeSpan.FromSeconds(60)
+};
+
+var client = new FirecrawlClient(
+    apiKey: "fc-your-api-key",
+    httpClient: httpClient);
+```
+
+<div id="environment-variable-configuration">
+  ### 環境変数による設定
+</div>
+
+コンストラクタのパラメータが省略されている場合、SDK は環境変数から設定を読み取ります。
+
+```csharp
+// FIRECRAWL_API_KEY と FIRECRAWL_API_URL の環境変数を使用
+var client = new FirecrawlClient();
+```
+
+<div id="error-handling">
+  ## エラーハンドリング
+</div>
+
+SDK は `Firecrawl.Exceptions` 以下に定義された特定の例外をスローします。
+
+```csharp
+using Firecrawl.Exceptions;
+using Firecrawl.Models;
+
+try
+{
+    var doc = await client.ScrapeAsync("https://example.com");
+}
+catch (AuthenticationException ex)
+{
+    Console.Error.WriteLine($"Auth failed: {ex.Message}");
+}
+catch (RateLimitException ex)
+{
+    Console.Error.WriteLine($"Rate limited: {ex.Message}");
+}
+catch (JobTimeoutException ex)
+{
+    Console.Error.WriteLine($"Job {ex.JobId} timed out after {ex.TimeoutSeconds}s");
+}
+catch (FirecrawlException ex)
+{
+    Console.Error.WriteLine($"Error {ex.StatusCode}: {ex.Message}");
+}
+```
+
+例外の階層:
+
+| Exception                 | HTTPコード | 発生条件                                |
+| ------------------------- | ------- | ----------------------------------- |
+| `AuthenticationException` | 401     | APIキーが無効、または指定されていない                |
+| `RateLimitException`      | 429     | リクエスト数が多すぎる                         |
+| `JobTimeoutException`     | —       | 非同期ジョブ (クロール/バッチスクレイプ) が時間内に完了しなかった |
+| `FirecrawlException`      | varies  | その他すべてのAPIエラーのベース例外                 |
+
+一時的な障害 (408、409、502、その他の5xxエラー) は、例外がスローされる前に指数バックオフを使用して自動的に再試行されます。
+
+> Firecrawl APIキーが必要なAI agentですか？自動オンボーディング手順については、[firecrawl.dev/agent-onboarding/SKILL.md](https://www.firecrawl.dev/agent-onboarding/SKILL.md)を参照してください。
