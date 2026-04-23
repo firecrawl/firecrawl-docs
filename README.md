@@ -12,23 +12,16 @@ To get started with the Firecrawl documentation, follow the steps below:
 
 ### Prerequisites
 
-- Node.js LTS (version 19 or higher). **Node 25+ is not supported** by the Mintlify CLI — it fails with `TypeError: localStorage.getItem is not a function` (see [mintlify/starter#116](https://github.com/mintlify/starter/issues/116)). If you're on Node 25+, pin an LTS for this repo with a version manager such as [mise](https://mise.jdx.dev/) or [nvm](https://github.com/nvm-sh/nvm):
+- Node.js LTS (version 19 or higher). **Node 25+ is not supported** by the Mintlify CLI (see [mintlify/starter#116](https://github.com/mintlify/starter/issues/116)). If you're on Node 25+, please use an [LTS version](https://nodejs.org/en/about/previous-releases#looking-for-the-latest-release-of-a-version-branch) of Node.js.
 
-  ```bash
-  mise use node@24
-  # or
-  nvm install 24 && nvm use 24
-  ```
 
 ### Installation
 
 1. Install the Mintlify CLI globally:
 
    ```bash
-   npm install -g mint
+   npm i -g mint
    ```
-
-   Or with your preferred package manager (`bun add -g mint`, `yarn global add mint`, `pnpm add -g mint`).
 
 2. Clone this repository and navigate to the directory:
 
