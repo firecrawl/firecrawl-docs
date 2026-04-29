@@ -1,0 +1,124 @@
+---
+title: 'Erreurs'
+description: 'Chaque code d’erreur de l’API, sa cause, comment y remédier et s’il faut réessayer.'
+---
+
+Toutes les réponses d’erreur de Firecrawl utilisent le même format JSON. Recherchez la valeur `error` (ou l’état HTTP) dans le tableau ci-dessous pour en connaître la cause, la solution et savoir si la requête peut être relancée sans risque.
+
+<Note>Ce récapitulatif couvre les erreurs que la plupart des agents et clients rencontreront. Il n’est pas exhaustif — si vous recevez une erreur qui n’est pas répertoriée ici, veuillez [ouvrir une issue](https://github.com/firecrawl/firecrawl/issues) afin que nous puissions la documenter.</Note>
+
+<div id="error-response-shape">
+  ## Format de la réponse d’erreur
+</div>
+
+Toutes les réponses non-2xx renvoient du JSON avec `success: false` à la racine, ainsi qu’une chaîne `error`. Certains points de terminaison incluent des champs supplémentaires (`details`, `code`) lorsque plus de contexte est disponible.
+
+```json
+{
+  "success": false,
+  "error": "Unauthorized: Invalid token",
+  "details": "Optional structured details (only present on some errors)"
+}
+```
+
+| Champ     | Type      | Description                                                                                        |
+| --------- | --------- | -------------------------------------------------------------------------------------------------- |
+| `success` | `boolean` | Toujours `false` en cas d&#39;erreur.                                                              |
+| `error`   | `string`  | Message d&#39;erreur compréhensible par un humain. Utilisez-le pour retrouver la ligne ci-dessous. |
+| `details` | `any`     | Facultatif. Erreurs de validation structurées par champ, le cas échéant.                           |
+
+<div id="errors">
+  ## Erreurs
+</div>
+
+| HTTP | `error` (message typique)                              | Cause                                                                                                     | Remède                                                                                                                                       | Réessayable                   |
+| ---- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| 400  | `Bad Request` / message de validation                  | Le corps de la requête n’a pas passé la validation du schéma (champs manquants ou invalides).             | Corrigez le payload de la requête à l’aide de la référence du point de terminaison. Consultez `details` pour identifier les champs en cause. | Non                           |
+| 400  | `Invalid URL`                                          | Le champ `url` est manquant, mal formé ou utilise un protocole non pris en charge.                        | Fournissez une URL absolue `http(s)://`.                                                                                                     | Non                           |
+| 401  | `Unauthorized: Invalid token`                          | La clé d’API est manquante, mal formée ou révoquée.                                                       | Envoyez `Authorization: Bearer fc-...` avec une clé valide depuis le [dashboard](https://www.firecrawl.dev/app/api-keys).                    | Non                           |
+| 402  | `Payment Required: Insufficient credits`               | Les crédits de l’offre sont épuisés ou la facturation n’est pas configurée.                               | Rechargez des crédits, activez la recharge automatique ou passez à une offre supérieure.                                                     | Non                           |
+| 403  | `Forbidden`                                            | La clé ne dispose pas des autorisations nécessaires pour ce point de terminaison ou cette fonctionnalité. | Utilisez une clé avec le scope requis, ou passez à l’offre qui donne accès à cette fonctionnalité.                                           | Non                           |
+| 404  | `Not Found`                                            | L’ID de tâche, la ressource ou le chemin du point de terminaison n’existe pas.                            | Vérifiez l’ID de la ressource et l’URL du point de terminaison.                                                                              | Non                           |
+| 408  | `Request Timeout`                                      | La page a mis plus de temps à charger que le `timeout` de la requête.                                     | Augmentez `timeout`, simplifiez les actions ou utilisez `fastMode`.                                                                          | Oui, avec backoff exponentiel |
+| 409  | `Conflict`                                             | La ressource est dans un état qui empêche l’opération (par ex. déjà supprimée).                           | Récupérez à nouveau l’état et remettez-le en cohérence avant de réessayer.                                                                   | Non                           |
+| 413  | `Payload Too Large`                                    | Le corps de la requête a dépassé la taille maximale autorisée.                                            | Réduisez le payload (par ex. schéma plus court, moins d’URL par batch).                                                                      | Non                           |
+| 422  | `Unprocessable Entity` / erreur de schéma d’extraction | Le schéma est un JSON Schema invalide, ou le modèle n’a pas pu produire un résultat conforme.             | Validez le schéma ; assouplissez les champs obligatoires ; essayez un autre `model`.                                                         | Parfois                       |
+| 429  | `Rate limit exceeded`                                  | Trop de requêtes pour la limite par minute de votre offre.                                                | Attendez puis réessayez après `Retry-After` secondes. Voir [limites de débit](/fr/rate-limits).                                                 | Oui, avec backoff exponentiel |
+| 429  | `Concurrency limit reached`                            | La limite de concurrence du browser pour votre offre est atteinte.                                        | Attendez que les tâches en cours se terminent, réduisez la concurrence ou passez à une offre supérieure.                                     | Oui, avec backoff exponentiel |
+| 500  | `Internal Server Error`                                | Défaillance non gérée côté serveur.                                                                       | Réessayez avec un backoff exponentiel. Si le problème persiste, contactez le support avec l’ID de la requête.                                | Oui, avec backoff exponentiel |
+| 502  | `Bad Gateway`                                          | Le proxy ou le worker en amont a renvoyé une réponse invalide.                                            | Réessayez avec un backoff exponentiel.                                                                                                       | Oui, avec backoff exponentiel |
+| 503  | `Service Unavailable`                                  | Le service est temporairement incapable de traiter la requête.                                            | Réessayez avec un backoff exponentiel.                                                                                                       | Oui, avec backoff exponentiel |
+| 504  | `Gateway Timeout`                                      | La requête a dépassé le `timeout` de la passerelle (généralement pour les crawls longs).                  | Utilisez plutôt les points de terminaison asynchrones de crawl/batch et interrogez l’état.                                                   | Oui, avec backoff exponentiel |
+
+Pour les réponses 429, Firecrawl inclut un en-tête `Retry-After` (en secondes) lorsqu’il est disponible — attendez au moins ce délai avant de réessayer.
+
+<div id="retry-guidance">
+  ## Conseils de réessai
+</div>
+
+Considérez la colonne **réessayable** comme la référence ; ne vous basez pas uniquement sur le code d’état HTTP. Le modèle ci-dessous utilise un backoff exponentiel avec jitter et respecte `Retry-After` pour les réponses 429.
+
+<CodeGroup>
+  ```python Python
+  import time
+  import random
+  import requests
+
+  RETRYABLE_STATUSES = {408, 429, 500, 502, 503, 504}
+
+  def request_with_retry(method, url, headers=None, json=None, max_attempts=5):
+      for attempt in range(max_attempts):
+          resp = requests.request(method, url, headers=headers, json=json)
+          if resp.status_code < 400 or resp.status_code not in RETRYABLE_STATUSES:
+              return resp
+          # Respecte Retry-After lorsqu'il est présent, sinon applique un backoff exponentiel avec jitter.
+          retry_after = resp.headers.get("Retry-After")
+          delay = float(retry_after) if retry_after else min(2 ** attempt, 30) + random.random()
+          time.sleep(delay)
+      return resp
+  ```
+
+  ```js Node
+  const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+
+  async function requestWithRetry(url, init = {}, maxAttempts = 5) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const resp = await fetch(url, init);
+      if (resp.ok || !RETRYABLE_STATUSES.has(resp.status)) return resp;
+      // Respecte Retry-After lorsqu'il est présent, sinon applique un backoff exponentiel avec jitter.
+      const retryAfter = resp.headers.get('Retry-After');
+      const delayMs = retryAfter
+        ? Number(retryAfter) * 1000
+        : Math.min(2 ** attempt, 30) * 1000 + Math.random() * 1000;
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  ```
+
+  ```bash cURL
+  # Boucle shell simple avec backoff exponentiel pour les codes pouvant être retentés.
+  attempt=0
+  max=5
+  until response=$(curl -sS -w "\n%{http_code}" -X POST "https://api.firecrawl.dev/v2/scrape" \
+      -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{"url":"https://example.com"}'); do
+    status=$(printf '%s' "$response" | tail -n1)
+    case "$status" in
+      408|429|500|502|503|504)
+        attempt=$((attempt+1))
+        [ "$attempt" -ge "$max" ] && break
+        sleep $((2 ** attempt))
+        ;;
+      *) break ;;
+    esac
+  done
+  echo "$response"
+  ```
+</CodeGroup>
+
+<div id="rate-limits">
+  ## Limites de débit
+</div>
+
+Les réponses 429 constituent l’erreur réessayable la plus courante. Les limites de débit et de concurrence propres à chaque offre sont documentées dans [Limites de débit](/fr/rate-limits). Respectez toujours l’en-tête `Retry-After` lorsqu’il est présent, plutôt que de réessayer immédiatement.
