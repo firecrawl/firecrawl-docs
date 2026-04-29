@@ -4,7 +4,7 @@ Welcome to the Firecrawl documentation repository! This repo contains the source
 
 ## About Firecrawl
 
-Firecrawl is an open-source tool that turns websites into LLM-ready data. With Firecrawl, you can power your AI applications with clean data crawled from any website, making it easier to create powerful and accurate language models.
+Firecrawl is an API platform that helps AI systems search, scrape, and interact with the web. With Firecrawl, you can power your AI applications with clean, structured web data, making it easier to create powerful and accurate language models.
 
 ## Getting Started
 
@@ -12,20 +12,15 @@ To get started with the Firecrawl documentation, follow the steps below:
 
 ### Prerequisites
 
-- Node.js (version 19 or higher)
+- Node.js LTS (version 19 or higher). **Node 25+ is not supported** by the Mintlify CLI (see [mintlify/starter#116](https://github.com/mintlify/starter/issues/116)). If you're on Node 25+, please use an [LTS version](https://nodejs.org/en/about/previous-releases#looking-for-the-latest-release-of-a-version-branch) of Node.js.
+
 
 ### Installation
 
-1. Install Mintlify globally using npm:
+1. Install the Mintlify CLI globally:
 
    ```bash
-   npm install -g mintlify
-   ```
-
-   Or if you prefer yarn:
-
-   ```bash
-   yarn global add mintlify
+   npm i -g mint
    ```
 
 2. Clone this repository and navigate to the directory:
@@ -38,8 +33,10 @@ To get started with the Firecrawl documentation, follow the steps below:
 3. Start the Mintlify development server:
 
    ```bash
-   mintlify dev
+   mint dev
    ```
+
+   > Note: the CLI was renamed from `mintlify` to `mint`. The old `mintlify dev` command is deprecated.
 
 4. Open your web browser and visit [http://localhost:3000](http://localhost:3000) to see a local preview of the documentation.
 
@@ -57,4 +54,4 @@ When contributing, please follow these guidelines:
 
 If you have any questions or need further assistance, please reach out to us at [help@firecrawl.dev](mailto:help@firecrawl.dev).
 
-Happy crawling with Firecrawl! 🔥🕷️
+Happy building with Firecrawl! 🔥

@@ -1,0 +1,482 @@
+---
+title: "Java 权威来源"
+description: "用于代理的 Firecrawl Java 权威来源，涵盖搜索、抓取和交互等关键端点。"
+---
+
+面向代理的 Firecrawl Java 权威来源。基于 SDK 源代码和 v2 OpenAPI 规范生成。
+
+<div id="install">
+  ## 安装
+</div>
+
+Maven：
+
+```xml
+<dependency>
+  <groupId>com.firecrawl</groupId>
+  <artifactId>firecrawl-java</artifactId>
+  <version>1.2.0</version>
+</dependency>
+```
+
+Gradle：
+
+```gradle
+implementation("com.firecrawl:firecrawl-java:1.2.0")
+```
+
+<div id="authenticate">
+  ## 认证
+</div>
+
+```java
+import com.firecrawl.client.FirecrawlClient;
+
+FirecrawlClient client = FirecrawlClient.builder()
+    .apiKey(System.getenv("FIRECRAWL_API_KEY"))
+    .build();
+```
+
+<div id="when-to-use-what">
+  ## 何时该用哪个
+</div>
+
+* `search`：当你从查询词开始，需要先发现目标时使用。
+* `scrape`：当你已经有 URL，并且想获取页面内容时使用。
+* `interact`：当页面需要点击、填写表单或在抓取后执行浏览器交互操作时使用。
+
+<div id="search">
+  ## 搜索
+</div>
+
+### 为什么使用它
+
+使用 search 根据查询词发现相关页面，然后选择要抓取或与之交互的 URL。你可以使用标准的 `site:` 运算符，将结果限制在某个域名下，例如 `site:docs.firecrawl.dev crawl webhooks`。
+
+<div id="preferred-sdk-methods">
+  ### 推荐的 SDK 方法
+</div>
+
+* `client.search(query)`
+* `client.search(query, options)`
+
+<div id="return-value">
+  ### 返回值
+</div>
+
+`search` 返回 `SearchData`。使用 `getWeb()`、`getNews()` 和 `getImages()` 读取结果分桶 (每个都是 `List<Map<String, Object>>`，且可能为 null) 。不要将 `SearchData` 视为可直接迭代的命中列表。
+
+<div id="simple-example">
+  ### 简单示例
+</div>
+
+```java
+import com.firecrawl.models.SearchData;
+import java.util.List;
+import java.util.Map;
+
+SearchData results = client.search("site:docs.firecrawl.dev webhook retries");
+List<Map<String, Object>> web = results.getWeb();
+```
+
+<div id="complex-example">
+  ### 复杂示例
+</div>
+
+```java
+import com.firecrawl.models.SearchOptions;
+import com.firecrawl.models.ScrapeOptions;
+import com.firecrawl.models.JsonFormat;
+import com.firecrawl.models.LocationConfig;
+
+SearchOptions options = SearchOptions.builder()
+    .sources(List.of("web", "news"))
+    .categories(List.of("research"))
+    .limit(10)
+    .tbs("qdr:m")
+    .location("San Francisco,California,United States")
+    .ignoreInvalidURLs(true)
+    .timeout(60000)
+    .scrapeOptions(
+        ScrapeOptions.builder()
+            .formats(List.of(
+                "markdown",
+                "links",
+                JsonFormat.builder().prompt("Extract title and key endpoints.").build()
+            ))
+            .onlyMainContent(true)
+            .waitFor(1000)
+            .build()
+    )
+    .build();
+
+SearchData results = client.search("site:docs.firecrawl.dev crawl webhooks", options);
+```
+
+<div id="parameters">
+  ### 参数
+</div>
+
+* `query`
+  * 类型：字符串
+  * 使用时机：需要提供搜索查询时。
+  * 说明：使用 `site:example.com` 可将结果限制在某个域名下。
+
+* `options.sources`
+  * 类型：来源字符串或映射组成的列表
+  * 使用时机：想控制搜索哪些来源时。
+  * 已确认的值：
+    * `"web"`：网页索引结果
+    * `"news"`：新闻结果
+    * `"images"`：图片结果
+    * `{type: "web" | "news" | "images"}`：带类型的来源映射形式
+
+* `options.categories`
+  * 类型：分类字符串或映射组成的列表
+  * 使用时机：想按分类筛选结果时。
+  * 已确认的值：
+    * `"github"`：GitHub 相关结果
+    * `"research"`：研究和学术结果
+    * `"pdf"`：PDF 相关结果
+    * `{type: "github" | "research" | "pdf"}`：带类型的分类映射形式
+
+* `options.limit`
+  * 类型：整数
+  * 使用时机：想限制结果数量时。
+
+* `options.tbs`
+  * 类型：字符串
+  * 使用时机：需要按时间筛选时 (例如 `qdr:d`、`qdr:w`、`sbd:1,qdr:m`) 。
+
+* `options.location`
+  * 类型：字符串
+  * 使用时机：想获取本地化结果时。
+
+* `options.ignoreInvalidURLs`
+  * 类型：布尔值
+  * 使用时机：想忽略其他端点无法抓取的 URL 时。
+
+* `options.timeout`
+  * 类型：整数
+  * 使用时机：需要设置以毫秒为单位的请求超时时。
+
+* `options.scrapeOptions`
+  * 类型：`ScrapeOptions`
+  * 使用时机：想抓取每个搜索结果时 (字段请参见 Scrape 参数) 。
+
+* `options.integration`
+  * 类型：字符串
+  * 使用时机：API 要求在请求中提供 integration 标识符时。
+
+<div id="scrape">
+  ## 抓取
+</div>
+
+### 为什么要用它
+
+如果你已经有了 URL，并希望获取一种或多种 formats 的结构化内容，请使用 `scrape`。
+
+<div id="preferred-sdk-methods">
+  ### 推荐的 SDK 方法
+</div>
+
+* `client.scrape(url)`
+* `client.scrape(url, options)`
+
+<div id="return-value">
+  ### 返回值
+</div>
+
+`scrape` 返回 `Document`。常见的 getter 包括 `getMarkdown()`、`getHtml()`、`getRawHtml()`、`getJson()`、`getMetadata()` 和 `getLinks()`，以及在请求相应 `formats` 时返回的其他字段。
+
+<div id="simple-example">
+  ### 简单示例
+</div>
+
+```java
+Document doc = client.scrape(
+    "https://docs.firecrawl.dev",
+    ScrapeOptions.builder().formats(List.of("markdown")).build()
+);
+```
+
+<div id="complex-example">
+  ### 复杂示例
+</div>
+
+```java
+import com.firecrawl.models.ScrapeOptions;
+import com.firecrawl.models.JsonFormat;
+
+List<Map<String, Object>> actions = List.of(
+    Map.of("type", "click", "selector", "#accept"),
+    Map.of("type", "wait", "milliseconds", 750),
+    Map.of("type", "scrape")
+);
+
+LocationConfig location = LocationConfig.builder()
+    .country("US")
+    .languages(List.of("en-US"))
+    .build();
+
+ScrapeOptions options = ScrapeOptions.builder()
+    .formats(List.of(
+        "markdown",
+        "links",
+        JsonFormat.builder().prompt("Extract plan names and prices.").build(),
+        Map.of("type", "screenshot", "fullPage", true, "quality", 80)
+    ))
+    .onlyMainContent(true)
+    .waitFor(1000)
+    .parsers(List.of(Map.of("type", "pdf", "maxPages", 5)))
+    .actions(actions)
+    .location(location)
+    .removeBase64Images(true)
+    .blockAds(true)
+    .proxy("auto")
+    .maxAge(86400000L)
+    .storeInCache(true)
+    .build();
+
+Document doc = client.scrape("https://example.com/pricing", options);
+```
+
+<div id="parameters">
+  ### 参数
+</div>
+
+* `url`
+  * Type: String
+  * 使用场景：要抓取某个特定页面时使用。
+
+* `options.formats`
+  * Type: formats 字符串列表或 formats 映射列表
+  * 使用场景：需要多种输出 formats 时使用。
+  * 已确认的 formats 字符串：
+    * `"markdown"`: markdown 内容
+    * `"html"`: 清理后的 HTML
+    * `"rawHtml"`: 原始 HTML
+    * `"links"`: 页面链接
+    * `"images"`: 图片 URL
+    * `"screenshot"`: 截图输出
+    * `"summary"`: 摘要输出
+    * `"changeTracking"`: 变更追踪输出
+    * `"json"`: JSON 提取
+    * `"attributes"`: 属性提取
+    * `"branding"`: 品牌资料输出
+    * `"audio"`: 音频提取
+  * 格式对象字段：
+    * `type`: 上述 formats 字符串之一
+    * `prompt`, `schema`: `type: "json"` 时的 JSON 提取选项
+    * `modes`, `schema`, `prompt`, `tag`: `type: "changeTracking"` 时的变更追踪选项
+    * `fullPage`, `quality`, `viewport`: `type: "screenshot"` 时的截图选项
+    * `selectors`: `type: "attributes"` 时使用的 `{selector, attribute}` 数组
+
+* `options.headers`
+  * Type: `Map<String, String>`
+  * 使用场景：需要自定义请求头时使用。
+
+* `options.includeTags`
+  * Type: `List<String>`
+  * 使用场景：只想包含特定 HTML 标签时使用。
+
+* `options.excludeTags`
+  * Type: `List<String>`
+  * 使用场景：想排除特定 HTML 标签时使用。
+
+* `options.onlyMainContent`
+  * Type: Boolean
+  * 使用场景：想去除导航栏、页脚和其他样板内容时使用。
+
+* `options.timeout`
+  * Type: Integer
+  * 使用场景：需要设置以毫秒为单位的超时时间时使用。
+
+* `options.waitFor`
+  * Type: Integer
+  * 使用场景：需要等待页面渲染完成时使用 (毫秒) 。
+
+* `options.mobile`
+  * Type: Boolean
+  * 使用场景：想使用移动端视口时使用。
+
+* `options.parsers`
+  * Type: `List<Object>`
+  * 使用场景：需要控制文件解析时使用。
+  * 已确认的值：
+    * `"pdf"`
+    * `{type: "pdf", maxPages: number}`
+
+* `options.actions`
+  * Type: `List<Map<String, Object>>`
+  * 使用场景：需要轻量级抓取前 actions 时使用。
+  * 已确认的 action 类型：
+    * `wait`: 必填 `milliseconds` 或 `selector`
+    * `screenshot`: `fullPage`、`quality`、`viewport` 可选
+    * `click`: 必填 `selector`
+    * `write`: 必填 `text` (先点击使输入框获得焦点) 
+    * `press`: 必填 `key`
+    * `scroll`: 必填 `direction` (`up` 或 `down`) ，`selector` 可选
+    * `scrape`: 无额外字段
+    * `executeJavascript`: 必填 `script`
+    * `pdf`: `format` (A0、A1、A2、A3、A4、A5、A6、Letter、Legal、Tabloid、Ledger) 、`landscape`、`scale` 可选
+
+* `options.location`
+  * Type: `LocationConfig`
+  * 使用场景：需要按地理位置或语言感知进行抓取时使用。
+
+* `options.skipTlsVerification`
+  * Type: Boolean
+  * 使用场景：需要跳过 TLS 验证时使用。
+
+* `options.removeBase64Images`
+  * Type: Boolean
+  * 使用场景：想从 markdown 输出中移除 base64 图片时使用。
+
+* `options.blockAds`
+  * Type: Boolean
+  * 使用场景：想启用广告和 Cookie 弹窗拦截时使用。
+
+* `options.proxy`
+  * Type: String
+  * 使用场景：需要控制代理时使用。
+  * 已确认的值：`"basic"`、`"stealth"`、`"enhanced"`、`"auto"`，或自定义代理 URL 字符串
+
+* `options.maxAge`
+  * Type: Long
+  * 使用场景：想使用不超过指定最大时长的缓存数据时使用 (毫秒) 。
+
+* `options.storeInCache`
+  * Type: Boolean
+  * 使用场景：希望 Firecrawl 缓存结果时使用。
+
+* `options.integration`
+  * Type: String
+  * 使用场景：API 要求在请求中提供 integration 标识符时使用。
+
+<div id="interact">
+  ## 交互
+</div>
+
+<div id="why-use-it">
+  ### 为什么要使用它
+</div>
+
+当页面在开始抓取后还需要执行浏览器 actions 或运行代码时，请使用 interact。
+
+<div id="preferred-sdk-methods">
+  ### 推荐的 SDK 方法
+</div>
+
+* `client.interact(jobId, code)` — 使用默认语言 `node` 和 API 的默认执行超时时间
+* `client.interact(jobId, code, language, timeout)` — `timeout` 的单位为秒 (1–300) ；也可设为 null，以省略该参数并使用 API 默认值 (30 秒) 
+* `client.interact(jobId, code, language, timeout, origin)` — 可选的 `origin` 字符串仅在非 null 时发送 (用于请求归因)
+
+<div id="simple-example">
+  ### 简单示例
+</div>
+
+```java
+import com.firecrawl.models.BrowserExecuteResponse;
+
+BrowserExecuteResponse result = client.interact(
+    "<scrapeJobId>",
+    "console.log(await page.title());",
+    "node",
+    60
+);
+```
+
+<div id="complex-example">
+  ### 复杂示例
+</div>
+
+```java
+BrowserExecuteResponse result = client.interact(
+    "<scrapeJobId>",
+    "// 在此处使用 Playwright page 方法",
+    "node",
+    120
+);
+```
+
+<div id="stop-interactive-browser">
+  ### 停止交互式浏览器
+</div>
+
+完成后，结束与抓取任务关联的浏览器会话。
+
+**首选 SDK 方法：** `client.stopInteractiveBrowser(jobId)`
+
+```java
+import com.firecrawl.models.BrowserDeleteResponse;
+
+BrowserDeleteResponse stopped = client.stopInteractiveBrowser("<scrapeJobId>");
+```
+
+<div id="interact-response-browserexecuteresponse">
+  ### 交互响应 (`BrowserExecuteResponse`)
+</div>
+
+* `isSuccess()`: 布尔值
+* `getStdout()`, `getStderr()`, `getResult()`, `getError()`: 字符串 (可为 null) 
+* `getExitCode()`: 整数 (可为 null) 
+* `getKilled()`: 布尔值 (可为 null) — 当执行因超时而中止时为 true
+
+<div id="stop-response-browserdeleteresponse">
+  ### 停止操作响应 (`BrowserDeleteResponse`)
+</div>
+
+* `isSuccess()`: 布尔值
+* `getSessionDurationMs()`: Long (可能为 null) 
+* `getCreditsBilled()`: Integer (可能为 null) 
+* `getError()`: String (可能为 null)
+
+<div id="parameters">
+  ### 参数
+</div>
+
+* `jobId`
+  * 类型: String
+  * 适用场景：你已有抓取任务 ID。
+
+* `code`
+  * 类型: String
+  * 适用场景：你想在浏览器会话中运行代码。
+
+* `language`
+  * 类型: String
+  * 适用场景：你需要指定运行时。
+  * 已确认的值：`"python"`、`"node"`、`"bash"`
+  * 说明：如果为 null，SDK 默认使用 `"node"`。
+
+* `timeout`
+  * 类型: Integer
+  * 适用场景：你需要设置执行超时时间 (单位为秒，范围 1–300) 。设为 null 时会省略该字段，并使用 API 默认值。
+
+* `origin`
+  * 类型: String
+  * 适用场景：你需要为请求添加可选的 origin 标签。除非你的集成需要，否则建议省略。
+
+<div id="notes">
+  ## 注意事项
+</div>
+
+* 已弃用的别名：`scrapeExecute` → `interact`，`deleteScrapeBrowser` → `stopInteractiveBrowser` (以及对应的 `*Async` 辅助函数) 。
+* Java SDK 仅支持基于代码的交互：`interact` 不提供 `prompt` 参数 (这点与某些其他语言的 SDK 不同) 。
+
+<div id="source-of-truth">
+  ## 权威来源
+</div>
+
+* `firecrawl/apps/java-sdk/build.gradle.kts`
+* `firecrawl/apps/java-sdk/src/main/java/com/firecrawl/client/FirecrawlClient.java`
+* `firecrawl/apps/java-sdk/src/main/java/com/firecrawl/models/SearchOptions.java`
+* `firecrawl/apps/java-sdk/src/main/java/com/firecrawl/models/ScrapeOptions.java`
+* `firecrawl/apps/java-sdk/src/main/java/com/firecrawl/models/SearchData.java`
+* `firecrawl/apps/java-sdk/src/main/java/com/firecrawl/models/JsonFormat.java`
+* `firecrawl/apps/java-sdk/src/main/java/com/firecrawl/models/LocationConfig.java`
+* `firecrawl/apps/java-sdk/src/main/java/com/firecrawl/models/Document.java`
+* `firecrawl/apps/java-sdk/src/main/java/com/firecrawl/models/BrowserExecuteResponse.java`
+* `firecrawl/apps/java-sdk/src/main/java/com/firecrawl/models/BrowserDeleteResponse.java`
+* `firecrawl-docs/api-reference/v2-openapi.json`

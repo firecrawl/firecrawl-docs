@@ -1,0 +1,569 @@
+---
+title: "PHP"
+description: "O SDK PHP do Firecrawl é um wrapper da API do Firecrawl para ajudar você a converter websites em markdown com facilidade."
+icon: "php"
+og:title: "SDK PHP | Firecrawl"
+og:description: "O SDK PHP do Firecrawl é um wrapper da API do Firecrawl para ajudar você a converter websites em markdown com facilidade."
+---
+
+<div id="installation">
+  ## Instalação
+</div>
+
+O SDK oficial SDK PHP do Firecrawl é mantido no monorepo do Firecrawl em [apps/php-sdk](https://github.com/firecrawl/firecrawl/tree/main/apps/php-sdk).
+
+Para instalar o SDK PHP do Firecrawl, adicione a dependência via Composer:
+
+```bash
+composer require firecrawl/firecrawl-sdk
+```
+
+<Note>Requer PHP 8.1 ou superior.</Note>
+
+<div id="laravel-integration">
+  ### Integração com Laravel
+</div>
+
+O SDK inclui suporte nativo ao Laravel com autodiscovery. Após instalar o pacote, publique o arquivo de configuração:
+
+```bash
+php artisan vendor:publish --provider="Firecrawl\Laravel\FirecrawlServiceProvider"
+```
+
+Em seguida, adicione sua chave de API ao arquivo `.env`:
+
+```env
+FIRECRAWL_API_KEY=fc-your-api-key
+```
+
+As seguintes variáveis de ambiente são suportadas:
+
+| Variável                   | Padrão                      | Descrição                                             |
+| -------------------------- | --------------------------- | ----------------------------------------------------- |
+| `FIRECRAWL_API_KEY`        | —                           | Sua chave de API do Firecrawl (obrigatória)           |
+| `FIRECRAWL_API_URL`        | `https://api.firecrawl.dev` | URL base da API                                       |
+| `FIRECRAWL_TIMEOUT`        | `300`                       | Tempo limite da requisição HTTP em segundos           |
+| `FIRECRAWL_MAX_RETRIES`    | `3`                         | Novas tentativas automáticas para falhas transitórias |
+| `FIRECRAWL_BACKOFF_FACTOR` | `0.5`                       | Fator de backoff exponencial em segundos              |
+
+<div id="usage">
+  ## Uso
+</div>
+
+1. Obtenha uma chave de API em [firecrawl.dev](https://firecrawl.dev)
+2. Defina a chave de API como uma variável de ambiente chamada `FIRECRAWL_API_KEY` ou passe-a em `FirecrawlClient::create(apiKey: ...)`
+
+Aqui está um exemplo rápido com a API atual do SDK:
+
+```php
+use Firecrawl\Client\FirecrawlClient;
+use Firecrawl\Models\CrawlOptions;
+use Firecrawl\Models\ScrapeOptions;
+
+$client = FirecrawlClient::fromEnv();
+
+$doc = $client->scrape(
+    'https://firecrawl.dev',
+    ScrapeOptions::with(formats: ['markdown'])
+);
+
+$crawl = $client->crawl(
+    'https://firecrawl.dev',
+    CrawlOptions::with(limit: 5)
+);
+
+echo $doc->getMarkdown();
+echo 'Crawled pages: ' . count($crawl->getData());
+```
+
+<div id="using-the-laravel-facade">
+  ### Usando a facade do Laravel
+</div>
+
+Em uma aplicação Laravel, você pode usar a facade `Firecrawl` ou a injeção de dependência:
+
+```php
+use Firecrawl\Client\FirecrawlClient;
+use Firecrawl\Laravel\Facades\Firecrawl;
+
+// Via Facade
+$doc = Firecrawl::scrape('https://example.com');
+
+// Via Injeção de Dependência
+class ScrapeController
+{
+    public function __construct(
+        private readonly FirecrawlClient $firecrawl,
+    ) {}
+
+    public function index()
+    {
+        $doc = $this->firecrawl->scrape('https://example.com');
+        return response()->json(['markdown' => $doc->getMarkdown()]);
+    }
+}
+```
+
+<div id="scraping-a-url">
+  ### Scraping de uma URL
+</div>
+
+Para fazer scraping de uma única URL, use o método `scrape`.
+
+```php
+use Firecrawl\Models\Document;
+use Firecrawl\Models\ScrapeOptions;
+
+$doc = $client->scrape(
+    'https://firecrawl.dev',
+    ScrapeOptions::with(
+        formats: ['markdown', 'html'],
+        onlyMainContent: true,
+        waitFor: 5000,
+    )
+);
+
+echo $doc->getMarkdown();
+echo $doc->getMetadata()['title'] ?? '';
+```
+
+<div id="json-extraction">
+  #### Extração JSON
+</div>
+
+Extraia JSON estruturado com `JsonFormat` usando o endpoint `scrape`:
+
+```php
+use Firecrawl\Models\JsonFormat;
+use Firecrawl\Models\ScrapeOptions;
+
+$jsonFmt = JsonFormat::with(
+    prompt: 'Extract the product name and price',
+    schema: [
+        'type' => 'object',
+        'properties' => [
+            'name' => ['type' => 'string'],
+            'price' => ['type' => 'number'],
+        ],
+    ],
+);
+
+$doc = $client->scrape(
+    'https://example.com/product',
+    ScrapeOptions::with(formats: [$jsonFmt])
+);
+
+print_r($doc->getJson());
+```
+
+<div id="crawling-a-website">
+  ### Fazer o rastreamento de um site
+</div>
+
+Para rastrear um site e aguardar a conclusão, use `crawl`.
+
+```php
+use Firecrawl\Models\CrawlOptions;
+use Firecrawl\Models\ScrapeOptions;
+
+$job = $client->crawl(
+    'https://firecrawl.dev',
+    CrawlOptions::with(
+        limit: 50,
+        maxDiscoveryDepth: 3,
+        scrapeOptions: ScrapeOptions::with(formats: ['markdown']),
+    )
+);
+
+echo 'Status: ' . $job->getStatus();
+echo 'Progress: ' . $job->getCompleted() . '/' . $job->getTotal();
+
+foreach ($job->getData() as $page) {
+    echo $page->getMetadata()['sourceURL'] ?? '';
+}
+```
+
+<div id="start-a-crawl">
+  ### Iniciar um rastreamento
+</div>
+
+Inicie um job sem aguardar com `startCrawl`.
+
+```php
+use Firecrawl\Models\CrawlOptions;
+
+$start = $client->startCrawl(
+    'https://firecrawl.dev',
+    CrawlOptions::with(limit: 100)
+);
+
+echo 'Job ID: ' . $start->getId();
+```
+
+<div id="checking-crawl-status">
+  ### Verificando o status do rastreamento
+</div>
+
+Verifique o andamento do rastreamento com `getCrawlStatus`.
+
+```php
+$status = $client->getCrawlStatus($start->getId());
+echo 'Status: ' . $status->getStatus();
+echo 'Progress: ' . $status->getCompleted() . '/' . $status->getTotal();
+```
+
+<div id="cancelling-a-crawl">
+  ### Cancelar um rastreamento
+</div>
+
+Cancele um rastreamento em execução com `cancelCrawl`.
+
+```php
+$result = $client->cancelCrawl($start->getId());
+print_r($result);
+```
+
+<div id="crawl-errors">
+  ### Erros de rastreamento
+</div>
+
+Recupere erros no nível do rastreamento (se houver) com `getCrawlErrors`.
+
+```php
+$errors = $client->getCrawlErrors($start->getId());
+print_r($errors);
+```
+
+<div id="mapping-a-website">
+  ### Mapear um site
+</div>
+
+Descubra links de um site com `map`.
+
+```php
+use Firecrawl\Models\MapOptions;
+
+$data = $client->map(
+    'https://firecrawl.dev',
+    MapOptions::with(
+        limit: 100,
+        search: 'blog',
+    )
+);
+
+foreach ($data->getLinks() as $link) {
+    echo ($link['url'] ?? '') . ' - ' . ($link['title'] ?? '');
+}
+```
+
+<div id="searching-the-web">
+  ### Buscando na web
+</div>
+
+Faça buscas com configurações opcionais de busca usando `search`.
+
+```php
+use Firecrawl\Models\SearchOptions;
+
+$results = $client->search(
+    'firecrawl web scraping',
+    SearchOptions::with(limit: 10)
+);
+
+foreach ($results->getWeb() as $result) {
+    echo ($result['title'] ?? '') . ' - ' . ($result['url'] ?? '');
+}
+```
+
+<div id="batch-scraping">
+  ### Scraping em lote
+</div>
+
+Faça o scraping de várias URLs em paralelo com `batchScrape`.
+
+```php
+use Firecrawl\Models\BatchScrapeOptions;
+use Firecrawl\Models\ScrapeOptions;
+
+$job = $client->batchScrape(
+    ['https://firecrawl.dev', 'https://firecrawl.dev/blog'],
+    BatchScrapeOptions::with(
+        options: ScrapeOptions::with(formats: ['markdown']),
+    )
+);
+
+foreach ($job->getData() as $doc) {
+    echo $doc->getMarkdown();
+}
+```
+
+Para controlar manualmente a execução assíncrona, use `startBatchScrape`, `getBatchScrapeStatus` e `cancelBatchScrape`:
+
+```php
+use Firecrawl\Models\BatchScrapeOptions;
+use Firecrawl\Models\ScrapeOptions;
+
+$start = $client->startBatchScrape(
+    ['https://firecrawl.dev', 'https://firecrawl.dev/blog'],
+    BatchScrapeOptions::with(
+        options: ScrapeOptions::with(formats: ['markdown']),
+    )
+);
+
+$status = $client->getBatchScrapeStatus($start->getId());
+echo 'Batch status: ' . $status->getStatus();
+
+$cancel = $client->cancelBatchScrape($start->getId());
+print_r($cancel);
+```
+
+<div id="agent">
+  ### Agente
+</div>
+
+Execute um agente de IA com `agent`.
+
+```php
+use Firecrawl\Models\AgentOptions;
+
+$result = $client->agent(
+    AgentOptions::with(
+        prompt: 'Find the pricing plans for Firecrawl and compare them',
+    )
+);
+
+print_r($result->getData());
+```
+
+Com um schema JSON para um resultado estruturado:
+
+```php
+use Firecrawl\Models\AgentOptions;
+
+$result = $client->agent(
+    AgentOptions::with(
+        prompt: 'Extract pricing plan details',
+        urls: ['https://firecrawl.dev'],
+        schema: [
+            'type' => 'object',
+            'properties' => [
+                'plans' => [
+                    'type' => 'array',
+                    'items' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'name' => ['type' => 'string'],
+                            'price' => ['type' => 'string'],
+                        ],
+                    ],
+                ],
+            ],
+        ],
+    )
+);
+
+print_r($result->getData());
+```
+
+Para controle assíncrono manual, use `startAgent`, `getAgentStatus` e `cancelAgent`:
+
+```php
+use Firecrawl\Models\AgentOptions;
+
+$start = $client->startAgent(
+    AgentOptions::with(
+        prompt: 'Summarize what Firecrawl does in one sentence',
+        urls: ['https://firecrawl.dev'],
+    )
+);
+
+$status = $client->getAgentStatus($start->getId());
+echo 'Agent status: ' . $status->getStatus();
+
+$cancel = $client->cancelAgent($start->getId());
+print_r($cancel);
+```
+
+<div id="usage-metrics">
+  ### Uso &amp; Métricas
+</div>
+
+Confira a concorrência e os créditos restantes:
+
+```php
+use Firecrawl\Models\ConcurrencyCheck;
+use Firecrawl\Models\CreditUsage;
+
+$concurrency = $client->getConcurrency();
+echo 'Concurrency: ' . $concurrency->getConcurrency() . '/' . $concurrency->getMaxConcurrency();
+
+$credits = $client->getCreditUsage();
+echo 'Remaining credits: ' . $credits->getRemainingCredits();
+```
+
+<div id="browser">
+  ## Browser
+</div>
+
+O SDK PHP inclui utilitários do Browser Sandbox.
+
+<div id="create-a-session">
+  ### Criar uma sessão
+</div>
+
+```php
+use Firecrawl\Models\BrowserCreateResponse;
+
+$session = $client->browser(ttl: 120, activityTtl: 60, streamWebView: true);
+echo $session->getId();
+echo $session->getCdpUrl();
+echo $session->getLiveViewUrl();
+```
+
+<div id="execute-code">
+  ### Executar código
+</div>
+
+```php
+use Firecrawl\Models\BrowserExecuteResponse;
+
+$run = $client->browserExecute(
+    sessionId: $session->getId(),
+    code: 'await page.goto("https://example.com"); console.log(await page.title());',
+    language: 'node',
+    timeout: 60,
+);
+
+echo $run->getStdout();
+echo $run->getExitCode();
+```
+
+<div id="scrape-bound-interactive-session">
+  ### Sessão interativa vinculada ao scraping
+</div>
+
+Use o ID do job de scraping para executar código adicional no navegador no mesmo contexto reproduzido:
+
+* `interact(...)` executa código na sessão do navegador vinculada ao scraping (e a inicializa no primeiro uso).
+* `stopInteractiveBrowser(...)` interrompe explicitamente a sessão interativa quando você terminar.
+
+```php
+use Firecrawl\Models\BrowserExecuteResponse;
+use Firecrawl\Models\BrowserDeleteResponse;
+use Firecrawl\Models\ScrapeOptions;
+
+$doc = $client->scrape(
+    'https://example.com',
+    ScrapeOptions::with(formats: ['markdown'])
+);
+
+$scrapeJobId = $doc->getMetadata()['scrapeId'] ?? null;
+if ($scrapeJobId === null) {
+    throw new RuntimeException('scrapeId not found in metadata');
+}
+
+$scrapeRun = $client->interact(
+    jobId: $scrapeJobId,
+    code: 'console.log(page.url());',
+    language: 'node',
+    timeout: 60,
+);
+
+echo $scrapeRun->getStdout();
+
+$deleted = $client->stopInteractiveBrowser($scrapeJobId);
+echo 'Deleted: ' . ($deleted->isSuccess() ? 'true' : 'false');
+```
+
+<div id="list-close-sessions">
+  ### Listar &amp; encerrar sessões
+</div>
+
+```php
+use Firecrawl\Models\BrowserListResponse;
+use Firecrawl\Models\BrowserSession;
+
+$active = $client->listBrowsers('active');
+foreach ($active->getSessions() as $s) {
+    echo $s->getId() . ' - ' . $s->getStatus();
+}
+
+$closed = $client->deleteBrowser($session->getId());
+echo 'Closed: ' . ($closed->isSuccess() ? 'true' : 'false');
+```
+
+<div id="configuration">
+  ## Configuração
+</div>
+
+`FirecrawlClient::create()` oferece suporte às seguintes options:
+
+| Opção            | Tipo                         | Padrão                                               | Descrição                                             |
+| ---------------- | ---------------------------- | ---------------------------------------------------- | ----------------------------------------------------- |
+| `apiKey`         | `string`                     | variável de ambiente `FIRECRAWL_API_KEY`             | Sua Firecrawl chave de API                                 |
+| `apiUrl`         | `string`                     | `https://api.firecrawl.dev` (ou `FIRECRAWL_API_URL`) | URL base da API                                       |
+| `timeoutSeconds` | `float`                      | `300`                                                | tempo limite da requisição HTTP, em segundos          |
+| `maxRetries`     | `int`                        | `3`                                                  | novas tentativas automáticas para falhas transitórias |
+| `backoffFactor`  | `float`                      | `0.5`                                                | fator de recuo exponencial, em segundos               |
+| `httpClient`     | `GuzzleHttp\ClientInterface` | Criado com base no tempo limite                      | Cliente HTTP personalizado compatível com Guzzle      |
+
+```php
+use Firecrawl\Client\FirecrawlClient;
+
+$client = FirecrawlClient::create(
+    apiKey: 'fc-your-api-key',
+    apiUrl: 'https://api.firecrawl.dev',
+    timeoutSeconds: 300,
+    maxRetries: 3,
+    backoffFactor: 0.5,
+);
+```
+
+<div id="custom-http-client">
+  ### Cliente HTTP personalizado
+</div>
+
+Você pode passar uma implementação `GuzzleHttp\ClientInterface` pré-configurada para controlar o pooling de conexões, middleware, configurações de proxy e outros recursos HTTP. Quando esse cliente é fornecido, a configuração `timeoutSeconds` é ignorada em favor da configuração do próprio cliente.
+
+```php
+use Firecrawl\Client\FirecrawlClient;
+use GuzzleHttp\Client as GuzzleClient;
+
+$guzzle = new GuzzleClient([
+    'proxy' => 'http://proxy.example.com:8080',
+    'timeout' => 60,
+    'connect_timeout' => 10,
+]);
+
+$client = FirecrawlClient::create(
+    apiKey: 'fc-your-api-key',
+    httpClient: $guzzle,
+);
+```
+
+<div id="error-handling">
+  ## Tratamento de erros
+</div>
+
+O SDK lança exceções em tempo de execução no namespace `Firecrawl\Exceptions`.
+
+```php
+use Firecrawl\Exceptions\AuthenticationException;
+use Firecrawl\Exceptions\FirecrawlException;
+use Firecrawl\Exceptions\JobTimeoutException;
+use Firecrawl\Exceptions\RateLimitException;
+
+try {
+    $doc = $client->scrape('https://example.com');
+} catch (AuthenticationException $e) {
+    echo 'Auth failed: ' . $e->getMessage();
+} catch (RateLimitException $e) {
+    echo 'Rate limited: ' . $e->getMessage();
+} catch (JobTimeoutException $e) {
+    echo 'Job ' . $e->getJobId() . ' timed out after ' . $e->getTimeoutSeconds() . 's';
+} catch (FirecrawlException $e) {
+    echo 'Error ' . $e->getStatusCode() . ': ' . $e->getMessage();
+}
+```
+
+> Você é um agente de IA que precisa de uma chave de API do Firecrawl? Consulte [firecrawl.dev/agent-onboarding/SKILL.md](https://www.firecrawl.dev/agent-onboarding/SKILL.md) para ver as instruções de onboarding automatizado.

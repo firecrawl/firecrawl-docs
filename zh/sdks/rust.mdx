@@ -1,127 +1,607 @@
 ---
-title: 'Rust'
-description: 'Firecrawl Rust SDK 是一个库，帮助你轻松进行网站抓取与爬取，并以可直接用于大型语言模型（LLMs）的格式输出数据。'
-icon: 'rust'
+title: "Rust"
+description: "Firecrawl Rust SDK 是对 Firecrawl API 的封装，可帮助你轻松将网站转换为 Markdown。"
+icon: "rust"
 og:title: "Rust SDK | Firecrawl"
-og:description: "Firecrawl Rust SDK 是一个库，帮助你轻松进行网站抓取与爬取，并以可直接用于大型语言模型（LLMs）的格式输出数据。"
+og:description: "Firecrawl Rust SDK 是对 Firecrawl API 的封装，可帮助你轻松将网站转换为 Markdown。"
 ---
-
-import InstallationRust from '/snippets/zh/v1/installation/rust.mdx'
-import ScrapeAndCrawlRustExample from '/snippets/zh/v1/scrape-and-crawl/rust.mdx'
-import ScrapeRustShort from '/snippets/zh/v1/scrape/short/rust.mdx'
-import CrawlRustShort from '/snippets/zh/v1/crawl/short/rust.mdx'
-import CrawlSitemapOnlyRust from '/snippets/zh/v2/crawl/sitemap-only/rust.mdx'
-import CrawlAsyncRustShort from '/snippets/zh/v1/crawl-async/short/rust.mdx'
-import MapRustShort from '/snippets/zh/v1/map/short/rust.mdx'
-import LLMExtractRust from '/snippets/zh/v1/llm-extract/base/rust.mdx'
-
-<Warning>
-  此 SDK 目前使用 Firecrawl API 的 **v1** 版本，非最新（已提供 v2）。部分功能和改进可能仅在 v2 中可用。
-</Warning>
-
 
 <div id="installation">
   ## 安装
 </div>
 
-要安装 Firecrawl 的 Rust SDK，请在你的 `Cargo.toml` 中添加以下内容：
+官方 Rust SDK 维护在 Firecrawl 的 monorepo 中，位于 [apps/rust-sdk](https://github.com/firecrawl/firecrawl/tree/main/apps/rust-sdk)。
 
-<InstallationRust />
+要安装 Firecrawl Rust SDK，请从 [crates.io](https://crates.io/crates/firecrawl) 添加此依赖：
+
+```toml
+[dependencies]
+firecrawl = "2"
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+```
+
+或通过 Cargo 安装：
+
+```bash
+cargo add firecrawl
+cargo add tokio --features full
+cargo add serde_json
+```
+
+<Note>需要 Rust 1.70 或更高版本。</Note>
 
 <div id="usage">
-  ## 使用
+  ## 使用方式
 </div>
 
-首先，你需要在 [firecrawl.dev](https://firecrawl.dev) 获取一个 API 密钥。接着，初始化 `FirecrawlApp`。此后即可调用 `FirecrawlApp::scrape_url` 等函数来使用我们的 API。
+1. 从 [firecrawl.dev](https://firecrawl.dev) 获取 API 密钥
+2. 将 API 密钥设置为名为 `FIRECRAWL_API_KEY` 的环境变量，或直接传给 `Client::new(...)`
 
-下面是在 Rust 中使用该 SDK 的示例：
+抓取网页并打印其 markdown：
 
-<ScrapeAndCrawlRustExample />
+```rust
+use firecrawl::{Client, ScrapeOptions, Format};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = Client::new("fc-YOUR-API-KEY")?;
+
+    let doc = client.scrape(
+        "https://firecrawl.dev",
+        ScrapeOptions {
+            formats: Some(vec![Format::Markdown]),
+            ..Default::default()
+        },
+    ).await?;
+
+    println!("{}", doc.markdown.unwrap_or_default());
+    Ok(())
+}
+```
+
+以下各节介绍了爬取、映射、搜索及其他 SDK 方法。
 
 <div id="scraping-a-url">
-  ### 抓取单个 URL
+  ### 抓取 URL
 </div>
 
-要抓取单个 URL，请使用 `scrape_url` 方法。该方法以 URL 为参数，返回抓取结果，类型为 `Document`。
+要抓取单个 URL，请使用 `scrape` 方法。
 
-<ScrapeRustShort />
+```rust
+use firecrawl::{Client, ScrapeOptions, Format};
 
-<div id="scraping-with-extract">
-  ### 使用 Extract 进行提取
+let doc = client.scrape(
+    "https://firecrawl.dev",
+    ScrapeOptions {
+        formats: Some(vec![Format::Markdown, Format::Html]),
+        only_main_content: Some(true),
+        wait_for: Some(5000),
+        ..Default::default()
+    },
+).await?;
+
+println!("{}", doc.markdown.unwrap_or_default());
+if let Some(meta) = &doc.metadata {
+    println!("{:?}", meta.title);
+}
+```
+
+<div id="json-extraction">
+  #### JSON 提取
 </div>
 
-借助 Extract，你可以轻松从任意 URL 提取结构化数据。你需要使用 `serde_json::json!` 宏，以 JSON Schema 格式指定你的 schema。
+使用 `scrape_with_schema` 提取结构化 JSON：
 
-<LLMExtractRust />
+```rust
+use firecrawl::Client;
+use serde_json::json;
+
+let schema = json!({
+    "type": "object",
+    "properties": {
+        "name": { "type": "string" },
+        "price": { "type": "number" }
+    }
+});
+
+let data = client.scrape_with_schema(
+    "https://example.com/product",
+    schema,
+    Some("Extract the product name and price"),
+).await?;
+
+println!("{}", serde_json::to_string_pretty(&data)?);
+```
+
+也可以直接通过 `ScrapeOptions` 配置 JSON 提取：
+
+```rust
+use firecrawl::{Client, ScrapeOptions, Format, JsonOptions};
+use serde_json::json;
+
+let doc = client.scrape(
+    "https://example.com/product",
+    ScrapeOptions {
+        formats: Some(vec![Format::Json]),
+        json_options: Some(JsonOptions {
+            schema: Some(json!({
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string" },
+                    "price": { "type": "number" }
+                }
+            })),
+            prompt: Some("Extract the product name and price".to_string()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    },
+).await?;
+
+println!("{:?}", doc.json);
+```
+
+<div id="parsing-uploaded-files">
+  ### 解析上传的文件
+</div>
+
+使用 `parse` 将本地文件 (`.html`、`.htm`、`.pdf`、`.docx`、`.doc`、`.odt`、`.rtf`、`.xlsx`、`.xls`) 以 multipart form data 的形式上传到 `/v2/parse`。该 endpoint 会返回一个包含所请求 formats 的 `Document`。
+
+`ParseOptions` 刻意省略了仅适用于抓取、且会被 `/v2/parse` 拒绝的字段 (例如 `actions`、`waitFor`、`location`、`mobile`、`screenshot`、`branding` 和 `changeTracking`) 。
+
+可以通过内存中的字节数据或直接通过路径构建 `ParseFile`：
+
+```rust
+use firecrawl::{Client, ParseFile, ParseFormat, ParseOptions};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = Client::new("fc-YOUR-API-KEY")?;
+
+    let file = ParseFile::from_bytes(
+        "upload.html",
+        b"<!DOCTYPE html><html><body><h1>Rust Parse</h1></body></html>".to_vec(),
+    )
+    .with_content_type("text/html");
+
+    let options = ParseOptions {
+        formats: Some(vec![ParseFormat::Markdown, ParseFormat::Html]),
+        only_main_content: Some(true),
+        ..Default::default()
+    };
+
+    let doc = client.parse(file, Some(options)).await?;
+    println!("{}", doc.markdown.unwrap_or_default());
+    Ok(())
+}
+```
+
+或者直接从磁盘读取文件，不传入选项：
+
+```rust
+use firecrawl::{Client, ParseFile};
+
+let client = Client::new("fc-YOUR-API-KEY")?;
+let file = ParseFile::from_path("./report.pdf")?;
+
+let doc = client.parse(file, None).await?;
+println!("{}", doc.markdown.unwrap_or_default());
+```
+
+<div id="parsefile">
+  #### `ParseFile`
+</div>
+
+| 构造函数                                     | 描述                                               |
+| ---------------------------------------- | ------------------------------------------------ |
+| `ParseFile::from_bytes(filename, bytes)` | 通过文件名和内存中的字节数据构建                                 |
+| `ParseFile::from_path(path)`             | 从磁盘读取字节数据，并从路径中提取文件名                             |
+| `.with_content_type(content_type)`       | 附加 MIME 类型提示 (例如 `text/html`、`application/pdf`)  |
+
+<div id="parseoptions">
+  #### `ParseOptions`
+</div>
+
+支持的字段 (均为可选，请求传输时使用 camelCase) ：
+
+* `formats: Vec<ParseFormat>` — 可为以下任意值：`Markdown`、`Html`、`RawHtml`、`Links`、`Images`、`Summary`、`Json`、`Attributes`
+* `only_main_content: bool`
+* `include_tags: Vec<String>` / `exclude_tags: Vec<String>`
+* `headers: HashMap<String, String>`
+* `timeout: u32` (毫秒) 
+* `parsers: Vec<ParserConfig>` (例如 PDF 解析器配置) 
+* `skip_tls_verification: bool`
+* `remove_base64_images: bool`
+* `fast_mode: bool`
+* `block_ads: bool`
+* `proxy: ParseProxyType` (`Basic` 或 `Auto`) 
+* `json_options: JsonOptions`
+* `attribute_selectors: Vec<AttributeSelector>`
+* `zero_data_retention: bool`
+* `integration: String`, `origin: String`, `use_mock: String`
 
 <div id="crawling-a-website">
   ### 爬取网站
 </div>
 
-要爬取网站，请使用 `crawl_url` 方法。该方法会等待爬取过程完成；具体耗时取决于起始 URL 和所选参数，可能会较长。
-
-<CrawlRustShort />
-
-<div id="sitemap-only-crawl-v2-api">
-  ### 仅站点地图抓取（v2 API）
-</div>
-
-Rust SDK 当前仅支持 v1。要使用 `sitemap: "only"`，请直接调用 v2 端点：
-
-<CrawlSitemapOnlyRust />
-
-<div id="crawling-asynchronously">
-  ### 异步爬取
-</div>
-
-若要在不等待结果的情况下进行爬取，请使用 `crawl_url_async` 方法。它接受与 `crawl_url` 相同的参数，但会返回一个 `CrawlAsyncRespone` 结构体，其中包含本次爬取的 ID。将该 ID 传递给 `check_crawl_status`，即可随时轮询进度。已完成的爬取将在 24 小时后被删除。
-
-<CrawlAsyncRustShort />
-
-<div id="map-a-url">
-  ### 映射 URL
-</div>
-
-从起始 URL 获取其所有关联链接的映射。
-
-<MapRustShort />
-
-<div id="scrape-bound-interactive-session-v2-api">
-  ### 与抓取绑定的交互式会话 (v2 API)
-</div>
-
-Rust SDK 包含 v2 的抓取交互辅助函数：
-
-- `interact(...)` 在与抓取绑定的浏览器会话中运行代码。
-- 首次调用 `interact` 时，可以基于抓取上下文初始化该会话。
-- `stop_interaction(...)` 会在你完成操作后停止该交互式会话。
+如需爬取网站并等待完成，请使用 `crawl`。
 
 ```rust
-use firecrawl::v2::{Client, ScrapeExecuteLanguage, ScrapeExecuteOptions};
+use firecrawl::{Client, CrawlOptions, ScrapeOptions, Format};
 
-let client = Client::new("fc-YOUR-API-KEY")?;
-let job_id = "550e8400-e29b-41d4-a716-446655440000";
+let job = client.crawl(
+    "https://firecrawl.dev",
+    CrawlOptions {
+        limit: Some(50),
+        max_discovery_depth: Some(3),
+        scrape_options: Some(ScrapeOptions {
+            formats: Some(vec![Format::Markdown]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    },
+).await?;
 
-let run = client
-    .interact(
-        job_id,
-        ScrapeExecuteOptions {
-            code: "console.log(await page.url())".to_string(),
-            language: Some(ScrapeExecuteLanguage::Node),
-            timeout: Some(60),
-            origin: None,
-        },
-    )
-    .await?;
+println!("Status: {:?}", job.status);
+println!("Progress: {}/{}", job.completed, job.total);
+
+for page in &job.data {
+    if let Some(meta) = &page.metadata {
+        println!("{:?}", meta.source_url);
+    }
+}
+```
+
+<div id="start-a-crawl">
+  ### 开始爬取
+</div>
+
+使用 `start_crawl` 启动任务，无需等待。
+
+```rust
+use firecrawl::{Client, CrawlOptions};
+
+let start = client.start_crawl(
+    "https://firecrawl.dev",
+    CrawlOptions {
+        limit: Some(100),
+        ..Default::default()
+    },
+).await?;
+
+println!("Job ID: {}", start.id);
+```
+
+<div id="checking-crawl-status">
+  ### 查看爬取状态
+</div>
+
+使用 `get_crawl_status` 查看爬取进度。
+
+```rust
+let status = client.get_crawl_status(&start.id).await?;
+println!("Status: {:?}", status.status);
+println!("Progress: {}/{}", status.completed, status.total);
+```
+
+<div id="cancelling-a-crawl">
+  ### 取消爬取
+</div>
+
+使用 `cancel_crawl` 取消正在进行的爬取。
+
+```rust
+let result = client.cancel_crawl(&start.id).await?;
+println!("{:?}", result);
+```
+
+<div id="checking-crawl-errors">
+  ### 检查爬取错误
+</div>
+
+使用 `get_crawl_errors` 获取爬取任务中的错误。
+
+```rust
+let errors = client.get_crawl_errors(&start.id).await?;
+println!("{:?}", errors);
+```
+
+<div id="mapping-a-website">
+  ### 网站映射
+</div>
+
+使用 `map` 发现网站中的链接。
+
+```rust
+use firecrawl::{Client, MapOptions};
+
+let response = client.map(
+    "https://firecrawl.dev",
+    MapOptions {
+        limit: Some(100),
+        search: Some("blog".to_string()),
+        ..Default::default()
+    },
+).await?;
+
+for link in &response.links {
+    println!("{} - {}", link.url, link.title.as_deref().unwrap_or(""));
+}
+```
+
+若只需返回 URL 的简化结果，请使用 `map_urls`：
+
+```rust
+let urls = client.map_urls("https://firecrawl.dev", None).await?;
+for url in &urls {
+    println!("{}", url);
+}
+```
+
+<div id="searching-the-web">
+  ### 搜索网页
+</div>
+
+使用 `search` 并结合可选设置进行搜索。
+
+```rust
+use firecrawl::{Client, SearchOptions};
+
+let results = client.search(
+    "firecrawl web scraping",
+    SearchOptions {
+        limit: Some(10),
+        ..Default::default()
+    },
+).await?;
+
+if let Some(web) = results.data.web {
+    for item in web {
+        match item {
+            firecrawl::SearchResultOrDocument::WebResult(r) => {
+                println!("{} - {}", r.url, r.title.unwrap_or_default());
+            }
+            firecrawl::SearchResultOrDocument::Document(d) => {
+                println!("{}", d.markdown.unwrap_or_default());
+            }
+        }
+    }
+}
+```
+
+如需使用可直接返回抓取到的文档的便捷方法：
+
+```rust
+let docs = client.search_and_scrape("firecrawl web scraping", 5).await?;
+for doc in &docs {
+    println!("{}", doc.markdown.as_deref().unwrap_or(""));
+}
+```
+
+<div id="batch-scraping">
+  ### 批量抓取
+</div>
+
+通过 `batch_scrape` 并行抓取多个 URL。
+
+```rust
+use firecrawl::{Client, BatchScrapeOptions, ScrapeOptions, Format};
+
+let urls = vec![
+    "https://firecrawl.dev".to_string(),
+    "https://firecrawl.dev/blog".to_string(),
+];
+
+let job = client.batch_scrape(
+    urls,
+    BatchScrapeOptions {
+        options: Some(ScrapeOptions {
+            formats: Some(vec![Format::Markdown]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    },
+).await?;
+
+for doc in &job.data {
+    println!("{}", doc.markdown.as_deref().unwrap_or(""));
+}
+```
+
+<div id="agent">
+  ### 代理
+</div>
+
+使用 `agent` 运行 AI 代理。
+
+```rust
+use firecrawl::{Client, AgentOptions};
+
+let result = client.agent(
+    AgentOptions {
+        prompt: "Find the pricing plans for Firecrawl and compare them".to_string(),
+        ..Default::default()
+    },
+).await?;
+
+println!("{:?}", result.data);
+```
+
+使用 JSON schema 实现结构化输出：
+
+```rust
+use firecrawl::{Client, AgentOptions, AgentModel};
+use serde::Deserialize;
+use serde_json::json;
+
+#[derive(Debug, Deserialize)]
+struct PricingPlan {
+    name: String,
+    price: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PricingData {
+    plans: Vec<PricingPlan>,
+}
+
+let schema = json!({
+    "type": "object",
+    "properties": {
+        "plans": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string" },
+                    "price": { "type": "string" }
+                }
+            }
+        }
+    }
+});
+
+let result: Option<PricingData> = client.agent_with_schema(
+    vec!["https://firecrawl.dev".to_string()],
+    "Extract pricing plan details",
+    schema,
+).await?;
+
+if let Some(data) = result {
+    for plan in &data.plans {
+        println!("{}: {}", plan.name, plan.price);
+    }
+}
+```
+
+<div id="scrape-bound-interactive-session">
+  ## 与抓取任务绑定的交互式会话
+</div>
+
+使用抓取任务 ID，可在同一上下文中运行后续浏览器代码：
+
+* `interact(...)` 会在与抓取任务绑定的浏览器会话中运行代码或 prompt。
+* `stop_interaction(...)` 会在你完成后停止交互式会话。
+
+```rust
+use firecrawl::{Client, ScrapeExecuteOptions, ScrapeExecuteLanguage};
+
+let scrape_job_id = "550e8400-e29b-41d4-a716-446655440000";
+
+// 在浏览器会话中运行代码
+let run = client.interact(
+    scrape_job_id,
+    ScrapeExecuteOptions {
+        code: Some("console.log(await page.title())".to_string()),
+        language: Some(ScrapeExecuteLanguage::Node),
+        timeout: Some(60),
+        ..Default::default()
+    },
+).await?;
 
 println!("{:?}", run.stdout);
-client.stop_interaction(job_id).await?;
+
+// 或使用自然语言 prompt
+let run = client.interact(
+    scrape_job_id,
+    ScrapeExecuteOptions {
+        prompt: Some("Click the pricing tab and summarize the plans".to_string()),
+        ..Default::default()
+    },
+).await?;
+
+// 完成后停止会话
+client.stop_interaction(scrape_job_id).await?;
+```
+
+<div id="configuration">
+  ## 配置
+</div>
+
+`Client::new(...)` 和 `Client::new_selfhosted(...)` 用于创建客户端。
+
+| 选项                                         | 描述                                                  |
+| ------------------------------------------ | --------------------------------------------------- |
+| `Client::new(api_key)`                     | 为 Firecrawl 云服务 (`https://api.firecrawl.dev`) 创建客户端 |
+| `Client::new_selfhosted(api_url, api_key)` | 为自托管 Firecrawl 实例创建客户端                              |
+
+```rust
+use firecrawl::Client;
+
+// 云服务
+let client = Client::new("fc-your-api-key")?;
+
+// 自托管
+let client = Client::new_selfhosted(
+    "http://localhost:3002",
+    Some("fc-your-api-key"),
+)?;
+
+// 自托管（无需身份验证）
+let client = Client::new_selfhosted(
+    "http://localhost:3002",
+    None::<&str>,
+)?;
+```
+
+<div id="environment-variable">
+  ### 环境变量
+</div>
+
+请设置 `FIRECRAWL_API_KEY` 环境变量，而不要直接传入密钥：
+
+```bash
+export FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+```
+
+```rust
+let api_key = std::env::var("FIRECRAWL_API_KEY")
+    .expect("FIRECRAWL_API_KEY must be set");
+let client = Client::new(api_key)?;
+```
+
+<div id="poll-intervals">
+  ### 轮询间隔
+</div>
+
+同步方法 (`crawl`、`batch_scrape`、`agent`) 会轮询直到完成。你可以通过 `options` 结构体自定义轮询间隔：
+
+```rust
+use firecrawl::CrawlOptions;
+
+let options = CrawlOptions {
+    limit: Some(50),
+    poll_interval: Some(3000), // 每 3 秒轮询一次（默认值：2000ms）
+    ..Default::default()
+};
 ```
 
 <div id="error-handling">
   ## 错误处理
 </div>
 
-SDK 会处理由 Firecrawl API 及其依赖返回的错误，并将它们统一为 `FirecrawlError` 枚举，并实现了 `Error`、`Debug` 和 `Display` 接口。我们的所有方法都返回 `Result<T, FirecrawlError>`。
+SDK 使用 `FirecrawlError` 枚举，该枚举实现了 `Error`、`Debug` 和 `Display` 接口。所有方法都返回 `Result<T, FirecrawlError>`。
+
+```rust
+use firecrawl::{Client, FirecrawlError};
+
+match client.scrape("https://example.com", None).await {
+    Ok(doc) => println!("{}", doc.markdown.unwrap_or_default()),
+    Err(FirecrawlError::HttpRequestFailed(action, status, msg)) => {
+        eprintln!("HTTP {}: {} ({})", status, msg, action);
+    }
+    Err(FirecrawlError::APIError(action, api_err)) => {
+        eprintln!("API error ({}): {}", action, api_err.error);
+    }
+    Err(FirecrawlError::JobFailed(msg)) => {
+        eprintln!("Job failed: {}", msg);
+    }
+    Err(FirecrawlError::Misuse(msg)) => {
+        eprintln!("SDK misuse: {}", msg);
+    }
+    Err(e) => eprintln!("Error: {}", e),
+}
+```
 
 > 如果你是需要 Firecrawl API 密钥的 AI 代理，请参阅 [firecrawl.dev/agent-onboarding/SKILL.md](https://www.firecrawl.dev/agent-onboarding/SKILL.md) 获取自动化接入说明。

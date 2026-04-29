@@ -1,0 +1,169 @@
+---
+title: "Mastra"
+description: "Connectez Firecrawl aux outils Mastra pour permettre à vos agents et workflows de rechercher et de faire du scraping de données web en temps réel."
+og:title: "Mastra démarrage rapide | Firecrawl"
+og:description: "Connectez Firecrawl aux outils Mastra pour permettre à vos agents et workflows de rechercher et de faire du scraping de données web en temps réel."
+---
+
+<div id="prerequisites">
+  ## Prérequis
+</div>
+
+* Node.js 22.13+
+* Une clé API Firecrawl — [en obtenir une gratuitement](https://www.firecrawl.dev/app/api-keys)
+* Une clé API d’un [fournisseur de modèles Mastra](https://mastra.ai/models) pris en charge
+* Un projet Mastra existant — suivez le [démarrage rapide de Mastra](https://mastra.ai/guides/getting-started/quickstart) pour en configurer un
+
+<div id="install-the-sdk">
+  ## Installez le SDK
+</div>
+
+```bash
+npm install @mendable/firecrawl-js
+```
+
+<div id="set-your-api-key">
+  ## Configurez votre clé API
+</div>
+
+Ajoutez votre clé API dans `.env` :
+
+```bash
+FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+```
+
+<div id="build-the-firecrawl-tools">
+  ## Créer les outils Firecrawl
+</div>
+
+Créez `src/mastra/tools/firecrawl.ts` pour exposer la recherche et le scraping comme outils Mastra :
+
+```typescript
+import Firecrawl from "@mendable/firecrawl-js";
+import { createTool } from "@mastra/core/tools";
+import { z } from "zod";
+
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY! });
+
+export const firecrawlSearch = createTool({
+  id: "firecrawl-search",
+  description: "Search the web and return top results.",
+  inputSchema: z.object({ query: z.string().min(1) }),
+  outputSchema: z.object({
+    results: z.array(
+      z.object({
+        title: z.string().nullable(),
+        url: z.string(),
+      }),
+    ),
+  }),
+  execute: async ({ query }) => {
+    const results = await firecrawl.search(query, { limit: 3 });
+    return {
+      results: (results.web ?? []).map((item) => ({
+        title: item.title ?? null,
+        url: item.url,
+      })),
+    };
+  },
+});
+
+export const firecrawlScrape = createTool({
+  id: "firecrawl-scrape",
+  description: "Scrape a URL and return markdown content.",
+  inputSchema: z.object({ url: z.string().url() }),
+  outputSchema: z.object({ markdown: z.string() }),
+  execute: async ({ url }) => {
+    const result = await firecrawl.scrape(url, {
+      formats: ["markdown"],
+      onlyMainContent: true,
+    });
+    return { markdown: result.markdown ?? "" };
+  },
+});
+```
+
+<div id="create-the-agent">
+  ## Créer l’agent
+</div>
+
+Créez `src/mastra/agents/web-agent.ts` et ajoutez-y les outils Firecrawl :
+
+```typescript
+import { Agent } from "@mastra/core/agent";
+import { firecrawlSearch, firecrawlScrape } from "../tools/firecrawl";
+
+export const webAgent = new Agent({
+  id: "web-agent",
+  name: "Web Agent",
+  instructions:
+    "Use Firecrawl tools to search and scrape web pages, then summarize the results.",
+  model: "openai/gpt-5.4",
+  tools: { firecrawlSearch, firecrawlScrape },
+});
+```
+
+<div id="register-the-agent">
+  ## Enregistrer l’agent
+</div>
+
+Enregistrez l’agent dans votre instance Mastra, dans `src/mastra/index.ts` :
+
+```typescript
+import { Mastra } from "@mastra/core";
+import { webAgent } from "./agents/web-agent";
+
+export const mastra = new Mastra({
+  agents: { webAgent },
+});
+```
+
+<div id="test-in-studio">
+  ## Tester dans Studio
+</div>
+
+Lancez le serveur de développement et ouvrez [Mastra Studio](https://mastra.ai/docs/studio/overview) :
+
+```bash
+mastra dev
+```
+
+Ouvrez le **Web Agent** et essayez des prompts comme :
+
+* &quot;Trouvez le dernier changelog de Firecrawl et résumez la dernière mise à jour.&quot;
+* &quot;Recherchez la tarification de Firecrawl et extrayez les différents niveaux d’offre.&quot;
+
+<div id="self-hosted-firecrawl">
+  ## Firecrawl auto-hébergé
+</div>
+
+Si vous exécutez Firecrawl en local, définissez `FIRECRAWL_API_URL` et passez `apiUrl` au client :
+
+```typescript
+const firecrawl = new Firecrawl({
+  apiKey: process.env.FIRECRAWL_API_KEY!,
+  apiUrl: process.env.FIRECRAWL_API_URL,
+});
+```
+
+<div id="next-steps">
+  ## Prochaines étapes
+</div>
+
+<CardGroup cols={2}>
+  <Card title="Docs scraping" icon="file-lines" href="/fr/features/scrape">
+    Toutes les options de scraping, y compris les formats, les actions et les proxies
+  </Card>
+
+  <Card title="Docs recherche" icon="magnifying-glass" href="/fr/features/search">
+    Recherchez sur le web et obtenez le contenu complet de la page
+  </Card>
+
+  <Card title="Docs Agent" icon="robot" href="/fr/features/agent">
+    Laissez un agent piloter Firecrawl de bout en bout
+  </Card>
+
+  <Card title="Référence SDK Node" icon="node" href="/fr/sdks/node">
+    Référence complète du SDK avec crawl, cartographie, extraction par lot, etc.
+  </Card>
+</CardGroup>

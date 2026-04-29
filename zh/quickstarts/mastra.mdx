@@ -1,0 +1,169 @@
+---
+title: "Mastra"
+description: "将 Firecrawl 集成到 Mastra 工具中，让你的代理和工作流能够搜索并抓取实时网页数据。"
+og:title: "Mastra 入门指南 | Firecrawl"
+og:description: "将 Firecrawl 集成到 Mastra 工具中，让你的代理和工作流能够搜索并抓取实时网页数据。"
+---
+
+<div id="prerequisites">
+  ## 前提条件
+</div>
+
+* Node.js 22.13+
+* 一个 Firecrawl API 密钥——[免费获取一个](https://www.firecrawl.dev/app/api-keys)
+* 来自受支持的 [Mastra 模型提供商](https://mastra.ai/models)的 API 密钥
+* 一个现有的 Mastra 项目——按照 [Mastra 快速开始](https://mastra.ai/guides/getting-started/quickstart) 进行创建
+
+<div id="install-the-sdk">
+  ## 安装 SDK
+</div>
+
+```bash
+npm install @mendable/firecrawl-js
+```
+
+<div id="set-your-api-key">
+  ## 设置 API 密钥
+</div>
+
+将 API 密钥添加到 `.env` 中：
+
+```bash
+FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+```
+
+<div id="build-the-firecrawl-tools">
+  ## 构建 Firecrawl 工具
+</div>
+
+创建 `src/mastra/tools/firecrawl.ts`，将 search 和 抓取 暴露为 Mastra 工具：
+
+```typescript
+import Firecrawl from "@mendable/firecrawl-js";
+import { createTool } from "@mastra/core/tools";
+import { z } from "zod";
+
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY! });
+
+export const firecrawlSearch = createTool({
+  id: "firecrawl-search",
+  description: "Search the web and return top results.",
+  inputSchema: z.object({ query: z.string().min(1) }),
+  outputSchema: z.object({
+    results: z.array(
+      z.object({
+        title: z.string().nullable(),
+        url: z.string(),
+      }),
+    ),
+  }),
+  execute: async ({ query }) => {
+    const results = await firecrawl.search(query, { limit: 3 });
+    return {
+      results: (results.web ?? []).map((item) => ({
+        title: item.title ?? null,
+        url: item.url,
+      })),
+    };
+  },
+});
+
+export const firecrawlScrape = createTool({
+  id: "firecrawl-scrape",
+  description: "Scrape a URL and return markdown content.",
+  inputSchema: z.object({ url: z.string().url() }),
+  outputSchema: z.object({ markdown: z.string() }),
+  execute: async ({ url }) => {
+    const result = await firecrawl.scrape(url, {
+      formats: ["markdown"],
+      onlyMainContent: true,
+    });
+    return { markdown: result.markdown ?? "" };
+  },
+});
+```
+
+<div id="create-the-agent">
+  ## 创建代理
+</div>
+
+创建 `src/mastra/agents/web-agent.ts`，并为其添加 Firecrawl 工具：
+
+```typescript
+import { Agent } from "@mastra/core/agent";
+import { firecrawlSearch, firecrawlScrape } from "../tools/firecrawl";
+
+export const webAgent = new Agent({
+  id: "web-agent",
+  name: "Web Agent",
+  instructions:
+    "Use Firecrawl tools to search and scrape web pages, then summarize the results.",
+  model: "openai/gpt-5.4",
+  tools: { firecrawlSearch, firecrawlScrape },
+});
+```
+
+<div id="register-the-agent">
+  ## 注册代理
+</div>
+
+在 `src/mastra/index.ts` 中向你的 Mastra 实例注册代理：
+
+```typescript
+import { Mastra } from "@mastra/core";
+import { webAgent } from "./agents/web-agent";
+
+export const mastra = new Mastra({
+  agents: { webAgent },
+});
+```
+
+<div id="test-in-studio">
+  ## 在 Studio 中测试
+</div>
+
+运行开发服务器，并打开 [Mastra Studio](https://mastra.ai/docs/studio/overview)：
+
+```bash
+mastra dev
+```
+
+打开 **网页代理**，尝试以下 prompt：
+
+* &quot;查找最新的 Firecrawl 更新日志，并总结最近一次发布的内容。&quot;
+* &quot;搜索 Firecrawl 的定价，并提取各套餐档位。&quot;
+
+<div id="self-hosted-firecrawl">
+  ## 自托管 Firecrawl
+</div>
+
+如果你在本地运行 Firecrawl，请设置 `FIRECRAWL_API_URL`，并向客户端传入 `apiUrl`：
+
+```typescript
+const firecrawl = new Firecrawl({
+  apiKey: process.env.FIRECRAWL_API_KEY!,
+  apiUrl: process.env.FIRECRAWL_API_URL,
+});
+```
+
+<div id="next-steps">
+  ## 后续步骤
+</div>
+
+<CardGroup cols={2}>
+  <Card title="抓取文档" icon="file-lines" href="/zh/features/scrape">
+    包含 formats、actions 和代理在内的所有抓取选项
+  </Card>
+
+  <Card title="搜索文档" icon="magnifying-glass" href="/zh/features/search">
+    进行网页搜索并获取完整页面内容
+  </Card>
+
+  <Card title="代理文档" icon="robot" href="/zh/features/agent">
+    让代理全程驱动 Firecrawl
+  </Card>
+
+  <Card title="Node SDK 参考" icon="node" href="/zh/sdks/node">
+    完整的 SDK 参考，涵盖爬取、映射、批量抓取等功能
+  </Card>
+</CardGroup>

@@ -1,0 +1,154 @@
+---
+title: '解析'
+description: '上传本地或非公开文档，并将其转换为干净、适用于 LLM 的数据'
+og:title: "解析 | Firecrawl"
+og:description: "将本地 PDF、DOCX、XLSX、HTML 等转换为 Markdown 或结构化 JSON"
+icon: "file-magnifying-glass"
+version: "v2"
+sidebarTitle: "解析"
+---
+
+<div id="introducing-parse">
+  ## /parse 简介
+</div>
+
+`/parse` 端点可将本地或非公开文档转换为干净、适用于 LLM 的数据。通过 `multipart/form-data` 上传文件字节后，可返回 Markdown、JSON、HTML、链接、图片或摘要，并保留阅读顺序和表格。
+
+* 将 PDF、DOCX、XLSX、HTML 等转换为 Markdown 或结构化 JSON
+* 借助基于 Rust 的引擎，解析速度最高可提升 **5 倍**
+* 每次请求的文件大小上限为 **50 MB**
+* 支持 Zero Data Retention
+
+<div id="when-to-use-parse">
+  ## 何时使用 `/parse`
+</div>
+
+当源文档是**本地文件**，或**无法通过公开 URL 访问**时，请使用 `/parse`。如果你有指向该文档的公开 URL，优先使用 [`/scrape`](/zh/features/scrape)——它会根据扩展名或内容类型自动检测文件类型，并以相同方式解析。
+
+| 来源                                                 | 端点                                               |
+| -------------------------------------------------- | ------------------------------------------------ |
+| 指向文档的公开 URL (例如 `https://example.com/report.pdf`)  | [`POST /scrape`](/zh/api-reference/endpoint/scrape) |
+| 本地文件或非公开字节数据 (PDF、DOCX、XLSX、HTML、…)                | [`POST /parse`](/zh/api-reference/endpoint/parse)   |
+
+<div id="parsing">
+  ## 解析
+</div>
+
+<div id="parse-endpoint">
+  ### /parse 端点
+</div>
+
+用于上传文件并获取解析后的内容。该请求采用 `multipart/form-data` 格式，包含一个必填的 `file` 部分，以及一个可选的 `options` JSON 部分。
+
+**支持的扩展名：** `.html`, `.htm`, `.pdf`, `.docx`, `.doc`, `.odt`, `.rtf`, `.xlsx`, `.xls`.
+
+<div id="usage">
+  ### 使用方式
+</div>
+
+<CodeGroup>
+  ```python Python
+  from firecrawl import Firecrawl
+
+  firecrawl = Firecrawl(api_key="fc-YOUR-API-KEY")
+
+  doc = firecrawl.parse("./report.pdf")
+
+  print(doc.markdown)
+  ```
+
+  ```javascript Node
+  import Firecrawl from "@mendable/firecrawl-js";
+  import fs from "node:fs";
+
+  const firecrawl = new Firecrawl({ apiKey: "fc-YOUR-API-KEY" });
+
+  const doc = await firecrawl.parse({
+    data: fs.readFileSync("./report.pdf"),
+    filename: "report.pdf",
+  });
+
+  console.log(doc.markdown);
+  ```
+
+  ```bash cURL
+  curl -X POST https://api.firecrawl.dev/v2/parse \
+    -H 'Authorization: Bearer YOUR_API_KEY' \
+    -F 'file=@./report.pdf' \
+    -F 'options={"formats":["markdown"]};type=application/json'
+  ```
+</CodeGroup>
+
+<div id="response">
+  ### 响应
+</div>
+
+SDK 直接返回文档对象。cURL 返回 JSON 数据。
+
+```json
+{
+  "success": true,
+  "data": {
+    "markdown": "# Annual Report\n\n...",
+    "metadata": {
+      "title": "Annual Report",
+      "numPages": 42,
+      "sourceFile": "report.pdf"
+    }
+  }
+}
+```
+
+<div id="options">
+  ## 选项
+</div>
+
+`/parse` 可在 `options` 字段下接受部分 scrape 选项。常见设置如下：
+
+* `formats`：输出格式数组。默认值为 `["markdown"]`。支持：`markdown`、`html`、`rawHtml`、`links`、`images`、`summary` 和 `json` (可搭配 schema 或 prompt) 。
+* `onlyMainContent`：仅返回文档的主体内容。默认值为 `true`。
+* `includeTags` / `excludeTags`：按标签包含或排除内容 (适用于 HTML 输入) 。
+* `timeout`：请求超时时间 (毫秒) 。默认值为 `30000`，最大为 `300000`。
+* `parsers`：文件解析器控制选项。对于 PDF，设置为 `{ "type": "pdf", "mode": "fast" | "auto" | "ocr", "maxPages": <int> }`。
+
+<Note>
+  `/parse` 不支持仅适用于浏览器的选项，例如 `actions`、`waitFor`、`location`、`mobile` 或变更追踪。
+</Note>
+
+<div id="pdf-parser-modes">
+  ### PDF 解析模式
+</div>
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/parse \
+  -H 'Authorization: Bearer YOUR_API_KEY' \
+  -F 'file=@./scan.pdf' \
+  -F 'options={"parsers":[{"type":"pdf","mode":"ocr","maxPages":50}]};type=application/json'
+```
+
+* `fast`：仅提取文本，速度最快。
+* `auto` (默认值) ：优先提取文本，页面仅含图像时回退到 OCR。
+* `ocr`：对每一页执行 OCR——适用于扫描文档。
+
+<div id="structured-json-output">
+  ### 结构化 JSON 输出
+</div>
+
+传入 JSON schema 或 prompt，即可直接从文档中提取结构化数据：
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/parse \
+  -H 'Authorization: Bearer YOUR_API_KEY' \
+  -F 'file=@./invoice.pdf' \
+  -F 'options={"formats":[{"type":"json","schema":{"type":"object","properties":{"total":{"type":"number"},"vendor":{"type":"string"}}}}]};type=application/json'
+```
+
+<div id="considerations">
+  ## 注意事项
+</div>
+
+* 每个请求的最大文件大小为 **50 MB**。
+* 在 `ocr` 模式下解析超大 PDF 或扫描版 PDF 可能需要更长时间——请增大 `timeout`，或使用 `maxPages` 来限定处理范围。
+* 对于多份文件，请对每个文件并行调用 `/parse`；不支持批量上传。
+
+> 你是需要 Firecrawl API 密钥的 AI 代理吗？请参见 [firecrawl.dev/agent-onboarding/SKILL.md](https://www.firecrawl.dev/agent-onboarding/SKILL.md) 获取自动化引导说明。

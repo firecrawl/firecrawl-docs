@@ -476,6 +476,136 @@
         }
       }
     },
+    "/parse": {
+      "post": {
+        "summary": "Upload and parse a file",
+        "operationId": "parseFile",
+        "tags": ["Scraping"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The file bytes to parse. Supported extensions: .html, .htm, .pdf, .docx, .doc, .odt, .rtf, .xlsx, .xls."
+                  },
+                  "options": {
+                    "$ref": "#/components/schemas/ParseOptions"
+                  }
+                },
+                "required": ["file"]
+              },
+              "encoding": {
+                "options": {
+                  "contentType": "application/json"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScrapeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "code": {
+                      "type": "string",
+                      "example": "BAD_REQUEST"
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "Invalid multipart form-data request."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Payment required to access this resource."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Request rate limit exceeded. Please wait and try again later."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "code": {
+                      "type": "string",
+                      "example": "UNKNOWN_ERROR"
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/batch/scrape": {
       "post": {
         "summary": "Scrape multiple URLs and optionally extract information using an LLM",
@@ -1167,6 +1297,15 @@
                     "description": "Allows the crawler to follow links to subdomains of the main domain.",
                     "default": false
                   },
+                  "ignoreRobotsTxt": {
+                    "type": "boolean",
+                    "description": "Ignore the website's robots.txt rules. Enterprise only — contact support@firecrawl.com to enable.",
+                    "default": false
+                  },
+                  "robotsUserAgent": {
+                    "type": "string",
+                    "description": "Custom User-Agent string for robots.txt evaluation. When set, robots.txt is fetched with this User-Agent and allow/disallow rules are matched against it instead of the default. Enterprise only — contact support@firecrawl.com to enable."
+                  },
                   "delay": {
                     "type": "number",
                     "description": "Delay in seconds between scrapes. This helps respect website rate limits. Setting this forces concurrency to 1."
@@ -1377,6 +1516,14 @@
                         "ignoreQueryParameters": {
                           "type": "boolean",
                           "description": "Whether to ignore query parameters"
+                        },
+                        "ignoreRobotsTxt": {
+                          "type": "boolean",
+                          "description": "Whether robots.txt rules are ignored"
+                        },
+                        "robotsUserAgent": {
+                          "type": "string",
+                          "description": "Custom User-Agent string used for robots.txt evaluation"
                         },
                         "deduplicateSimilarURLs": {
                           "type": "boolean",
@@ -2661,8 +2808,8 @@
                   },
                   "limit": {
                     "type": "integer",
-                    "description": "Maximum number of results to return",
-                    "default": 5,
+                    "description": "Maximum number of results to return (per source type when using multiple sources)",
+                    "default": 10,
                     "maximum": 100,
                     "minimum": 1
                   },
@@ -3663,6 +3810,205 @@
         "description": "Output formats to include in the response. You can specify one or more formats, either as strings (e.g., `'markdown'`) or as objects with additional options (e.g., `{ type: 'json', schema: {...} }`). Some formats require specific options to be set. Example: `['markdown', { type: 'json', schema: {...} }]`.",
         "default": ["markdown"]
       },
+      "ParseFormats": {
+        "type": "array",
+        "items": {
+          "oneOf": [
+            {
+              "type": "object",
+              "title": "Markdown",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": ["markdown"]
+                }
+              },
+              "required": ["type"]
+            },
+            {
+              "type": "object",
+              "title": "Summary",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": ["summary"]
+                }
+              },
+              "required": ["type"]
+            },
+            {
+              "type": "object",
+              "title": "HTML",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": ["html"]
+                }
+              },
+              "required": ["type"]
+            },
+            {
+              "type": "object",
+              "title": "Raw HTML",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": ["rawHtml"]
+                }
+              },
+              "required": ["type"]
+            },
+            {
+              "type": "object",
+              "title": "Links",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": ["links"]
+                }
+              },
+              "required": ["type"]
+            },
+            {
+              "type": "object",
+              "title": "Images",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": ["images"]
+                }
+              },
+              "required": ["type"]
+            },
+            {
+              "type": "object",
+              "title": "JSON",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": ["json"]
+                },
+                "schema": {
+                  "type": "object",
+                  "description": "The schema to use for the JSON output. Must conform to [JSON Schema](https://json-schema.org/)."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "The prompt to use for the JSON output"
+                }
+              },
+              "required": ["type"]
+            }
+          ]
+        },
+        "description": "Output formats supported for `/parse` uploads. Browser-rendering formats and change tracking are not supported.",
+        "default": ["markdown"]
+      },
+      "ParseOptions": {
+        "type": "object",
+        "description": "Optional parse options sent as JSON in the multipart `options` field.",
+        "properties": {
+          "formats": {
+            "$ref": "#/components/schemas/ParseFormats"
+          },
+          "onlyMainContent": {
+            "type": "boolean",
+            "description": "Only return the main content of the page excluding headers, navs, footers, etc.",
+            "default": true
+          },
+          "includeTags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tags to include in the output."
+          },
+          "excludeTags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tags to exclude from the output."
+          },
+          "headers": {
+            "type": "object",
+            "description": "Headers to send when additional network requests are required."
+          },
+          "timeout": {
+            "type": "integer",
+            "description": "Timeout in milliseconds for the request. Default is 30000 (30 seconds). Maximum is 300000 (300 seconds).",
+            "default": 30000,
+            "maximum": 300000
+          },
+          "parsers": {
+            "type": "array",
+            "description": "Controls file parser behavior when relevant (for example PDF parser mode).",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": ["pdf"]
+                    },
+                    "mode": {
+                      "type": "string",
+                      "enum": ["fast", "auto", "ocr"],
+                      "default": "auto",
+                      "description": "PDF parsing mode. \"fast\": text-only extraction. \"auto\": text-first with OCR fallback. \"ocr\": OCR on every page."
+                    },
+                    "maxPages": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 10000,
+                      "description": "Maximum number of pages to parse from the PDF."
+                    }
+                  },
+                  "required": ["type"],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "default": ["pdf"]
+          },
+          "skipTlsVerification": {
+            "type": "boolean",
+            "description": "Skip TLS certificate verification when making requests.",
+            "default": true
+          },
+          "removeBase64Images": {
+            "type": "boolean",
+            "description": "Remove base64-encoded images from output and keep alt text placeholders.",
+            "default": true
+          },
+          "blockAds": {
+            "type": "boolean",
+            "description": "Enable ad and cookie popup blocking.",
+            "default": true
+          },
+          "proxy": {
+            "type": "string",
+            "enum": ["basic", "auto"],
+            "description": "Proxy mode for parse uploads. `/parse` supports only `basic` and `auto`."
+          },
+          "origin": {
+            "type": "string",
+            "description": "Origin identifier for analytics and logging.",
+            "default": "api"
+          },
+          "integration": {
+            "type": "string",
+            "nullable": true,
+            "description": "Optional integration identifier."
+          },
+          "zeroDataRetention": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true, this will enable zero data retention for this parse. To enable this feature, please contact help@firecrawl.dev"
+          }
+        }
+      },
       "ScrapeOptions": {
         "type": "object",
         "properties": {
@@ -3671,8 +4017,13 @@
           },
           "onlyMainContent": {
             "type": "boolean",
-            "description": "Only return the main content of the page excluding headers, navs, footers, etc.",
+            "description": "Only return the main content of the page excluding headers, navs, footers, etc. This is a deterministic HTML-level filter applied before markdown is generated; no LLM is involved.",
             "default": true
+          },
+          "onlyCleanContent": {
+            "type": "boolean",
+            "description": "Beta. Run an additional LLM-based pass over the generated markdown to remove residual boilerplate that `onlyMainContent` can miss (cookie banners, ad blocks, social share widgets, breadcrumbs, newsletter signups, comment sections, related-article lists). Headings, lists, tables, code blocks, image references, and inline links are preserved. Can be combined with `onlyMainContent` (the most common setup) or used on its own. Skipped with a warning when the markdown exceeds the cleaning model's output token limit (the original markdown is preserved). Not supported on zero-data-retention requests.",
+            "default": false
           },
           "includeTags": {
             "type": "array",

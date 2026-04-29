@@ -1,80 +1,570 @@
 ---
 title: "Go"
-description: "使用 Firecrawl Go SDK 从任何 Go 应用程序对网站进行抓取、爬取和映射。"
+description: "Firecrawl Go SDK 是对 Firecrawl API 的封装，可帮助你轻松将网站转换为 Markdown。"
 icon: "golang"
 og:title: "Go SDK | Firecrawl"
-og:description: "使用 Firecrawl Go SDK 从任何 Go 应用程序对网站进行抓取、爬取和映射。"
+og:description: "Firecrawl Go SDK 是对 Firecrawl API 的封装，可帮助你轻松将网站转换为 Markdown。"
 ---
-
-import InstallGoSDK from "/snippets/zh/v1/installation/go.mdx";
-import ScrapeAndCrawlGoExample from "/snippets/zh/v1/scrape-and-crawl/go.mdx";
-import ScrapeGoShort from "/snippets/zh/v1/scrape/short/go.mdx";
-import CrawlGoShort from "/snippets/zh/v1/crawl/short/go.mdx";
-import CheckCrawlStatusGoShort from "/snippets/zh/v1/crawl-status/short/go.mdx";
-import MapGoShort from "/snippets/zh/v1/map/short/go.mdx";
-
-<Warning>
-  此 SDK 目前使用 Firecrawl API 的 **v1** 版本，非最新 (已提供 v2) 。部分功能和改进可能仅在 v2 中可用。
-</Warning>
-
-Firecrawl Go SDK 让你可以在任何 Go 应用中抓取、爬取和映射网站。只需调用几个方法，即可获得干净的 Markdown、结构化数据或屏幕截图。
 
 <div id="installation">
   ## 安装
 </div>
 
-要安装 Firecrawl 的 Go SDK，请运行：
+官方 Go SDK 维护在 Firecrawl 的 monorepo 仓库 [apps/go-sdk](https://github.com/firecrawl/firecrawl/tree/main/apps/go-sdk) 中。
 
-<InstallGoSDK />
+要安装 Firecrawl Go SDK，请运行：
+
+```bash
+go get github.com/firecrawl/firecrawl/apps/go-sdk
+```
+
+<Note>需要 Go 1.23 或更高版本。</Note>
 
 <div id="usage">
-  ## 使用
+  ## 使用方式
 </div>
 
-1. 从 [firecrawl.dev](https://firecrawl.dev) 获取 API 密钥。
-2. 创建 `FirecrawlApp` 实例时传入你的 API 密钥。
-3. 可选设置 `apiUrl` (默认值为 `https://api.firecrawl.dev`) 和 `version` (默认值为 `v1`) 。
+1. 前往 [firecrawl.dev](https://firecrawl.dev) 获取 API 密钥
+2. 将 API 密钥设置为名为 `FIRECRAWL_API_KEY` 的环境变量，或通过 `option.WithAPIKey(...)` 传入
 
-下面是一个带错误处理的完整示例：
+下面是一个基于当前 SDK API 的快速示例：
 
-<ScrapeAndCrawlGoExample />
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+
+	firecrawl "github.com/firecrawl/firecrawl/apps/go-sdk"
+	"github.com/firecrawl/firecrawl/apps/go-sdk/option"
+)
+
+func main() {
+	// 创建客户端（从环境变量读取 FIRECRAWL_API_KEY）
+	client, err := firecrawl.NewClient()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// 或直接传入 API 密钥
+	client, err = firecrawl.NewClient(
+		option.WithAPIKey("fc-your-api-key"),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ctx := context.Background()
+
+	// 抓取单个页面
+	doc, err := client.Scrape(ctx, "https://firecrawl.dev", &firecrawl.ScrapeOptions{
+		Formats: []string{"markdown"},
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(doc.Markdown)
+
+	// 爬取网站
+	job, err := client.Crawl(ctx, "https://firecrawl.dev", &firecrawl.CrawlOptions{
+		Limit: firecrawl.Int(5),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("Crawled pages: %d\n", len(job.Data))
+}
+```
 
 <div id="scraping-a-url">
-  ### 抓取单个 URL
+  ### 抓取 URL
 </div>
 
-要在包含错误处理的情况下抓取单个 URL，请使用 `ScrapeURL` 方法。该方法接收 URL 作为参数，并以字典形式返回抓取结果。
+如需抓取单个 URL，可使用 `Scrape` 方法。
 
-<ScrapeGoShort />
+```go
+doc, err := client.Scrape(ctx, "https://firecrawl.dev", &firecrawl.ScrapeOptions{
+	Formats:         []string{"markdown", "html"},
+	OnlyMainContent: firecrawl.Bool(true),
+	WaitFor:         firecrawl.Int(5000),
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Println(doc.Markdown)
+fmt.Println(doc.Metadata["title"])
+```
+
+<div id="json-extraction">
+  #### JSON 提取
+</div>
+
+使用 `JsonOptions` 通过 `Scrape` 端点提取结构化 JSON：
+
+```go
+doc, err := client.Scrape(ctx, "https://example.com/product", &firecrawl.ScrapeOptions{
+	Formats: []string{"json"},
+	JsonOptions: &firecrawl.JsonOptions{
+		Prompt: "Extract the product name and price",
+		Schema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"name":  map[string]interface{}{"type": "string"},
+				"price": map[string]interface{}{"type": "number"},
+			},
+		},
+	},
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Println(doc.JSON)
+```
 
 <div id="crawling-a-website">
   ### 爬取网站
 </div>
 
-要爬取网站，请使用 `CrawlUrl` 方法。该方法接受起始 URL 和可选参数。通过 `params` 参数，你可以为爬取任务设置其他选项，例如最大爬取页数、允许的域名以及输出 formats。
+要爬取网站并等待完成，请使用 `Crawl`。
 
-<CrawlGoShort />
+```go
+job, err := client.Crawl(ctx, "https://firecrawl.dev", &firecrawl.CrawlOptions{
+	Limit:             firecrawl.Int(50),
+	MaxDiscoveryDepth: firecrawl.Int(3),
+	ScrapeOptions: &firecrawl.ScrapeOptions{
+		Formats: []string{"markdown"},
+	},
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Printf("Status: %s\n", job.Status)
+fmt.Printf("Progress: %d/%d\n", job.Completed, job.Total)
+
+for _, page := range job.Data {
+	fmt.Println(page.Metadata["sourceURL"])
+}
+```
+
+<div id="start-a-crawl">
+  ### 开始爬取
+</div>
+
+使用 `StartCrawl` 启动任务，无需等待其完成。
+
+```go
+resp, err := client.StartCrawl(ctx, "https://firecrawl.dev", &firecrawl.CrawlOptions{
+	Limit: firecrawl.Int(100),
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Printf("Job ID: %s\n", resp.ID)
+```
 
 <div id="checking-crawl-status">
-  ### 检查爬取状态
+  ### 查看爬取状态
 </div>
 
-要检查爬取作业的状态，请使用 `CheckCrawlStatus` 方法。该方法接受作业 ID 作为参数，并返回该爬取作业的当前状态。
+使用 `GetCrawlStatus` 查看爬取进度。
 
-<CheckCrawlStatusGoShort />
+```go
+status, err := client.GetCrawlStatus(ctx, resp.ID)
+if err != nil {
+	log.Fatal(err)
+}
 
-<div id="map-a-website">
-  ### 映射网站
+fmt.Printf("Status: %s\n", status.Status)
+fmt.Printf("Progress: %d/%d\n", status.Completed, status.Total)
+```
+
+<div id="cancelling-a-crawl">
+  ### 取消爬取
 </div>
 
-使用 `MapUrl` 从网站生成 URL 列表。你可以通过 `params` 参数自定义映射过程，包括排除子域名或使用站点地图等选项。
+使用 `CancelCrawl` 取消正在进行的爬取。
 
-<MapGoShort />
+```go
+result, err := client.CancelCrawl(ctx, resp.ID)
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Println(result)
+```
+
+<div id="mapping-a-website">
+  ### 网站映射
+</div>
+
+使用 `Map` 发现网站中的链接。
+
+```go
+mapData, err := client.Map(ctx, "https://firecrawl.dev", &firecrawl.MapOptions{
+	Limit:             firecrawl.Int(100),
+	Search:            firecrawl.String("blog"),
+	IncludeSubdomains: firecrawl.Bool(true),
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+for _, link := range mapData.Links {
+	fmt.Println(link["url"], "-", link["title"])
+}
+```
+
+<div id="searching-the-web">
+  ### 搜索网页
+</div>
+
+使用 `Search` 并按需配置搜索选项进行搜索。
+
+```go
+results, err := client.Search(ctx, "firecrawl web scraping", &firecrawl.SearchOptions{
+	Limit: firecrawl.Int(10),
+	ScrapeOptions: &firecrawl.ScrapeOptions{
+		Formats: []string{"markdown"},
+	},
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+for _, result := range results.Web {
+	fmt.Println(result["title"], "-", result["url"])
+}
+```
+
+<div id="batch-scraping">
+  ### 批量抓取
+</div>
+
+使用 `BatchScrape` 可并行抓取多个 URL。
+
+```go
+urls := []string{
+	"https://firecrawl.dev",
+	"https://firecrawl.dev/blog",
+}
+
+job, err := client.BatchScrape(ctx, urls, &firecrawl.BatchScrapeOptions{
+	ScrapeOptions: &firecrawl.ScrapeOptions{
+		Formats: []string{"markdown"},
+	},
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+for _, doc := range job.Data {
+	fmt.Println(doc.Markdown)
+}
+```
+
+<div id="agent">
+  ### 代理
+</div>
+
+使用 `Agent` 运行一个 AI 代理。
+
+```go
+status, err := client.Agent(ctx, &firecrawl.AgentOptions{
+	Prompt: "Find the pricing plans for Firecrawl and compare them",
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Println(status.Data)
+```
+
+使用结构化输出的 JSON schema：
+
+```go
+status, err := client.Agent(ctx, &firecrawl.AgentOptions{
+	Prompt: "Extract pricing plan details",
+	URLs:   []string{"https://firecrawl.dev"},
+	Schema: map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"plans": map[string]interface{}{
+				"type": "array",
+				"items": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"name":  map[string]interface{}{"type": "string"},
+						"price": map[string]interface{}{"type": "string"},
+					},
+				},
+			},
+		},
+	},
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Println(status.Data)
+```
+
+<div id="usage-metrics">
+  ### 使用方式 &amp; 指标
+</div>
+
+查看并发数和剩余额度：
+
+```go
+concurrency, err := client.GetConcurrency(ctx)
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Printf("Concurrency: %d/%d\n", concurrency.Concurrency, concurrency.MaxConcurrency)
+
+credits, err := client.GetCreditUsage(ctx)
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Printf("Remaining credits: %d\n", credits.RemainingCredits)
+```
+
+<div id="browser">
+  ## 浏览器
+</div>
+
+Go SDK 提供了 Browser Sandbox 辅助函数。
+
+<div id="create-a-session">
+  ### 创建会话
+</div>
+
+```go
+session, err := client.Browser(ctx, &firecrawl.BrowserOptions{
+	TTL:           firecrawl.Int(300),
+	StreamWebView: firecrawl.Bool(true),
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Println(session.ID)
+fmt.Println(session.CDPUrl)
+fmt.Println(session.LiveViewURL)
+```
+
+<div id="execute-code">
+  ### 执行代码
+</div>
+
+```go
+result, err := client.BrowserExecute(ctx, session.ID,
+	`await page.goto("https://example.com"); console.log(await page.title());`,
+	&firecrawl.BrowserExecuteParams{
+		Language: "node",
+		Timeout:  firecrawl.Int(60),
+	},
+)
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Println(result.Stdout)
+fmt.Println(*result.ExitCode)
+```
+
+<div id="scrape-bound-interactive-session">
+  ### 与抓取任务绑定的交互会话
+</div>
+
+使用抓取任务 ID，在同一重放上下文中运行后续浏览器代码：
+
+* `Interact(...)` 会在与抓取任务绑定的浏览器会话中运行代码 (首次使用时会初始化该会话) 。
+* `StopInteractiveBrowser(...)` 会在使用完成后显式停止该交互会话。
+
+```go
+scrapeJobID := "550e8400-e29b-41d4-a716-446655440000"
+
+execResp, err := client.Interact(ctx, scrapeJobID, "console.log(page.url())", &firecrawl.InteractParams{
+	Language: "node",
+	Timeout:  firecrawl.Int(60),
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Println(execResp.Stdout)
+
+deleteResp, err := client.StopInteractiveBrowser(ctx, scrapeJobID)
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Printf("Deleted: %v\n", deleteResp.Success)
+```
+
+<div id="list-close-sessions">
+  ### 列出 &amp; 关闭会话
+</div>
+
+```go
+active, err := client.ListBrowsers(ctx, "active")
+if err != nil {
+	log.Fatal(err)
+}
+
+for _, s := range active.Sessions {
+	fmt.Printf("%s - %s\n", s.ID, s.Status)
+}
+
+closed, err := client.DeleteBrowser(ctx, session.ID)
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Printf("Closed: %v\n", closed.Success)
+```
+
+<div id="configuration">
+  ## 配置
+</div>
+
+`firecrawl.NewClient()` 支持以下函数式选项：
+
+| 选项                         | 类型               | 默认值                                                  | 描述                  |
+| -------------------------- | ---------------- | ---------------------------------------------------- | ------------------- |
+| `option.WithAPIKey`        | `string`         | `FIRECRAWL_API_KEY` 环境变量                             | 你的 Firecrawl API 密钥 |
+| `option.WithAPIURL`        | `string`         | `https://api.firecrawl.dev` (或 `FIRECRAWL_API_URL`)  | API 基础 URL          |
+| `option.WithTimeout`       | `time.Duration`  | `5 * time.Minute`                                    | HTTP 客户端超时时间        |
+| `option.WithMaxRetries`    | `int`            | `3`                                                  | 发生瞬时故障时自动重试         |
+| `option.WithBackoffFactor` | `float64`        | `0.5`                                                | 以秒为单位的指数退避系数        |
+| `option.WithHTTPClient`    | `*http.Client`   | 基于超时配置构建                                             | 预先配置的 HTTP 客户端实例    |
+| `option.WithHeader`        | `string, string` | —                                                    | 为所有请求添加额外的请求头       |
+
+```go
+import (
+	"net/http"
+	"time"
+
+	firecrawl "github.com/firecrawl/firecrawl/apps/go-sdk"
+	"github.com/firecrawl/firecrawl/apps/go-sdk/option"
+)
+
+client, err := firecrawl.NewClient(
+	option.WithAPIKey("fc-your-api-key"),
+	option.WithAPIURL("https://api.firecrawl.dev"),
+	option.WithTimeout(5 * time.Minute),
+	option.WithMaxRetries(3),
+	option.WithBackoffFactor(0.5),
+)
+```
+
+<div id="custom-http-client">
+  ### 自定义 HTTP 客户端
+</div>
+
+你可以传入一个预先配置的 `*http.Client`，以控制传输设置、代理配置、TLS 设置等。提供该客户端后，`WithTimeout` 设置会被忽略，改为使用客户端自身的配置。
+
+```go
+import (
+	"crypto/tls"
+	"net"
+	"net/http"
+	"time"
+
+	firecrawl "github.com/firecrawl/firecrawl/apps/go-sdk"
+	"github.com/firecrawl/firecrawl/apps/go-sdk/option"
+)
+
+transport := &http.Transport{
+	TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+	DialContext: (&net.Dialer{
+		Timeout: 10 * time.Second,
+	}).DialContext,
+}
+
+custom := &http.Client{
+	Transport: transport,
+	Timeout:   60 * time.Second,
+}
+
+client, err := firecrawl.NewClient(
+	option.WithAPIKey("fc-your-api-key"),
+	option.WithHTTPClient(custom),
+)
+```
+
+<div id="context-support">
+  ## Context 支持
+</div>
+
+所有方法都接受 `context.Context` 作为第一个参数，用于控制取消和截止时间：
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+defer cancel()
+
+doc, err := client.Scrape(ctx, "https://example.com", nil)
+```
 
 <div id="error-handling">
   ## 错误处理
 </div>
 
-SDK 会处理 Firecrawl API 返回的错误并抛出相应异常。若请求过程中发生错误，将抛出包含详细错误信息的异常。
+SDK 使用 `firecrawl` 包中定义的类型化错误。
+
+```go
+import "errors"
+
+doc, err := client.Scrape(ctx, "https://example.com", nil)
+if err != nil {
+	var authErr *firecrawl.AuthenticationError
+	var rateErr *firecrawl.RateLimitError
+	var timeoutErr *firecrawl.JobTimeoutError
+	var fcErr *firecrawl.FirecrawlError
+
+	switch {
+	case errors.As(err, &authErr):
+		fmt.Println("Auth failed:", authErr.Message)
+	case errors.As(err, &rateErr):
+		fmt.Println("Rate limited:", rateErr.Message)
+	case errors.As(err, &timeoutErr):
+		fmt.Printf("Job %s timed out after %ds\n", timeoutErr.JobID, timeoutErr.TimeoutSeconds)
+	case errors.As(err, &fcErr):
+		fmt.Printf("Error %d: %s\n", fcErr.StatusCode, fcErr.Message)
+	default:
+		fmt.Println("Unexpected error:", err)
+	}
+}
+```
+
+<div id="retry-logic">
+  ### 重试逻辑
+</div>
+
+SDK 会自动重试临时性故障：
+
+* **会重试：**408、409、5xx 错误以及连接失败
+* **不会重试：**401、429 和其他 4xx 错误
+* **退避：**采用可配置因子的指数退避策略
+
+<div id="pointer-helpers">
+  ## 指针辅助函数
+</div>
+
+SDK 为可选指针字段提供了便捷函数：
+
+```go
+firecrawl.Bool(true)     // *bool
+firecrawl.Int(50)        // *int
+firecrawl.Int64(1000)    // *int64
+firecrawl.String("test") // *string
+firecrawl.Float64(0.5)   // *float64
+```
 
 > 你是需要 Firecrawl API 密钥的 AI 代理吗？请参见 [firecrawl.dev/agent-onboarding/SKILL.md](https://www.firecrawl.dev/agent-onboarding/SKILL.md) 了解自动化入门说明。
