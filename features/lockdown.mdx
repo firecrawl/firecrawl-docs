@@ -1,0 +1,88 @@
+---
+title: "Lockdown Mode"
+description: "Cache-only scrape mode for compliance and air-gapped environments. No outbound traffic."
+og:title: "Lockdown Mode | Firecrawl"
+og:description: "Cache-only scrape mode for compliance and air-gapped environments. No outbound traffic."
+---
+
+import LockdownPython from "/snippets/v2/scrape/lockdown/python.mdx";
+import LockdownNode from "/snippets/v2/scrape/lockdown/js.mdx";
+import LockdownCURL from "/snippets/v2/scrape/lockdown/curl.mdx";
+import LockdownCLI from "/snippets/v2/scrape/lockdown/cli.mdx";
+
+Lockdown mode forces the scrape endpoint to read from Firecrawl's existing index and cache only — it never makes an outbound request to the target URL. It is designed for compliance-constrained and air-gapped environments where the scrape request itself (the URL, headers, and body) could leak sensitive information over the network.
+
+## How it works
+
+When `lockdown: true` is set on a `/v2/scrape` request:
+
+- **No outbound traffic.** Firecrawl never connects to the target URL. All outbound paths (HTTP engines, robots.txt fetching, search-index writes, audio transforms, etc.) are gated off.
+- **Cache-only reads.** The request is served from Firecrawl's index if a matching entry exists. The default `maxAge` is bumped to 2 years so existing cached pages are eligible regardless of age.
+- **Cache miss returns an error.** If no cached data is available, Firecrawl returns a `404` with error code `SCRAPE_LOCKDOWN_CACHE_MISS`. The URL is never logged on miss.
+- **Zero data retention.** Lockdown requests are treated as ZDR: no URL is persisted, no response blob is written to long-term storage, and the scrape job is cleaned up after delivery.
+
+## When to use this
+
+**Great for:**
+- Regulated industries (healthcare, finance, legal) where outbound requests require audit or approval
+- Air-gapped or compliance-constrained environments where the URL itself is sensitive
+- Replaying already-indexed pages without re-hitting origins
+
+**Skip for:**
+- Fresh content that has never been scraped before — lockdown mode returns an error on cache miss
+- Real-time or time-sensitive data
+
+## Usage
+
+Add `lockdown: true` to your scrape request.
+
+<CodeGroup>
+
+<LockdownPython />
+
+<LockdownNode />
+
+<LockdownCURL />
+
+<LockdownCLI />
+
+</CodeGroup>
+
+## Cache miss response
+
+If the URL has not been previously scraped and cached, the response is:
+
+```json
+{
+  "success": false,
+  "code": "SCRAPE_LOCKDOWN_CACHE_MISS",
+  "error": "No cached data is available for this request in lockdown mode. Lockdown mode only serves previously cached responses and never makes outbound requests. To resolve this, either disable lockdown mode to allow a fresh scrape, or try again after the URL has been scraped and cached."
+}
+```
+
+To seed the cache, perform a normal (non-lockdown) scrape of the URL first. Subsequent lockdown requests will return the cached result.
+
+## Billing
+
+| Outcome | Credits |
+|---|---|
+| Cache hit | 5 credits |
+| Cache miss (`SCRAPE_LOCKDOWN_CACHE_MISS`) | 1 credit |
+
+Zero Data Retention does not incur an additional charge on lockdown requests — the ZDR cost is waived because lockdown mode is already ZDR by default.
+
+## Cache hit matching
+
+Lockdown uses the same cache-match rules as regular scrapes. For a cache hit, these parameters must match the cached entry: `url`, `mobile`, `location`, `waitFor`, `blockAds`, `screenshot` (enabled/disabled and full-page), and enhanced proxy mode. You can verify behavior via `metadata.cacheState` in the response — it will be `"hit"` on a served response.
+
+## Availability
+
+Lockdown mode is supported on the `/v2/scrape` endpoint and is exposed across all surfaces that call it:
+
+- **SDKs** — Python, Node.js, Go, Rust, Java, .NET, Ruby, PHP, and Elixir (`lockdown: true` on the scrape options).
+- **CLI** — pass `--lockdown` to `firecrawl scrape`.
+- **MCP server** — include `"lockdown": true` in the `firecrawl_scrape` tool arguments.
+
+It is not available on `crawl`, `map`, `extract`, or `search`.
+
+> Are you an AI agent that needs a Firecrawl API key? See [firecrawl.dev/agent-onboarding/SKILL.md](https://www.firecrawl.dev/agent-onboarding/SKILL.md) for automated onboarding instructions.
