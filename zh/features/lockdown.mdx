@@ -1,0 +1,102 @@
+---
+title: "锁定模式"
+description: "仅使用缓存的抓取模式，适用于合规和物理隔离环境。不产生出站流量。"
+og:title: "锁定模式 | Firecrawl"
+og:description: "仅使用缓存的抓取模式，适用于合规和物理隔离环境。不产生出站流量。"
+---
+
+import LockdownPython from "/snippets/zh/v2/scrape/lockdown/python.mdx";
+import LockdownNode from "/snippets/zh/v2/scrape/lockdown/js.mdx";
+import LockdownCURL from "/snippets/zh/v2/scrape/lockdown/curl.mdx";
+import LockdownCLI from "/snippets/zh/v2/scrape/lockdown/cli.mdx";
+
+锁定模式会强制抓取端点仅从 Firecrawl 的现有索引和缓存中读取——绝不会向目标 URL 发起对外请求。它专为受合规约束和气隙环境而设计；在这些环境中，抓取请求本身 (URL、标头和正文) 就可能通过网络泄露敏感信息。
+
+<div id="how-it-works">
+  ## 工作原理
+</div>
+
+当在 `/v2/scrape` 请求中设置 `lockdown: true` 时：
+
+* **无出站流量。** Firecrawl 绝不会连接到目标 URL。所有出站路径 (HTTP 引擎、获取 `robots.txt`、写入搜索索引、音频转换等) 都会被禁用。
+* **仅从缓存读取。** 如果存在匹配条目，请求将直接由 Firecrawl 的索引返回。默认 `maxAge` 会上调为 2 年，因此现有缓存页面无论缓存时间多久都可使用。
+* **缓存未命中时返回错误。** 如果没有可用的缓存数据，Firecrawl 会返回 `404`，错误代码为 `SCRAPE_LOCKDOWN_CACHE_MISS`。未命中时，该 URL 也不会被记录。
+* **零数据保留。** Lockdown 请求会按 ZDR 处理：不会持久化 URL，不会将响应 blob 写入长期存储，并且抓取任务会在交付后清理。
+
+<div id="when-to-use-this">
+  ## 何时使用此功能
+</div>
+
+**适合用于：**
+
+* 受监管行业 (医疗、金融、法律等) ，其出站请求需要审计或审批
+* 网络隔离或受合规限制的环境，其中 URL 本身属于敏感信息
+* 重放已编入索引的页面，无需再次请求源站
+
+**不适合用于：**
+
+* 之前从未抓取过的新内容——锁定模式在缓存未命中时会返回错误
+* 实时数据或对时效性要求较高的数据
+
+<div id="usage">
+  ## 使用方式
+</div>
+
+在 scrape 请求中添加 `lockdown: true`。
+
+<CodeGroup>
+  <LockdownPython />
+
+  <LockdownNode />
+
+  <LockdownCURL />
+
+  <LockdownCLI />
+</CodeGroup>
+
+<div id="cache-miss-response">
+  ## 缓存未命中时的响应
+</div>
+
+如果该 URL 之前未被抓取并缓存，响应如下：
+
+```json
+{
+  "success": false,
+  "code": "SCRAPE_LOCKDOWN_CACHE_MISS",
+  "error": "No cached data is available for this request in lockdown mode. Lockdown mode only serves previously cached responses and never makes outbound requests. To resolve this, either disable lockdown mode to allow a fresh scrape, or try again after the URL has been scraped and cached."
+}
+```
+
+要预热缓存，请先对该 URL 执行一次正常的 (非锁定模式) 抓取。后续的锁定模式请求将返回缓存的结果。
+
+<div id="billing">
+  ## 计费
+</div>
+
+| 结果                                   | 额度    |
+| ------------------------------------ | ----- |
+| 缓存命中                                 | 5 个额度 |
+| 缓存未命中 (`SCRAPE_LOCKDOWN_CACHE_MISS`) | 1 个额度 |
+
+零数据保留 不会对 lockdown 请求额外收费——由于 lockdown 模式默认已是 ZDR，因此免收 ZDR 成本。
+
+<div id="cache-hit-matching">
+  ## 缓存命中匹配
+</div>
+
+Lockdown 使用与常规抓取相同的缓存匹配规则。要命中缓存，这些参数必须与缓存条目一致：`url`、`mobile`、`location`、`waitFor`、`blockAds`、`screenshot` (是否启用及是否为整页) ，以及强化代理模式。你可以通过响应中的 `metadata.cacheState` 来验证这一行为——命中缓存并返回响应时，它的值会是 `"hit"`。
+
+<div id="availability">
+  ## 可用性
+</div>
+
+锁定模式支持 `/v2/scrape` 端点，并已在所有调用该端点的入口中提供：
+
+* **SDKs** — Python、Node.js、Go、Rust、Java、.NET、Ruby、PHP 和 Elixir (在 scrape 选项中设置 `lockdown: true`) 。
+* **CLI** — 在 `firecrawl scrape` 中传入 `--lockdown`。
+* **MCP server** — 在 `firecrawl_scrape` 工具参数中加入 `"lockdown": true`。
+
+`crawl`、`map`、`extract` 和 `search` 暂不支持。
+
+> 你是需要 Firecrawl API 密钥的 AI 代理吗？请参见 [firecrawl.dev/agent-onboarding/SKILL.md](https://www.firecrawl.dev/agent-onboarding/SKILL.md) 获取自动化引导说明。

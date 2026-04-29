@@ -1,0 +1,102 @@
+---
+title: "Modo Lockdown"
+description: "Modo de scraping somente com cache para conformidade e ambientes isolados da rede. Sem tráfego de saída."
+og:title: "Modo Lockdown | Firecrawl"
+og:description: "Modo de scraping somente com cache para conformidade e ambientes isolados da rede. Sem tráfego de saída."
+---
+
+import LockdownPython from "/snippets/pt-BR/v2/scrape/lockdown/python.mdx";
+import LockdownNode from "/snippets/pt-BR/v2/scrape/lockdown/js.mdx";
+import LockdownCURL from "/snippets/pt-BR/v2/scrape/lockdown/curl.mdx";
+import LockdownCLI from "/snippets/pt-BR/v2/scrape/lockdown/cli.mdx";
+
+O modo Lockdown força o endpoint /scrape a ler somente do índice e do cache já existentes do Firecrawl — ele nunca faz uma requisição de saída para a URL de destino. Ele foi projetado para ambientes com restrições de conformidade e isolados da rede, nos quais a própria solicitação de scraping (a URL, os cabeçalhos e o corpo) poderia vazar informações sensíveis pela rede.
+
+<div id="how-it-works">
+  ## Como funciona
+</div>
+
+Quando `lockdown: true` é definido em uma requisição para `/v2/scrape`:
+
+* **Sem tráfego de saída.** O Firecrawl nunca se conecta à URL de destino. Todas as rotas de saída (mecanismos HTTP, busca de robots.txt, gravações no índice de busca, transformações de áudio etc.) são desativadas.
+* **Leituras somente de cache.** A requisição é atendida a partir do índice do Firecrawl se houver uma entrada correspondente. O `maxAge` padrão é aumentado para 2 anos, para que páginas já armazenadas em cache sejam elegíveis independentemente da idade.
+* **Cache miss retorna erro.** Se não houver dados em cache disponíveis, o Firecrawl retorna `404` com o código de erro `SCRAPE_LOCKDOWN_CACHE_MISS`. A URL nunca é registrada em caso de cache miss.
+* **Retenção zero de dados.** As requisições com lockdown são tratadas como ZDR: nenhuma URL é persistida, nenhum blob de resposta é gravado no armazenamento de longo prazo, e o job de scraping é removido após a entrega.
+
+<div id="when-to-use-this">
+  ## Quando usar isso
+</div>
+
+**Ótimo para:**
+
+* Setores regulados (saúde, finanças, jurídico) em que requisições externas exigem auditoria ou aprovação
+* Ambientes isolados da rede ou com restrições de compliance em que a própria URL é sensível
+* Reproduzir páginas já indexadas sem consultar novamente as origens
+
+**Não é ideal para:**
+
+* Conteúdo novo que nunca foi extraído antes — o modo lockdown retorna um erro em caso de cache miss
+* Dados em tempo real ou sensíveis ao fator tempo
+
+<div id="usage">
+  ## Uso
+</div>
+
+Adicione `lockdown: true` à sua requisição de scraping.
+
+<CodeGroup>
+  <LockdownPython />
+
+  <LockdownNode />
+
+  <LockdownCURL />
+
+  <LockdownCLI />
+</CodeGroup>
+
+<div id="cache-miss-response">
+  ## Resposta em caso de cache miss
+</div>
+
+Se a URL não tiver sido previamente extraída e armazenada em cache, a resposta será:
+
+```json
+{
+  "success": false,
+  "code": "SCRAPE_LOCKDOWN_CACHE_MISS",
+  "error": "No cached data is available for this request in lockdown mode. Lockdown mode only serves previously cached responses and never makes outbound requests. To resolve this, either disable lockdown mode to allow a fresh scrape, or try again after the URL has been scraped and cached."
+}
+```
+
+Para popular o cache, primeiro faça um scraping normal (sem lockdown) da URL. As requisições em lockdown subsequentes retornarão o resultado em cache.
+
+<div id="billing">
+  ## Cobrança
+</div>
+
+| Resultado                                    | Créditos   |
+| -------------------------------------------- | ---------- |
+| Hit de cache                                 | 5 créditos |
+| cache miss (`SCRAPE_LOCKDOWN_CACHE_MISS`) | 1 crédito  |
+
+Zero Data Retention não tem custo adicional em solicitações de lockdown — o custo de ZDR é isento, pois o modo lockdown já é ZDR por padrão.
+
+<div id="cache-hit-matching">
+  ## Correspondência para hit de cache
+</div>
+
+O Lockdown usa as mesmas regras de correspondência de cache dos scrapes regulares. Para haver um hit de cache, estes parâmetros precisam corresponder ao item em cache: `url`, `mobile`, `location`, `waitFor`, `blockAds`, `screenshot` (habilitado/desabilitado e página inteira) e o modo de proxy aprimorado. Você pode verificar esse comportamento por meio de `metadata.cacheState` na resposta — o valor será `"hit"` em uma resposta entregue.
+
+<div id="availability">
+  ## Disponibilidade
+</div>
+
+O modo lockdown é suportado no endpoint `/v2/scrape` e está disponível em todas as interfaces que fazem chamadas para ele:
+
+* **SDKs** — Python, Node.js, Go, Rust, Java, .NET, Ruby, PHP e Elixir (`lockdown: true` nas opções de scraping).
+* **CLI** — passe `--lockdown` para `firecrawl scrape`.
+* **MCP server** — inclua `"lockdown": true` nos argumentos da ferramenta `firecrawl_scrape`.
+
+Ele não está disponível em `crawl`, `map`, `extract` ou `search`.
+
+> Você é um agente de IA que precisa de uma chave de API da Firecrawl? Consulte [firecrawl.dev/agent-onboarding/SKILL.md](https://www.firecrawl.dev/agent-onboarding/SKILL.md) para obter instruções de onboarding automatizado.
