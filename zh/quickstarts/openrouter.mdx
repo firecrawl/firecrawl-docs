@@ -1,0 +1,140 @@
+---
+title: "OpenRouter"
+description: "将 Firecrawl 作为工具与 OpenRouter 提供的任意模型配合使用。"
+sidebarTitle: "OpenRouter"
+---
+
+将 [OpenRouter](https://openrouter.ai) (一个面向数百个 LLM 的统一 API) 与 Firecrawl 搭配使用，即可为任意模型提供实时网页搜索、抓取和爬取能力。
+
+OpenRouter 的 API 与 OpenAI 兼容，因此你可以将 OpenAI SDK 指向 OpenRouter 的 base URL，再将 Firecrawl 的 Python 或 JavaScript SDK 作为工具使用。
+
+<div id="setup">
+  ## 配置
+</div>
+
+```bash
+npm install @mendable/firecrawl-js openai zod
+```
+
+```bash
+export FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+export OPENROUTER_API_KEY=sk-or-YOUR-OPENROUTER-KEY
+```
+
+<div id="scrape-summarize-with-any-openrouter-model">
+  ## 使用任意 OpenRouter 模型进行抓取 + 总结
+</div>
+
+这会使用 Firecrawl 抓取页面，并用你在 OpenRouter 中选择的任意模型进行总结——这里以 Claude Haiku 4.5 为例。
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import OpenAI from 'openai';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+
+const openrouter = new OpenAI({
+  apiKey: process.env.OPENROUTER_API_KEY,
+  baseURL: 'https://openrouter.ai/api/v1',
+});
+
+const scraped = await firecrawl.scrape('https://docs.firecrawl.dev', {
+  formats: ['markdown'],
+});
+
+const completion = await openrouter.chat.completions.create({
+  model: 'anthropic/claude-haiku-4.5',
+  messages: [
+    { role: 'user', content: `Summarize in 5 bullets: ${scraped.markdown}` },
+  ],
+});
+
+console.log(completion.choices[0]?.message.content);
+```
+
+将 `model` 的值改为任意 [OpenRouter 支持的模型](https://openrouter.ai/models)——`openai/gpt-5`、`google/gemini-2.5-pro`、`meta-llama/llama-4-maverick` 等。
+
+<div id="tool-calling-model-decides-when-to-scrape">
+  ## 工具调用：由模型决定何时抓取
+</div>
+
+OpenRouter 支持 OpenAI 风格的工具调用，因此 Firecrawl 可以作为模型可调用的函数接入。
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import OpenAI from 'openai';
+import { z } from 'zod';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+const openrouter = new OpenAI({
+  apiKey: process.env.OPENROUTER_API_KEY,
+  baseURL: 'https://openrouter.ai/api/v1',
+});
+
+const ScrapeArgs = z.object({
+  url: z.string().describe('The URL to scrape'),
+});
+
+const tools = [
+  {
+    type: 'function' as const,
+    function: {
+      name: 'scrape_website',
+      description: 'Scrape the markdown content of any URL via Firecrawl',
+      parameters: z.toJSONSchema(ScrapeArgs),
+    },
+  },
+];
+
+const response = await openrouter.chat.completions.create({
+  model: 'anthropic/claude-haiku-4.5',
+  tools,
+  messages: [
+    {
+      role: 'user',
+      content: 'What is Firecrawl? Visit firecrawl.dev and tell me.',
+    },
+  ],
+});
+
+const call = response.choices[0]?.message.tool_calls?.[0];
+if (call?.function.name === 'scrape_website') {
+  const { url } = ScrapeArgs.parse(JSON.parse(call.function.arguments));
+  const page = await firecrawl.scrape(url, { formats: ['markdown'] });
+  console.log(page.markdown);
+}
+```
+
+<div id="python">
+  ## Python
+</div>
+
+```python
+import os
+from firecrawl import FirecrawlApp
+from openai import OpenAI
+
+firecrawl = FirecrawlApp(api_key=os.environ["FIRECRAWL_API_KEY"])
+
+openrouter = OpenAI(
+    api_key=os.environ["OPENROUTER_API_KEY"],
+    base_url="https://openrouter.ai/api/v1",
+)
+
+page = firecrawl.scrape("https://docs.firecrawl.dev", formats=["markdown"])
+
+completion = openrouter.chat.completions.create(
+    model="anthropic/claude-haiku-4.5",
+    messages=[{"role": "user", "content": f"Summarize: {page.markdown}"}],
+)
+
+print(completion.choices[0].message.content)
+```
+
+<div id="notes">
+  ## 备注
+</div>
+
+* Firecrawl 完全不依赖特定模型——无需修改抓取代码，即可选择任意 OpenRouter 模型。
+* 许多热门的 OpenRouter 应用 (Cline、Roo Code、Kilo、Cursor、Continue) 本身就是可使用 Firecrawl MCP 的代理框架——请参见 [MCP Server](/zh/mcp-server)，了解如何将 Firecrawl 直接接入这些应用。
+* 对于大型任务，请使用 [batch scrape](/zh/features/batch-scrape)，以控制在 LLM 上下文预算范围内。

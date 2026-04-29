@@ -1,0 +1,152 @@
+---
+title: "AutoGen"
+description: "在 Microsoft AutoGen 的多代理对话中使用 Firecrawl 作为工具。"
+sidebarTitle: "AutoGen"
+---
+
+将 Firecrawl 与 [Microsoft AutoGen](https://github.com/microsoft/autogen) 集成，为多代理对话提供实时网页搜索、抓取和爬取能力。
+
+<div id="setup">
+  ## 配置
+</div>
+
+```bash
+pip install -U "autogen-agentchat" "autogen-ext[openai]" firecrawl-py
+```
+
+设置密钥：
+
+```bash
+export FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+export OPENAI_API_KEY=sk-YOUR-OPENAI-KEY
+```
+
+<div id="firecrawl-as-an-autogen-tool">
+  ## 将 Firecrawl 用作 AutoGen 工具
+</div>
+
+本示例将 Firecrawl 的 `scrape` 和 `search` 封装为 AutoGen 函数工具，然后让单个 `AssistantAgent` 使用它们来回答问题。
+
+```python
+import asyncio
+import os
+from firecrawl import FirecrawlApp
+from autogen_agentchat.agents import AssistantAgent
+from autogen_agentchat.ui import Console
+from autogen_ext.models.openai import OpenAIChatCompletionClient
+
+firecrawl = FirecrawlApp(api_key=os.environ["FIRECRAWL_API_KEY"])
+
+
+def scrape_url(url: str) -> str:
+    """Scrape a URL and return clean markdown."""
+    result = firecrawl.scrape(url, formats=["markdown"])
+    return result.markdown or ""
+
+
+def web_search(query: str, limit: int = 5) -> list[dict]:
+    """Search the web and return the top results."""
+    result = firecrawl.search(query, limit=limit)
+    return [
+        {"title": r.title, "url": r.url, "snippet": r.description}
+        for r in result.web or []
+    ]
+
+
+async def main() -> None:
+    model = OpenAIChatCompletionClient(model="gpt-4o-mini")
+
+    researcher = AssistantAgent(
+        name="researcher",
+        model_client=model,
+        tools=[scrape_url, web_search],
+        system_message=(
+            "You are a web researcher. Use web_search to find candidate sources, "
+            "then scrape_url to read the most relevant ones. Cite URLs in your answer."
+        ),
+    )
+
+    await Console(
+        researcher.run_stream(
+            task="What does Firecrawl's /agent endpoint do? Cite the docs."
+        )
+    )
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+运行：
+
+```bash
+python researcher.py
+```
+
+<div id="multi-agent-researcher-writer">
+  ## 多代理：研究代理 + 写作代理
+</div>
+
+将研究代理生成的 Firecrawl 输出交给轮询团队中的写作代理。
+
+```python
+import asyncio
+import os
+from firecrawl import FirecrawlApp
+from autogen_agentchat.agents import AssistantAgent
+from autogen_agentchat.conditions import MaxMessageTermination
+from autogen_agentchat.teams import RoundRobinGroupChat
+from autogen_agentchat.ui import Console
+from autogen_ext.models.openai import OpenAIChatCompletionClient
+
+firecrawl = FirecrawlApp(api_key=os.environ["FIRECRAWL_API_KEY"])
+
+
+def scrape_url(url: str) -> str:
+    result = firecrawl.scrape(url, formats=["markdown"])
+    return result.markdown or ""
+
+
+def web_search(query: str, limit: int = 5) -> list[dict]:
+    result = firecrawl.search(query, limit=limit)
+    return [
+        {"title": r.title, "url": r.url, "snippet": r.description}
+        for r in result.web or []
+    ]
+
+
+async def main() -> None:
+    model = OpenAIChatCompletionClient(model="gpt-4o-mini")
+
+    researcher = AssistantAgent(
+        name="researcher",
+        model_client=model,
+        tools=[scrape_url, web_search],
+        system_message="Gather sources with web_search + scrape_url. Reply with bullet-point findings and URLs.",
+    )
+
+    writer = AssistantAgent(
+        name="writer",
+        model_client=model,
+        system_message="Turn the researcher's findings into a 200-word briefing with inline citations.",
+    )
+
+    team = RoundRobinGroupChat(
+        [researcher, writer],
+        termination_condition=MaxMessageTermination(max_messages=6),
+    )
+
+    await Console(team.run_stream(task="Write a briefing on Firecrawl's crawl endpoint."))
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+<div id="notes">
+  ## 备注
+</div>
+
+* Firecrawl 的 Python SDK 是同步的；对于小规模工作负载，AutoGen 会在其事件循环中调用你的封装器，一般不会有问题。对于高并发抓取等较重负载，请将调用移出主线程，或使用[批量抓取](/zh/features/batch-scrape)。
+* 将 `OpenAIChatCompletionClient` 替换为任何 AutoGen 支持的模型客户端 (Azure OpenAI、通过 `autogen-ext` 接入的 Anthropic、Ollama 等) 即可。Firecrawl 不依赖特定模型。
+* 如需了解轮询之外的代理模式 (selector、swarm、nested teams) ，请参见 [AutoGen docs](https://microsoft.github.io/autogen/)。
