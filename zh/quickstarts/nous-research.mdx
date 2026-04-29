@@ -1,0 +1,120 @@
+---
+title: "Nous Research"
+description: "将 Firecrawl 作为工具，与 Nous Research 的 Hermes 模型配合使用。"
+sidebarTitle: "Nous Research"
+---
+
+将 [Nous Research](https://nousresearch.com) 的 Hermes 模型与 Firecrawl 搭配使用，为 Hermes 提供实时网页搜索、抓取和爬取能力。
+
+Hermes 模型支持兼容 OpenAI 的工具调用，因此 Firecrawl 可以作为模型可调用的函数接入。你可以通过 Nous Portal API、[OpenRouter](/zh/quickstarts/openrouter)，或通过 Nous 的 Forge 代理平台访问 Hermes。
+
+<div id="setup">
+  ## 设置
+</div>
+
+```bash
+npm install @mendable/firecrawl-js openai zod
+```
+
+```bash
+export FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+export NOUS_API_KEY=YOUR-NOUS-PORTAL-KEY
+```
+
+<div id="hermes-firecrawl-tool-call">
+  ## Hermes + Firecrawl 工具调用
+</div>
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import OpenAI from 'openai';
+import { z } from 'zod';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+
+// Nous Portal 兼容 OpenAI 接口
+const nous = new OpenAI({
+  apiKey: process.env.NOUS_API_KEY,
+  baseURL: 'https://inference-api.nousresearch.com/v1',
+});
+
+const SearchArgs = z.object({
+  query: z.string().describe('The web search query'),
+  limit: z.number().int().min(1).max(10).default(5),
+});
+
+const ScrapeArgs = z.object({
+  url: z.string().describe('The URL to scrape'),
+});
+
+const tools = [
+  {
+    type: 'function' as const,
+    function: {
+      name: 'web_search',
+      description: 'Search the web with Firecrawl and return top results.',
+      parameters: z.toJSONSchema(SearchArgs),
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'scrape_website',
+      description: 'Scrape the markdown content of a URL.',
+      parameters: z.toJSONSchema(ScrapeArgs),
+    },
+  },
+];
+
+const response = await nous.chat.completions.create({
+  model: 'Hermes-4-405B',
+  tools,
+  messages: [
+    {
+      role: 'user',
+      content: 'Research Firecrawl\'s /agent endpoint and cite the docs.',
+    },
+  ],
+});
+
+for (const call of response.choices[0]?.message.tool_calls ?? []) {
+  if (call.function.name === 'web_search') {
+    const { query, limit } = SearchArgs.parse(JSON.parse(call.function.arguments));
+    const results = await firecrawl.search(query, { limit });
+    console.log(results.web);
+  }
+  if (call.function.name === 'scrape_website') {
+    const { url } = ScrapeArgs.parse(JSON.parse(call.function.arguments));
+    const page = await firecrawl.scrape(url, { formats: ['markdown'] });
+    console.log(page.markdown);
+  }
+}
+```
+
+<div id="hermes-via-openrouter">
+  ## 通过 OpenRouter 使用 Hermes
+</div>
+
+想用单一网关接入多个模型？可通过 OpenRouter 调用 Hermes：
+
+```typescript
+const client = new OpenAI({
+  apiKey: process.env.OPENROUTER_API_KEY,
+  baseURL: 'https://openrouter.ai/api/v1',
+});
+
+await client.chat.completions.create({
+  model: 'nousresearch/hermes-4-405b',
+  // ...相同的工具，相同的消息
+});
+```
+
+请参见[OpenRouter 指南](/zh/quickstarts/openrouter)了解完整用法。
+
+<div id="notes">
+  ## 注意事项
+</div>
+
+* Hermes 很擅长生成结构化工具输出——配合 Firecrawl 的 [JSON 格式](/zh/features/llm-extract)，可顺畅地串联抓取 → 提取流程。
+* 对于长时间运行的代理循环，可流式处理工具调用，并使用 Firecrawl 的 [异步爬取](/zh/features/crawl)，这样模型就不会因大型抓取任务而被阻塞。
+* 请在 [portal.nousresearch.com](https://portal.nousresearch.com) 确认 Nous Portal 的准确基准 URL 和模型 slug——随着新一代 Hermes 发布，模型名称也会更新。
