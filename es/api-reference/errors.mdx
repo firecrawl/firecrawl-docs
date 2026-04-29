@@ -1,0 +1,124 @@
+---
+title: 'Errores'
+description: 'Todos los códigos de error de la API, qué los causa, cómo resolverlos y si se deben reintentar.'
+---
+
+Todas las respuestas de error de Firecrawl usan la misma estructura JSON. Busca el valor de `error` (o el código de estado HTTP) en la tabla siguiente para identificar la causa, cómo corregirlo y si es seguro reintentar la solicitud.
+
+<Note>Este catálogo cubre los errores con los que se encontrarán la mayoría de los agentes y clientes. No es exhaustivo: si recibes un error que no aparece aquí, por favor [abre un issue](https://github.com/firecrawl/firecrawl/issues) para que podamos documentarlo.</Note>
+
+<div id="error-response-shape">
+  ## Estructura de la respuesta de error
+</div>
+
+Todas las respuestas que no son 2xx devuelven JSON con `success: false` en el nivel superior y un `error` de tipo cadena. Algunos endpoints incluyen campos adicionales (`details`, `code`) cuando hay más contexto disponible.
+
+```json
+{
+  "success": false,
+  "error": "Unauthorized: Invalid token",
+  "details": "Optional structured details (only present on some errors)"
+}
+```
+
+| Campo     | Tipo      | Descripción                                                                             |
+| --------- | --------- | --------------------------------------------------------------------------------------- |
+| `success` | `boolean` | Siempre `false` en caso de error.                                                       |
+| `error`   | `string`  | Mensaje de error comprensible para una persona. Úsalo para consultar la fila siguiente. |
+| `details` | `any`     | Opcional. Errores de validación estructurados por campo, cuando corresponda.            |
+
+<div id="errors">
+  ## Errores
+</div>
+
+| HTTP | `error` (mensaje típico)                                | Causa                                                                                        | Solución                                                                                                                | Reintentable    |
+| ---- | ------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | --------------- |
+| 400  | `Bad Request` / mensaje de validación                   | El cuerpo de la solicitud no pasó la validación del esquema (faltan campos o son inválidos). | Corrige la carga útil de la solicitud usando la referencia del endpoint. Revisa `details` para identificar los campos.  | No              |
+| 400  | `Invalid URL`                                           | Falta el campo `url`, está mal formado o usa un esquema no compatible.                       | Proporciona una URL absoluta `http(s)://`.                                                                              | No              |
+| 401  | `Unauthorized: Invalid token`                           | Falta la API key, está mal formada o fue revocada.                                           | Envía `Authorization: Bearer fc-...` con una clave válida desde el [dashboard](https://www.firecrawl.dev/app/api-keys). | No              |
+| 402  | `Payment Required: Insufficient credits`                | Los créditos del plan se agotaron o la facturación no está configurada.                      | Recarga créditos, habilita la recarga automática o actualiza tu plan.                                                   | No              |
+| 403  | `Forbidden`                                             | La clave no tiene permisos para este endpoint o función.                                     | Usa una clave con el alcance requerido o actualiza el plan que habilita esta función.                                   | No              |
+| 404  | `Not Found`                                             | El ID de trabajo, el recurso o la ruta del endpoint no existen.                              | Verifica el ID del recurso y la URL del endpoint.                                                                       | No              |
+| 408  | `Request Timeout`                                       | La página tardó más que el `timeout` de la solicitud en cargarse.                            | Aumenta `timeout`, simplifica las acciones o usa `fastMode`.                                                            | Sí, con backoff |
+| 409  | `Conflict`                                              | El recurso está en un estado que impide la operación (p. ej., ya fue eliminado).             | Vuelve a consultar el estado y reconcílialo antes de reintentar.                                                        | No              |
+| 413  | `Payload Too Large`                                     | El cuerpo de la solicitud superó el tamaño máximo permitido.                                 | Reduce la carga útil (p. ej., un esquema más corto, menos URL por lote).                                                | No              |
+| 422  | `Unprocessable Entity` / error de esquema de extracción | El esquema no es un JSON Schema válido o el modelo no pudo generar un resultado conforme.    | Valida el esquema; flexibiliza los campos obligatorios; prueba con otro `model`.                                        | A veces         |
+| 429  | `Rate limit exceeded`                                   | Hay demasiadas solicitudes para el límite por minuto de tu plan.                             | Espera y reintenta después de los segundos indicados en `Retry-After`. Consulta [Límites de tasa](/es/rate-limits).       | Sí, con backoff |
+| 429  | `Concurrency limit reached`                             | Se alcanzó el límite de navegadores concurrentes de tu plan.                                 | Espera a que terminen los trabajos en curso, reduce la concurrencia o actualiza tu plan.                                | Sí, con backoff |
+| 500  | `Internal Server Error`                                 | Error no controlado del lado del servidor.                                                   | Reintenta con backoff exponencial. Si persiste, contacta con soporte e indica el ID de la solicitud.                    | Sí, con backoff |
+| 502  | `Bad Gateway`                                           | El proxy upstream o el worker devolvió una respuesta no válida.                              | Reintenta con backoff.                                                                                                  | Sí, con backoff |
+| 503  | `Service Unavailable`                                   | El servicio no puede procesar temporalmente la solicitud.                                    | Reintenta con backoff.                                                                                                  | Sí, con backoff |
+| 504  | `Gateway Timeout`                                       | La solicitud superó el timeout de la puerta de enlace (normalmente en crawls largos).        | Usa los endpoints async de crawl/lote y consulta el estado en su lugar.                                                 | Sí, con backoff |
+
+Para las respuestas 429, Firecrawl incluye una cabecera `Retry-After` (en segundos) cuando está disponible; espera al menos ese tiempo antes de reintentar.
+
+<div id="retry-guidance">
+  ## Guía de reintentos
+</div>
+
+Toma la columna **Reintentable** como referencia definitiva; no lo deduzcas solo a partir del estado HTTP. El patrón siguiente usa backoff exponencial con jitter y respeta `Retry-After` en respuestas 429.
+
+<CodeGroup>
+  ```python Python
+  import time
+  import random
+  import requests
+
+  RETRYABLE_STATUSES = {408, 429, 500, 502, 503, 504}
+
+  def request_with_retry(method, url, headers=None, json=None, max_attempts=5):
+      for attempt in range(max_attempts):
+          resp = requests.request(method, url, headers=headers, json=json)
+          if resp.status_code < 400 or resp.status_code not in RETRYABLE_STATUSES:
+              return resp
+          # Respeta Retry-After cuando esté presente; de lo contrario, usa backoff exponencial con jitter.
+          retry_after = resp.headers.get("Retry-After")
+          delay = float(retry_after) if retry_after else min(2 ** attempt, 30) + random.random()
+          time.sleep(delay)
+      return resp
+  ```
+
+  ```js Node
+  const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+
+  async function requestWithRetry(url, init = {}, maxAttempts = 5) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const resp = await fetch(url, init);
+      if (resp.ok || !RETRYABLE_STATUSES.has(resp.status)) return resp;
+      // Respeta Retry-After cuando esté presente; de lo contrario, usa backoff exponencial con jitter.
+      const retryAfter = resp.headers.get('Retry-After');
+      const delayMs = retryAfter
+        ? Number(retryAfter) * 1000
+        : Math.min(2 ** attempt, 30) * 1000 + Math.random() * 1000;
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  ```
+
+  ```bash cURL
+  # Bucle simple de shell con backoff exponencial para estados reintentables.
+  attempt=0
+  max=5
+  until response=$(curl -sS -w "\n%{http_code}" -X POST "https://api.firecrawl.dev/v2/scrape" \
+      -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{"url":"https://example.com"}'); do
+    status=$(printf '%s' "$response" | tail -n1)
+    case "$status" in
+      408|429|500|502|503|504)
+        attempt=$((attempt+1))
+        [ "$attempt" -ge "$max" ] && break
+        sleep $((2 ** attempt))
+        ;;
+      *) break ;;
+    esac
+  done
+  echo "$response"
+  ```
+</CodeGroup>
+
+<div id="rate-limits">
+  ## Límites de tasa
+</div>
+
+Las respuestas 429 son el error reintentable más común. Los límites de tasa y de concurrencia por plan se documentan en [Límites de tasa](/es/rate-limits). Respeta siempre la cabecera `Retry-After` cuando esté presente, en lugar de reintentar de inmediato.

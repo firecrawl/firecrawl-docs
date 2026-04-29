@@ -1,0 +1,124 @@
+---
+title: '错误'
+description: '所有 API 错误代码、成因、处理方法，以及是否应重试。'
+---
+
+每个 Firecrawl 错误响应都采用相同的 JSON 结构。请在下表中查找 `error` 的值 (或 HTTP 状态码) ，以了解错误原因、处理方法，以及该请求是否可以安全重试。
+
+<Note>本文涵盖了大多数代理和客户端会遇到的错误，但并非完整列表——如果你遇到了此处未列出的错误，请[提交 issue](https://github.com/firecrawl/firecrawl/issues)，以便我们将其补充到文档中。</Note>
+
+<div id="error-response-shape">
+  ## 错误响应结构
+</div>
+
+所有非 2xx 响应都会返回 JSON，顶层包含 `success: false` 和字符串类型的 `error`。某些端点在可提供更多上下文信息时，还会包含其他字段 (`details`、`code`) 。
+
+```json
+{
+  "success": false,
+  "error": "Unauthorized: Invalid token",
+  "details": "Optional structured details (only present on some errors)"
+}
+```
+
+| 字段        | 类型        | 描述                        |
+| --------- | --------- | ------------------------- |
+| `success` | `boolean` | 出错时始终为 `false`。           |
+| `error`   | `string`  | 便于人工阅读的错误消息。可据此查找下方对应的行。  |
+| `details` | `any`     | 可选。适用时，包含按字段组织的结构化验证错误信息。 |
+
+<div id="errors">
+  ## 错误
+</div>
+
+| HTTP | `error` (典型消息)                           | 原因                                       | 处理方法                                                                                              | 可重试     |
+| ---- | ---------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------- | ------- |
+| 400  | `Bad Request` / 验证消息                     | 请求体未通过 schema 验证 (字段缺失或无效) 。             | 根据 endpoint 参考文档修正请求 payload。检查 `details` 中的字段。                                                   | 否       |
+| 400  | `Invalid URL`                            | `url` 字段缺失、格式错误，或使用了不受支持的协议。             | 传入绝对 `http(s)://` URL。                                                                            | 否       |
+| 401  | `Unauthorized: Invalid token`            | API 密钥缺失、格式错误或已被撤销。                      | 发送 `Authorization: Bearer fc-...`，并使用 [Dashboard](https://www.firecrawl.dev/app/api-keys) 中的有效密钥。 | 否       |
+| 402  | `Payment Required: Insufficient credits` | 套餐额度已用尽，或尚未配置计费。                         | 充值额度、启用 auto-recharge，或升级你的套餐。                                                                    | 否       |
+| 403  | `Forbidden`                              | 该密钥没有访问此 endpoint 或功能的权限。                | 使用具备所需 scope 的密钥，或升级包含该功能的套餐。                                                                     | 否       |
+| 404  | `Not Found`                              | 任务 ID、资源或 endpoint 路径不存在。                | 核实资源 ID 和 endpoint URL。                                                                           | 否       |
+| 408  | `Request Timeout`                        | 页面加载时间超过了请求 `timeout`。                   | 增加 `timeout`、简化 actions，或使用 `fastMode`。                                                           | 是，需退避重试 |
+| 409  | `Conflict`                               | 资源当前所处状态阻止了该操作 (例如已被删除) 。                | 重试前重新获取状态并完成协调。                                                                                   | 否       |
+| 413  | `Payload Too Large`                      | 请求体超过允许的最大大小。                            | 缩减 payload (例如缩短 schema、减少每个 batch 中的 URL 数量) 。                                                   | 否       |
+| 422  | `Unprocessable Entity` / 提取 schema 错误    | schema 不是有效的 JSON Schema，或模型无法生成符合要求的结果。 | 验证 schema；放宽必填字段；尝试其他 `model`。                                                                    | 有时      |
+| 429  | `Rate limit exceeded`                    | 请求次数超过了你的套餐每分钟限额。                        | 退避，并在 `Retry-After` 指定的秒数后重试。请参见 [限流](/zh/rate-limits)。                                     | 是，需退避重试 |
+| 429  | `Concurrency limit reached`              | 已达到你的套餐并发浏览器数上限。                         | 等待进行中的任务完成、降低并发，或升级你的套餐。                                                                          | 是，需退避重试 |
+| 500  | `Internal Server Error`                  | 服务端发生了未处理的故障。                            | 使用指数退避重试。如果问题持续存在，请附上请求 ID 联系支持团队。                                                                | 是，需退避重试 |
+| 502  | `Bad Gateway`                            | 上游代理或工作进程返回了无效响应。                        | 退避后重试。                                                                                            | 是，需退避重试 |
+| 503  | `Service Unavailable`                    | 服务暂时无法处理该请求。                             | 退避后重试。                                                                                            | 是，需退避重试 |
+| 504  | `Gateway Timeout`                        | 请求超过了网关超时时间 (通常见于长时间爬取) 。                | 改用异步爬取/batch 端点，并改为轮询状态。                                                                   | 是，需退避重试 |
+
+对于 429 响应，Firecrawl 会在可用时包含 `Retry-After` 响应头 (单位为秒) ——重试前至少等待这么久。
+
+<div id="retry-guidance">
+  ## 重试指南
+</div>
+
+以 **可重试** 列为准；不要仅凭 HTTP 状态码自行判断。以下模式使用带抖动的指数退避，并在遇到 429 时遵循 `Retry-After`。
+
+<CodeGroup>
+  ```python Python
+  import time
+  import random
+  import requests
+
+  RETRYABLE_STATUSES = {408, 429, 500, 502, 503, 504}
+
+  def request_with_retry(method, url, headers=None, json=None, max_attempts=5):
+      for attempt in range(max_attempts):
+          resp = requests.request(method, url, headers=headers, json=json)
+          if resp.status_code < 400 or resp.status_code not in RETRYABLE_STATUSES:
+              return resp
+          # 存在 Retry-After 时优先遵循，否则使用带抖动的指数退避。
+          retry_after = resp.headers.get("Retry-After")
+          delay = float(retry_after) if retry_after else min(2 ** attempt, 30) + random.random()
+          time.sleep(delay)
+      return resp
+  ```
+
+  ```js Node
+  const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+
+  async function requestWithRetry(url, init = {}, maxAttempts = 5) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const resp = await fetch(url, init);
+      if (resp.ok || !RETRYABLE_STATUSES.has(resp.status)) return resp;
+      // 存在 Retry-After 时优先遵循，否则使用带抖动的指数退避。
+      const retryAfter = resp.headers.get('Retry-After');
+      const delayMs = retryAfter
+        ? Number(retryAfter) * 1000
+        : Math.min(2 ** attempt, 30) * 1000 + Math.random() * 1000;
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  ```
+
+  ```bash cURL
+  # 针对可重试状态码使用指数退避的简单 shell 循环。
+  attempt=0
+  max=5
+  until response=$(curl -sS -w "\n%{http_code}" -X POST "https://api.firecrawl.dev/v2/scrape" \
+      -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{"url":"https://example.com"}'); do
+    status=$(printf '%s' "$response" | tail -n1)
+    case "$status" in
+      408|429|500|502|503|504)
+        attempt=$((attempt+1))
+        [ "$attempt" -ge "$max" ] && break
+        sleep $((2 ** attempt))
+        ;;
+      *) break ;;
+    esac
+  done
+  echo "$response"
+  ```
+</CodeGroup>
+
+<div id="rate-limits">
+  ## 限流
+</div>
+
+429 响应是最常见的可重试错误。各套餐的限流和并发限制详见[限流](/zh/rate-limits)。如果存在 `Retry-After` 标头，请务必遵循其指定的等待时间，而不要立即重试。
