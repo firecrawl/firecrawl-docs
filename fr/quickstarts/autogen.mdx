@@ -1,0 +1,152 @@
+---
+title: "AutoGen"
+description: "Utiliser Firecrawl comme outil dans les conversations multi-agents de Microsoft AutoGen."
+sidebarTitle: "AutoGen"
+---
+
+Intégrez Firecrawl à [Microsoft AutoGen](https://github.com/microsoft/autogen) pour doter les conversations multi-agents d’outils de recherche web, de scraping et de crawl en temps réel.
+
+<div id="setup">
+  ## Configuration
+</div>
+
+```bash
+pip install -U "autogen-agentchat" "autogen-ext[openai]" firecrawl-py
+```
+
+Configurez vos clés :
+
+```bash
+export FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+export OPENAI_API_KEY=sk-YOUR-OPENAI-KEY
+```
+
+<div id="firecrawl-as-an-autogen-tool">
+  ## Firecrawl en tant qu’outil AutoGen
+</div>
+
+Cet exemple encapsule les fonctions `scrape` et `search` de Firecrawl sous forme d’outils AutoGen, puis permet à un unique `AssistantAgent` de les utiliser pour répondre à une question.
+
+```python
+import asyncio
+import os
+from firecrawl import FirecrawlApp
+from autogen_agentchat.agents import AssistantAgent
+from autogen_agentchat.ui import Console
+from autogen_ext.models.openai import OpenAIChatCompletionClient
+
+firecrawl = FirecrawlApp(api_key=os.environ["FIRECRAWL_API_KEY"])
+
+
+def scrape_url(url: str) -> str:
+    """Scrape a URL and return clean markdown."""
+    result = firecrawl.scrape(url, formats=["markdown"])
+    return result.markdown or ""
+
+
+def web_search(query: str, limit: int = 5) -> list[dict]:
+    """Search the web and return the top results."""
+    result = firecrawl.search(query, limit=limit)
+    return [
+        {"title": r.title, "url": r.url, "snippet": r.description}
+        for r in result.web or []
+    ]
+
+
+async def main() -> None:
+    model = OpenAIChatCompletionClient(model="gpt-4o-mini")
+
+    researcher = AssistantAgent(
+        name="researcher",
+        model_client=model,
+        tools=[scrape_url, web_search],
+        system_message=(
+            "You are a web researcher. Use web_search to find candidate sources, "
+            "then scrape_url to read the most relevant ones. Cite URLs in your answer."
+        ),
+    )
+
+    await Console(
+        researcher.run_stream(
+            task="What does Firecrawl's /agent endpoint do? Cite the docs."
+        )
+    )
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+Exécutez-le :
+
+```bash
+python researcher.py
+```
+
+<div id="multi-agent-researcher-writer">
+  ## Multi-agent : chercheur + rédacteur
+</div>
+
+Transmettez la sortie de Firecrawl d’un agent chercheur à un agent rédacteur au sein d’une équipe en round-robin.
+
+```python
+import asyncio
+import os
+from firecrawl import FirecrawlApp
+from autogen_agentchat.agents import AssistantAgent
+from autogen_agentchat.conditions import MaxMessageTermination
+from autogen_agentchat.teams import RoundRobinGroupChat
+from autogen_agentchat.ui import Console
+from autogen_ext.models.openai import OpenAIChatCompletionClient
+
+firecrawl = FirecrawlApp(api_key=os.environ["FIRECRAWL_API_KEY"])
+
+
+def scrape_url(url: str) -> str:
+    result = firecrawl.scrape(url, formats=["markdown"])
+    return result.markdown or ""
+
+
+def web_search(query: str, limit: int = 5) -> list[dict]:
+    result = firecrawl.search(query, limit=limit)
+    return [
+        {"title": r.title, "url": r.url, "snippet": r.description}
+        for r in result.web or []
+    ]
+
+
+async def main() -> None:
+    model = OpenAIChatCompletionClient(model="gpt-4o-mini")
+
+    researcher = AssistantAgent(
+        name="researcher",
+        model_client=model,
+        tools=[scrape_url, web_search],
+        system_message="Gather sources with web_search + scrape_url. Reply with bullet-point findings and URLs.",
+    )
+
+    writer = AssistantAgent(
+        name="writer",
+        model_client=model,
+        system_message="Turn the researcher's findings into a 200-word briefing with inline citations.",
+    )
+
+    team = RoundRobinGroupChat(
+        [researcher, writer],
+        termination_condition=MaxMessageTermination(max_messages=6),
+    )
+
+    await Console(team.run_stream(task="Write a briefing on Firecrawl's crawl endpoint."))
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+<div id="notes">
+  ## Remarques
+</div>
+
+* Le SDK Python de Firecrawl est synchrone ; AutoGen appellera vos wrappers dans sa boucle d’événements sans problème pour de petites charges de travail. Pour du scraping fortement concurrent, déplacez les appels hors du thread principal ou utilisez l’[extraction par lot](/fr/features/batch-scrape).
+* Remplacez `OpenAIChatCompletionClient` par n’importe quel client de modèle pris en charge par AutoGen (Azure OpenAI, Anthropic via `autogen-ext`, Ollama, etc.). Firecrawl est indépendant du modèle.
+* Consultez la [documentation d’AutoGen](https://microsoft.github.io/autogen/) pour des modèles d’agents au-delà du round-robin (selector, swarm, équipes imbriquées).

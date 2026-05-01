@@ -1,0 +1,130 @@
+---
+title: "OpenRouter"
+description: "Use Firecrawl as a tool with any model served by OpenRouter."
+sidebarTitle: "OpenRouter"
+---
+
+Pair [OpenRouter](https://openrouter.ai) — a unified API for hundreds of LLMs — with Firecrawl to give any model live web search, scrape, and crawl.
+
+OpenRouter's API is OpenAI-compatible, so you can use the OpenAI SDK pointed at OpenRouter's base URL plus Firecrawl's Python or JavaScript SDK as the tool.
+
+## Setup
+
+```bash
+npm install @mendable/firecrawl-js openai zod
+```
+
+```bash
+export FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+export OPENROUTER_API_KEY=sk-or-YOUR-OPENROUTER-KEY
+```
+
+## Scrape + Summarize with Any OpenRouter Model
+
+This scrapes a page with Firecrawl and summarizes it with whatever model you pick from OpenRouter — here, Claude Haiku 4.5.
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import OpenAI from 'openai';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+
+const openrouter = new OpenAI({
+  apiKey: process.env.OPENROUTER_API_KEY,
+  baseURL: 'https://openrouter.ai/api/v1',
+});
+
+const scraped = await firecrawl.scrape('https://docs.firecrawl.dev', {
+  formats: ['markdown'],
+});
+
+const completion = await openrouter.chat.completions.create({
+  model: 'anthropic/claude-haiku-4.5',
+  messages: [
+    { role: 'user', content: `Summarize in 5 bullets: ${scraped.markdown}` },
+  ],
+});
+
+console.log(completion.choices[0]?.message.content);
+```
+
+Switch the `model` string to any [OpenRouter-supported model](https://openrouter.ai/models) — `openai/gpt-5`, `google/gemini-2.5-pro`, `meta-llama/llama-4-maverick`, etc.
+
+## Tool Calling: Model Decides When to Scrape
+
+OpenRouter supports OpenAI-style tool calls, so Firecrawl plugs in as a function the model can invoke.
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import OpenAI from 'openai';
+import { z } from 'zod';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+const openrouter = new OpenAI({
+  apiKey: process.env.OPENROUTER_API_KEY,
+  baseURL: 'https://openrouter.ai/api/v1',
+});
+
+const ScrapeArgs = z.object({
+  url: z.string().describe('The URL to scrape'),
+});
+
+const tools = [
+  {
+    type: 'function' as const,
+    function: {
+      name: 'scrape_website',
+      description: 'Scrape the markdown content of any URL via Firecrawl',
+      parameters: z.toJSONSchema(ScrapeArgs),
+    },
+  },
+];
+
+const response = await openrouter.chat.completions.create({
+  model: 'anthropic/claude-haiku-4.5',
+  tools,
+  messages: [
+    {
+      role: 'user',
+      content: 'What is Firecrawl? Visit firecrawl.dev and tell me.',
+    },
+  ],
+});
+
+const call = response.choices[0]?.message.tool_calls?.[0];
+if (call?.function.name === 'scrape_website') {
+  const { url } = ScrapeArgs.parse(JSON.parse(call.function.arguments));
+  const page = await firecrawl.scrape(url, { formats: ['markdown'] });
+  console.log(page.markdown);
+}
+```
+
+## Python
+
+```python
+import os
+from firecrawl import FirecrawlApp
+from openai import OpenAI
+
+firecrawl = FirecrawlApp(api_key=os.environ["FIRECRAWL_API_KEY"])
+
+openrouter = OpenAI(
+    api_key=os.environ["OPENROUTER_API_KEY"],
+    base_url="https://openrouter.ai/api/v1",
+)
+
+page = firecrawl.scrape("https://docs.firecrawl.dev", formats=["markdown"])
+
+completion = openrouter.chat.completions.create(
+    model="anthropic/claude-haiku-4.5",
+    messages=[{"role": "user", "content": f"Summarize: {page.markdown}"}],
+)
+
+print(completion.choices[0].message.content)
+```
+
+## Notes
+
+- Firecrawl is fully model-agnostic — pick any OpenRouter model without changing the scrape code.
+- Many top OpenRouter apps (Cline, Roo Code, Kilo, Cursor, Continue) are themselves agent harnesses that can use Firecrawl MCP — see [MCP Server](/mcp-server) to wire Firecrawl into those directly.
+- For large jobs, use [batch scrape](/features/batch-scrape) to stay within LLM context budgets.

@@ -1,0 +1,102 @@
+---
+title: "ロックダウンモード"
+description: "コンプライアンスやエアギャップ環境向けの、キャッシュのみを使用するスクレイピングモード。外部への通信はありません。"
+og:title: "ロックダウンモード | Firecrawl"
+og:description: "コンプライアンスやエアギャップ環境向けの、キャッシュのみを使用するスクレイピングモード。外部への通信はありません。"
+---
+
+import LockdownPython from "/snippets/ja/v2/scrape/lockdown/python.mdx";
+import LockdownNode from "/snippets/ja/v2/scrape/lockdown/js.mdx";
+import LockdownCURL from "/snippets/ja/v2/scrape/lockdown/curl.mdx";
+import LockdownCLI from "/snippets/ja/v2/scrape/lockdown/cli.mdx";
+
+ロックダウンモード では、/scrape エンドポイントは Firecrawl の既存のインデックスとキャッシュのみを参照し、対象 URL への外部リクエストは一切行いません。これは、コンプライアンス上の制約がある環境やエアギャップ環境向けに設計されており、スクレイピング リクエスト自体 (URL、ヘッダー、本文) がネットワーク経由で機密情報を漏えいさせるおそれがある場合に適しています。
+
+<div id="how-it-works">
+  ## 仕組み
+</div>
+
+`/v2/scrape` リクエストで `lockdown: true` を設定すると、次のように動作します。
+
+* **外部への通信は行われません。** Firecrawl は対象 URL に一切接続しません。外部に出る経路 (HTTP エンジン、robots.txt の取得、検索インデックスへの書き込み、音声変換など) はすべて無効化されます。
+* **キャッシュのみを参照します。** 一致するエントリが存在する場合、リクエストは Firecrawl のインデックスから処理されます。デフォルトの `maxAge` は 2 年に引き上げられるため、既存のキャッシュ済みページは経過時間にかかわらず利用対象になります。
+* **キャッシュミス時はエラーを返します。** 利用可能なキャッシュデータがない場合、Firecrawl はエラーコード `SCRAPE_LOCKDOWN_CACHE_MISS` を付けて `404` を返します。キャッシュミス時も URL が記録されることはありません。
+* **ゼロデータ保持。** Lockdown リクエストは ZDR として扱われます。URL は永続化されず、レスポンス blob は長期ストレージに書き込まれず、スクレイピングジョブは配信後にクリーンアップされます。
+
+<div id="when-to-use-this">
+  ## これを使う場面
+</div>
+
+**適しているケース:**
+
+* 外部へのリクエストに監査や承認が必要な、規制の厳しい業界 (医療、金融、法務) 
+* URL自体が機微情報にあたる、エアギャップ環境やコンプライアンス上の制約がある環境
+* originに再アクセスせずに、すでにインデックス済みのページを再利用する場合
+
+**避けるべきケース:**
+
+* これまで一度もスクレイピングされたことのない新規コンテンツ — ロックダウンモードでは、キャッシュミス時にエラーが返されます
+* リアルタイムデータや時間に敏感なデータ
+
+<div id="usage">
+  ## 使用方法
+</div>
+
+スクレイピングリクエストに `lockdown: true` を追加します。
+
+<CodeGroup>
+  <LockdownPython />
+
+  <LockdownNode />
+
+  <LockdownCURL />
+
+  <LockdownCLI />
+</CodeGroup>
+
+<div id="cache-miss-response">
+  ## キャッシュミス時のレスポンス
+</div>
+
+URL がこれまで一度もスクレイピングされておらず、キャッシュも存在しない場合、レスポンスは次のとおりです。
+
+```json
+{
+  "success": false,
+  "code": "SCRAPE_LOCKDOWN_CACHE_MISS",
+  "error": "No cached data is available for this request in lockdown mode. Lockdown mode only serves previously cached responses and never makes outbound requests. To resolve this, either disable lockdown mode to allow a fresh scrape, or try again after the URL has been scraped and cached."
+}
+```
+
+キャッシュを生成するには、まず URL を通常モード (ロックダウン以外) でスクレイピングします。以降のロックダウンリクエストでは、キャッシュ済みの結果が返されます。
+
+<div id="billing">
+  ## 課金
+</div>
+
+| 結果                                     | クレジット  |
+| -------------------------------------- | ------ |
+| キャッシュヒット                               | 5クレジット |
+| キャッシュミス (`SCRAPE_LOCKDOWN_CACHE_MISS`) | 1クレジット |
+
+ロックダウンリクエストでは、ゼロデータ保持に追加料金は発生しません。ロックダウンモードはデフォルトでZDRであるため、ZDRのコストは免除されます。
+
+<div id="cache-hit-matching">
+  ## キャッシュヒットの一致条件
+</div>
+
+Lockdown では、通常のスクレイピングと同じキャッシュ一致ルールが使われます。キャッシュヒットと判定されるには、次のパラメータがキャッシュ済みエントリと一致している必要があります: `url`、`mobile`、`location`、`waitFor`、`blockAds`、`screenshot` (有効/無効とフルページ) 、および強化プロキシモード。動作はレスポンス内の `metadata.cacheState` で確認できます。レスポンスがキャッシュから返された場合、この値は `"hit"` になります。
+
+<div id="availability">
+  ## 提供状況
+</div>
+
+ロックダウンモード は `/v2/scrape` エンドポイントでサポートされており、これを呼び出すすべての手段で利用できます。
+
+* **SDKs** — Python、Node.js、Go、Rust、Java、.NET、Ruby、PHP、Elixir (スクレイピングのオプションで `lockdown: true` を指定) 。
+* **CLI** — `firecrawl scrape` に `--lockdown` を渡します。
+* **MCP server** — `firecrawl_scrape` ツールの引数に `"lockdown": true` を含めます。
+
+`crawl`、`map`、`extract`、`search` では利用できません。
+
+> Firecrawl APIキーが必要なAIエージェントですか？自動オンボーディングの手順は、[firecrawl.dev/agent-onboarding/SKILL.md](https://www.firecrawl.dev/agent-onboarding/SKILL.md) を参照してください。

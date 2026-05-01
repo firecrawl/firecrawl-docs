@@ -1,0 +1,154 @@
+---
+title: 'Parse'
+description: 'Sube un documento local o privado y conviértelo en datos limpios, listos para LLM'
+og:title: "Parse | Firecrawl"
+og:description: "Convierte PDF, DOCX, XLSX, HTML locales y más en Markdown o JSON estructurado"
+icon: "file-magnifying-glass"
+version: "v2"
+sidebarTitle: "Parse"
+---
+
+<div id="introducing-parse">
+  ## Presentamos /parse
+</div>
+
+El endpoint `/parse` convierte documentos locales o privados en datos limpios y listos para LLM. Sube el archivo en bytes mediante `multipart/form-data` y recibe Markdown, JSON, HTML, enlaces, imágenes o un resumen, manteniendo el orden de lectura y las tablas.
+
+* Convierte PDF, DOCX, XLSX, HTML y más en Markdown o JSON estructurado
+* Procesamiento hasta **5 veces más rápido** con un motor basado en Rust
+* Archivos de hasta **50 MB** por solicitud
+* Compatibilidad con retención de datos cero
+
+<div id="when-to-use-parse">
+  ## Cuándo usar `/parse`
+</div>
+
+Usa `/parse` cuando el documento de origen sea **un archivo local** o **no sea accesible públicamente por URL**. Si tienes una URL pública que apunta a un documento, es preferible usar [`/scrape`](/es/features/scrape): detecta automáticamente el tipo de archivo a partir de la extensión o del tipo de contenido, y lo procesa de la misma forma.
+
+| Origen                                                                 | Endpoint                                         |
+| ---------------------------------------------------------------------- | ------------------------------------------------ |
+| URL pública de un documento (p. ej., `https://example.com/report.pdf`) | [`POST /scrape`](/es/api-reference/endpoint/scrape) |
+| Archivo local o bytes no públicos (PDF, DOCX, XLSX, HTML, …)           | [`POST /parse`](/es/api-reference/endpoint/parse)   |
+
+<div id="parsing">
+  ## Parseo
+</div>
+
+<div id="parse-endpoint">
+  ### endpoint `/parse`
+</div>
+
+Se utiliza para subir un archivo y recibir el contenido procesado. La solicitud es `multipart/form-data`, con una parte `file` obligatoria y una parte JSON `options` opcional.
+
+**Extensiones compatibles:** `.html`, `.htm`, `.pdf`, `.docx`, `.doc`, `.odt`, `.rtf`, `.xlsx`, `.xls`.
+
+<div id="usage">
+  ### Uso
+</div>
+
+<CodeGroup>
+  ```python Python
+  from firecrawl import Firecrawl
+
+  firecrawl = Firecrawl(api_key="fc-YOUR-API-KEY")
+
+  doc = firecrawl.parse("./report.pdf")
+
+  print(doc.markdown)
+  ```
+
+  ```javascript Node
+  import Firecrawl from "@mendable/firecrawl-js";
+  import fs from "node:fs";
+
+  const firecrawl = new Firecrawl({ apiKey: "fc-YOUR-API-KEY" });
+
+  const doc = await firecrawl.parse({
+    data: fs.readFileSync("./report.pdf"),
+    filename: "report.pdf",
+  });
+
+  console.log(doc.markdown);
+  ```
+
+  ```bash cURL
+  curl -X POST https://api.firecrawl.dev/v2/parse \
+    -H 'Authorization: Bearer YOUR_API_KEY' \
+    -F 'file=@./report.pdf' \
+    -F 'options={"formats":["markdown"]};type=application/json'
+  ```
+</CodeGroup>
+
+<div id="response">
+  ### Respuesta
+</div>
+
+Los SDK devuelven el objeto de documento directamente. cURL devuelve la carga útil en JSON.
+
+```json
+{
+  "success": true,
+  "data": {
+    "markdown": "# Annual Report\n\n...",
+    "metadata": {
+      "title": "Annual Report",
+      "numPages": 42,
+      "sourceFile": "report.pdf"
+    }
+  }
+}
+```
+
+<div id="options">
+  ## Opciones
+</div>
+
+`/parse` acepta un subconjunto de las opciones de scraping en el campo `options`. Ajustes comunes:
+
+* `formats`: array de formatos de salida. El valor predeterminado es `["markdown"]`. Admitidos: `markdown`, `html`, `rawHtml`, `links`, `images`, `summary` y `json` (con un schema o prompt).
+* `onlyMainContent`: Solo devuelve el contenido principal del documento. El valor predeterminado es `true`.
+* `includeTags` / `excludeTags`: Inclusión o exclusión por etiqueta (entradas HTML).
+* `timeout`: Tiempo de espera de la solicitud en milisegundos. El valor predeterminado es `30000`; el máximo, `300000`.
+* `parsers`: Opciones del analizador de archivos. Para PDF, establece `{ "type": "pdf", "mode": "fast" | "auto" | "ocr", "maxPages": <int> }`.
+
+<Note>
+  `/parse` no admite opciones exclusivas del navegador como `actions`, `waitFor`, `location`, `mobile` o seguimiento de cambios.
+</Note>
+
+<div id="pdf-parser-modes">
+  ### Modos del analizador de PDF
+</div>
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/parse \
+  -H 'Authorization: Bearer YOUR_API_KEY' \
+  -F 'file=@./scan.pdf' \
+  -F 'options={"parsers":[{"type":"pdf","mode":"ocr","maxPages":50}]};type=application/json'
+```
+
+* `fast`: extracción solo de texto, la opción más rápida.
+* `auto` (predeterminado): prioriza el texto y usa OCR como alternativa en páginas que solo contienen imágenes.
+* `ocr`: aplica OCR a cada página — úsalo para documentos escaneados.
+
+<div id="structured-json-output">
+  ### Salida JSON estructurada
+</div>
+
+Proporciona un JSON schema o un prompt para extraer datos estructurados directamente del documento:
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/parse \
+  -H 'Authorization: Bearer YOUR_API_KEY' \
+  -F 'file=@./invoice.pdf' \
+  -F 'options={"formats":[{"type":"json","schema":{"type":"object","properties":{"total":{"type":"number"},"vendor":{"type":"string"}}}}]};type=application/json'
+```
+
+<div id="considerations">
+  ## Consideraciones
+</div>
+
+* El tamaño máximo de archivo es de **50 MB** por solicitud.
+* Procesar archivos PDF muy grandes o escaneados en modo `ocr` puede tardar más; aumenta `timeout` o usa `maxPages` para limitar el procesamiento.
+* Para lotes de archivos, llama a `/parse` por archivo en paralelo; no existe una variante de carga por lote.
+
+> ¿Eres un agente de IA que necesita una API key de Firecrawl? Consulta [firecrawl.dev/agent-onboarding/SKILL.md](https://www.firecrawl.dev/agent-onboarding/SKILL.md) para ver las instrucciones de incorporación automatizada.

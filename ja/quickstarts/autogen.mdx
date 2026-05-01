@@ -1,0 +1,152 @@
+---
+title: "AutoGen"
+description: "Microsoft AutoGenのマルチエージェント会話内で、Firecrawlをツールとして利用します。"
+sidebarTitle: "AutoGen"
+---
+
+Firecrawl を [Microsoft AutoGen](https://github.com/microsoft/autogen) と統合すると、マルチエージェント会話でリアルタイムのWeb検索、スクレイピング、クロールを利用できるようになります。
+
+<div id="setup">
+  ## セットアップ
+</div>
+
+```bash
+pip install -U "autogen-agentchat" "autogen-ext[openai]" firecrawl-py
+```
+
+キーを設定します：
+
+```bash
+export FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+export OPENAI_API_KEY=sk-YOUR-OPENAI-KEY
+```
+
+<div id="firecrawl-as-an-autogen-tool">
+  ## AutoGen ツールとしての Firecrawl
+</div>
+
+この例では、Firecrawl の `scrape` と `search` を AutoGen の関数ツールとして扱い、1 つの `AssistantAgent` がそれらを使って質問に回答できるようにします。
+
+```python
+import asyncio
+import os
+from firecrawl import FirecrawlApp
+from autogen_agentchat.agents import AssistantAgent
+from autogen_agentchat.ui import Console
+from autogen_ext.models.openai import OpenAIChatCompletionClient
+
+firecrawl = FirecrawlApp(api_key=os.environ["FIRECRAWL_API_KEY"])
+
+
+def scrape_url(url: str) -> str:
+    """URLをスクレイピングしてクリーンなmarkdownを返す。"""
+    result = firecrawl.scrape(url, formats=["markdown"])
+    return result.markdown or ""
+
+
+def web_search(query: str, limit: int = 5) -> list[dict]:
+    """ウェブを検索して上位の結果を返す。"""
+    result = firecrawl.search(query, limit=limit)
+    return [
+        {"title": r.title, "url": r.url, "snippet": r.description}
+        for r in result.web or []
+    ]
+
+
+async def main() -> None:
+    model = OpenAIChatCompletionClient(model="gpt-4o-mini")
+
+    researcher = AssistantAgent(
+        name="researcher",
+        model_client=model,
+        tools=[scrape_url, web_search],
+        system_message=(
+            "You are a web researcher. Use web_search to find candidate sources, "
+            "then scrape_url to read the most relevant ones. Cite URLs in your answer."
+        ),
+    )
+
+    await Console(
+        researcher.run_stream(
+            task="What does Firecrawl's /agent endpoint do? Cite the docs."
+        )
+    )
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+次を実行します：
+
+```bash
+python researcher.py
+```
+
+<div id="multi-agent-researcher-writer">
+  ## マルチエージェント: リサーチャー + ライター
+</div>
+
+リサーチャーエージェントの Firecrawl の出力を、ラウンドロビン方式のチーム内のライターエージェントに渡します。
+
+```python
+import asyncio
+import os
+from firecrawl import FirecrawlApp
+from autogen_agentchat.agents import AssistantAgent
+from autogen_agentchat.conditions import MaxMessageTermination
+from autogen_agentchat.teams import RoundRobinGroupChat
+from autogen_agentchat.ui import Console
+from autogen_ext.models.openai import OpenAIChatCompletionClient
+
+firecrawl = FirecrawlApp(api_key=os.environ["FIRECRAWL_API_KEY"])
+
+
+def scrape_url(url: str) -> str:
+    result = firecrawl.scrape(url, formats=["markdown"])
+    return result.markdown or ""
+
+
+def web_search(query: str, limit: int = 5) -> list[dict]:
+    result = firecrawl.search(query, limit=limit)
+    return [
+        {"title": r.title, "url": r.url, "snippet": r.description}
+        for r in result.web or []
+    ]
+
+
+async def main() -> None:
+    model = OpenAIChatCompletionClient(model="gpt-4o-mini")
+
+    researcher = AssistantAgent(
+        name="researcher",
+        model_client=model,
+        tools=[scrape_url, web_search],
+        system_message="Gather sources with web_search + scrape_url. Reply with bullet-point findings and URLs.",
+    )
+
+    writer = AssistantAgent(
+        name="writer",
+        model_client=model,
+        system_message="Turn the researcher's findings into a 200-word briefing with inline citations.",
+    )
+
+    team = RoundRobinGroupChat(
+        [researcher, writer],
+        termination_condition=MaxMessageTermination(max_messages=6),
+    )
+
+    await Console(team.run_stream(task="Write a briefing on Firecrawl's crawl endpoint."))
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+<div id="notes">
+  ## 注意事項
+</div>
+
+* Firecrawl の Python SDK は同期型です。小規模なワークロードであれば、AutoGen はイベントループ内でラッパーを問題なく呼び出せます。高い並行性でスクレイピングする場合は、呼び出しをメインスレッド外に移すか、[バッチスクレイプ](/ja/features/batch-scrape) を使用してください。
+* `OpenAIChatCompletionClient` は、AutoGen がサポートする任意のモデルクライアント (Azure OpenAI、`autogen-ext` 経由の Anthropic、Ollama など) に置き換え可能です。Firecrawl は特定のモデルに依存しません。
+* ラウンドロビン以外のエージェントパターン (selector、swarm、nested teams) については、[AutoGen docs](https://microsoft.github.io/autogen/) を参照してください。

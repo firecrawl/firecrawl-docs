@@ -1,0 +1,120 @@
+---
+title: "Nous Research"
+description: "Firecrawlをツールとして使用し、Nous ResearchのHermesモデルと連携します。"
+sidebarTitle: "Nous Research"
+---
+
+[Nous Research](https://nousresearch.com) のHermesモデルとFirecrawlを組み合わせることで、HermesにライブのWeb検索、スクレイピング、クロールを行わせることができます。
+
+HermesモデルはOpenAI互換のツール呼び出しに対応しているため、Firecrawlはモデルが呼び出せる関数として組み込めます。Hermesには、Nous Portal API、[OpenRouter](/ja/quickstarts/openrouter)、またはNousのForgeエージェントプラットフォーム経由でアクセスできます。
+
+<div id="setup">
+  ## セットアップ
+</div>
+
+```bash
+npm install @mendable/firecrawl-js openai zod
+```
+
+```bash
+export FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+export NOUS_API_KEY=YOUR-NOUS-PORTAL-KEY
+```
+
+<div id="hermes-firecrawl-tool-call">
+  ## Hermes + Firecrawl のツール呼び出し
+</div>
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import OpenAI from 'openai';
+import { z } from 'zod';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+
+// Nous Portal は OpenAI 互換です
+const nous = new OpenAI({
+  apiKey: process.env.NOUS_API_KEY,
+  baseURL: 'https://inference-api.nousresearch.com/v1',
+});
+
+const SearchArgs = z.object({
+  query: z.string().describe('The web search query'),
+  limit: z.number().int().min(1).max(10).default(5),
+});
+
+const ScrapeArgs = z.object({
+  url: z.string().describe('The URL to scrape'),
+});
+
+const tools = [
+  {
+    type: 'function' as const,
+    function: {
+      name: 'web_search',
+      description: 'Search the web with Firecrawl and return top results.',
+      parameters: z.toJSONSchema(SearchArgs),
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'scrape_website',
+      description: 'Scrape the markdown content of a URL.',
+      parameters: z.toJSONSchema(ScrapeArgs),
+    },
+  },
+];
+
+const response = await nous.chat.completions.create({
+  model: 'Hermes-4-405B',
+  tools,
+  messages: [
+    {
+      role: 'user',
+      content: 'Research Firecrawl\'s /agent endpoint and cite the docs.',
+    },
+  ],
+});
+
+for (const call of response.choices[0]?.message.tool_calls ?? []) {
+  if (call.function.name === 'web_search') {
+    const { query, limit } = SearchArgs.parse(JSON.parse(call.function.arguments));
+    const results = await firecrawl.search(query, { limit });
+    console.log(results.web);
+  }
+  if (call.function.name === 'scrape_website') {
+    const { url } = ScrapeArgs.parse(JSON.parse(call.function.arguments));
+    const page = await firecrawl.scrape(url, { formats: ['markdown'] });
+    console.log(page.markdown);
+  }
+}
+```
+
+<div id="hermes-via-openrouter">
+  ## OpenRouter 経由の Hermes
+</div>
+
+複数のモデルを単一のゲートウェイで扱いたい場合は、Hermes を OpenRouter 経由で利用できます。
+
+```typescript
+const client = new OpenAI({
+  apiKey: process.env.OPENROUTER_API_KEY,
+  baseURL: 'https://openrouter.ai/api/v1',
+});
+
+await client.chat.completions.create({
+  model: 'nousresearch/hermes-4-405b',
+  // ...同じツール、同じメッセージ
+});
+```
+
+完全な実装パターンについては、[OpenRouter ガイド](/ja/quickstarts/openrouter)を参照してください。
+
+<div id="notes">
+  ## 注意事項
+</div>
+
+* Hermes は構造化されたツール出力に強いため、Firecrawl の [JSON 形式](/ja/features/llm-extract) と組み合わせることで、スクレイピング → 抽出の連携をスムーズに構築できます。
+* 長時間動作するエージェントループでは、ツール呼び出しをストリーミングし、Firecrawl の [非同期クロール](/ja/features/crawl) を使うことで、モデルが大規模なスクレイピングで待たされないようにします。
+* 正確な Nous Portal のベース URL とモデルスラッグは [portal.nousresearch.com](https://portal.nousresearch.com) で確認してください。新しい Hermes 世代の提供に合わせて、モデル名は更新されます。

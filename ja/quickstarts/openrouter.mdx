@@ -1,0 +1,140 @@
+---
+title: "OpenRouter"
+description: "OpenRouterで提供される任意のモデルで、Firecrawl をツールとして使えます。"
+sidebarTitle: "OpenRouter"
+---
+
+[OpenRouter](https://openrouter.ai) — 数百もの LLM に対応する統合 API — と Firecrawl を組み合わせれば、どのモデルにもリアルタイムのWeb検索、スクレイピング、クロール機能を持たせられます。
+
+OpenRouter の API は OpenAI 互換のため、OpenRouter のベース URL を指定した OpenAI SDK と、ツールとして Firecrawl の Python または JavaScript SDK を利用できます。
+
+<div id="setup">
+  ## セットアップ
+</div>
+
+```bash
+npm install @mendable/firecrawl-js openai zod
+```
+
+```bash
+export FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+export OPENROUTER_API_KEY=sk-or-YOUR-OPENROUTER-KEY
+```
+
+<div id="scrape-summarize-with-any-openrouter-model">
+  ## OpenRouterの任意のモデルでスクレイピング + 要約
+</div>
+
+Firecrawlでページをスクレイピングし、OpenRouterで選択した任意のモデル (ここではClaude Haiku 4.5) で要約します。
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import OpenAI from 'openai';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+
+const openrouter = new OpenAI({
+  apiKey: process.env.OPENROUTER_API_KEY,
+  baseURL: 'https://openrouter.ai/api/v1',
+});
+
+const scraped = await firecrawl.scrape('https://docs.firecrawl.dev', {
+  formats: ['markdown'],
+});
+
+const completion = await openrouter.chat.completions.create({
+  model: 'anthropic/claude-haiku-4.5',
+  messages: [
+    { role: 'user', content: `Summarize in 5 bullets: ${scraped.markdown}` },
+  ],
+});
+
+console.log(completion.choices[0]?.message.content);
+```
+
+`model` 文字列は、任意の [OpenRouter 対応モデル](https://openrouter.ai/models) (`openai/gpt-5`、`google/gemini-2.5-pro`、`meta-llama/llama-4-maverick` など) に切り替えられます。
+
+<div id="tool-calling-model-decides-when-to-scrape">
+  ## ツール呼び出し：スクレイピングするタイミングはモデルが判断
+</div>
+
+OpenRouter は OpenAI 互換のツール呼び出しをサポートしているため、Firecrawl をモデルが呼び出せる関数として組み込めます。
+
+```typescript
+import FirecrawlApp from '@mendable/firecrawl-js';
+import OpenAI from 'openai';
+import { z } from 'zod';
+
+const firecrawl = new FirecrawlApp({ apiKey: process.env.FIRECRAWL_API_KEY });
+const openrouter = new OpenAI({
+  apiKey: process.env.OPENROUTER_API_KEY,
+  baseURL: 'https://openrouter.ai/api/v1',
+});
+
+const ScrapeArgs = z.object({
+  url: z.string().describe('The URL to scrape'),
+});
+
+const tools = [
+  {
+    type: 'function' as const,
+    function: {
+      name: 'scrape_website',
+      description: 'Scrape the markdown content of any URL via Firecrawl',
+      parameters: z.toJSONSchema(ScrapeArgs),
+    },
+  },
+];
+
+const response = await openrouter.chat.completions.create({
+  model: 'anthropic/claude-haiku-4.5',
+  tools,
+  messages: [
+    {
+      role: 'user',
+      content: 'What is Firecrawl? Visit firecrawl.dev and tell me.',
+    },
+  ],
+});
+
+const call = response.choices[0]?.message.tool_calls?.[0];
+if (call?.function.name === 'scrape_website') {
+  const { url } = ScrapeArgs.parse(JSON.parse(call.function.arguments));
+  const page = await firecrawl.scrape(url, { formats: ['markdown'] });
+  console.log(page.markdown);
+}
+```
+
+<div id="python">
+  ## Python
+</div>
+
+```python
+import os
+from firecrawl import FirecrawlApp
+from openai import OpenAI
+
+firecrawl = FirecrawlApp(api_key=os.environ["FIRECRAWL_API_KEY"])
+
+openrouter = OpenAI(
+    api_key=os.environ["OPENROUTER_API_KEY"],
+    base_url="https://openrouter.ai/api/v1",
+)
+
+page = firecrawl.scrape("https://docs.firecrawl.dev", formats=["markdown"])
+
+completion = openrouter.chat.completions.create(
+    model="anthropic/claude-haiku-4.5",
+    messages=[{"role": "user", "content": f"Summarize: {page.markdown}"}],
+)
+
+print(completion.choices[0].message.content)
+```
+
+<div id="notes">
+  ## 注記
+</div>
+
+* Firecrawl は完全にモデル非依存で、スクレイピングのコードを変更せずに任意の OpenRouter モデルを選択できます。
+* 主要な OpenRouter アプリ (Cline、Roo Code、Kilo、Cursor、Continue) の多くは、Firecrawl MCP を利用できるエージェント実行基盤でもあります。Firecrawl をそれらに直接接続する方法については、[MCP Server](/ja/mcp-server) を参照してください。
+* 大規模なジョブでは、LLM のコンテキスト上限内に収めるために [バッチスクレイプ](/ja/features/batch-scrape) を使用してください。
