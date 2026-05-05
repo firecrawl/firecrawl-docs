@@ -1,0 +1,277 @@
+---
+title: "Monitoring"
+description: "Schedule recurring scrapes and crawls, detect content changes, and receive webhook or email notifications"
+og:title: "Monitoring | Firecrawl"
+og:description: "Schedule recurring scrapes and crawls, detect content changes, and receive webhook or email notifications"
+icon: "radar"
+---
+
+Firecrawl monitors run recurring scrapes or crawls and compare each result against the last retained snapshot. Use monitors to track product pages, docs, blogs, changelogs, competitor sites, or any page where changes matter.
+
+Each check records page-level results as `same`, `new`, `changed`, `removed`, or `error`. You can receive a webhook for every completed check, email summaries when changes or errors happen, or both.
+
+<Note>
+  Monitoring requires retained snapshots and diffs. It is not available for zero data retention teams.
+</Note>
+
+## Create a monitor
+
+Create a scrape monitor for one or more explicit URLs:
+
+```bash
+curl -X POST "https://api.firecrawl.dev/v2/monitor" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Blog monitor",
+    "schedule": {
+      "text": "every 30 minutes",
+      "timezone": "UTC"
+    },
+    "notification": {
+      "email": {
+        "enabled": true,
+        "recipients": ["alerts@example.com"],
+        "includeDiffs": true
+      }
+    },
+    "targets": [
+      {
+        "type": "scrape",
+        "urls": ["https://example.com/blog"]
+      }
+    ]
+  }'
+```
+
+Create a crawl monitor to diff every page discovered by a crawl on each check:
+
+```bash
+curl -X POST "https://api.firecrawl.dev/v2/monitor" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Docs monitor",
+    "schedule": {
+      "cron": "7-59/15 * * * *",
+      "timezone": "UTC"
+    },
+    "webhook": {
+      "url": "https://example.com/webhooks/firecrawl",
+      "events": ["monitor.check.completed"]
+    },
+    "targets": [
+      {
+        "type": "crawl",
+        "url": "https://example.com/docs",
+        "crawlOptions": {
+          "limit": 100,
+          "maxDepth": 3
+        }
+      }
+    ]
+  }'
+```
+
+## Schedules
+
+Schedules can be provided as cron or as simple natural language text.
+
+```json
+{
+  "schedule": {
+    "cron": "*/30 * * * *",
+    "timezone": "UTC"
+  }
+}
+```
+
+```json
+{
+  "schedule": {
+    "text": "every 30 minutes",
+    "timezone": "UTC"
+  }
+}
+```
+
+Supported natural language examples:
+
+- `every 30 minutes`
+- `every 15 minutes starting at :07`
+- `hourly`
+- `every 2 hours`
+- `daily`
+- `daily at 9:00`
+- `weekly`
+
+The minimum interval is 15 minutes. API responses always return the normalized cron expression.
+
+## Targets
+
+Monitors support two target types:
+
+- `scrape`: Runs one scrape per URL in `urls`.
+- `crawl`: Runs a full crawl for `url` on each check, then diffs all discovered pages.
+
+Target scrape options are passed through to the underlying scrape jobs. Monitor-triggered scrapes default `maxAge` to `0`, so each check performs a fresh scrape unless you explicitly set a different `maxAge`.
+
+```json
+{
+  "type": "scrape",
+  "urls": ["https://example.com/pricing"],
+  "scrapeOptions": {
+    "formats": ["markdown"],
+    "maxAge": 0
+  }
+}
+```
+
+For crawl targets, use `crawlOptions` for crawl behavior and `scrapeOptions` for each page scrape:
+
+```json
+{
+  "type": "crawl",
+  "url": "https://example.com/docs",
+  "crawlOptions": {
+    "limit": 100,
+    "includePaths": ["/docs"]
+  },
+  "scrapeOptions": {
+    "formats": ["markdown"]
+  }
+}
+```
+
+## Notifications
+
+### Webhooks
+
+When a monitor has a `webhook`, Firecrawl sends `monitor.check.completed` after each completed check. The webhook contains the check summary and up to 100 page-level results.
+
+```json
+{
+  "webhook": {
+    "url": "https://example.com/webhooks/firecrawl",
+    "headers": {
+      "Authorization": "Bearer your-secret"
+    },
+    "metadata": {
+      "environment": "production"
+    },
+    "events": ["monitor.check.completed"]
+  }
+}
+```
+
+Payload:
+
+```json
+{
+  "success": true,
+  "type": "monitor.check.completed",
+  "id": "019df960-5f2a-75fb-a98b-bd2d32ca67d4",
+  "webhookId": "f1e2d3c4-0001-0000-0000-000000000000",
+  "data": {
+    "monitorId": "019df960-06e7-7383-9d89-82c0113dc31a",
+    "checkId": "019df960-5f2a-75fb-a98b-bd2d32ca67d4",
+    "status": "completed",
+    "summary": {
+      "totalPages": 2,
+      "same": 1,
+      "changed": 1,
+      "new": 0,
+      "removed": 0,
+      "error": 0
+    },
+    "pages": [
+      {
+        "url": "https://example.com/blog",
+        "status": "changed",
+        "previousScrapeId": "019df94f-82c3-7e41-81f0-00c72b2d9c52",
+        "currentScrapeId": "019df960-73ee-7ac2-97a9-fb0e442c21f1",
+        "error": null
+      }
+    ]
+  },
+  "metadata": {
+    "environment": "production"
+  }
+}
+```
+
+`success` is `true` when the check completed without page errors. It is `false` for failed or partial checks, and `error` contains the failure reason when available.
+
+### Email
+
+Email summaries are sent only when a check has changed, new, removed, or errored pages.
+
+```json
+{
+  "notification": {
+    "email": {
+      "enabled": true,
+      "recipients": ["alerts@example.com"],
+      "includeDiffs": true
+    }
+  }
+}
+```
+
+If `recipients` is omitted, Firecrawl sends to team members who are eligible for system alert emails.
+
+## Check results
+
+Use `GET /v2/monitor/{monitorId}/checks` to list checks and `GET /v2/monitor/{monitorId}/checks/{checkId}` to inspect a check.
+
+```bash
+curl "https://api.firecrawl.dev/v2/monitor/$MONITOR_ID/checks/$CHECK_ID?limit=25" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY"
+```
+
+The check detail response includes summary counts and a paginated `pages` array. Changed pages include inline diff data when available.
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "019df960-5f2a-75fb-a98b-bd2d32ca67d4",
+    "monitorId": "019df960-06e7-7383-9d89-82c0113dc31a",
+    "status": "completed",
+    "summary": {
+      "totalPages": 1,
+      "same": 0,
+      "changed": 1,
+      "new": 0,
+      "removed": 0,
+      "error": 0
+    },
+    "pages": [
+      {
+        "url": "https://example.com/blog",
+        "status": "changed",
+        "previousScrapeId": "019df94f-82c3-7e41-81f0-00c72b2d9c52",
+        "currentScrapeId": "019df960-73ee-7ac2-97a9-fb0e442c21f1",
+        "diff": {
+          "text": "...",
+          "json": {}
+        }
+      }
+    ],
+    "pageLimit": 25,
+    "pageOffset": 0
+  }
+}
+```
+
+## API reference
+
+- [Create monitor](/api-reference/endpoint/monitor-create)
+- [List monitors](/api-reference/endpoint/monitor-list)
+- [Get monitor](/api-reference/endpoint/monitor-get)
+- [Update monitor](/api-reference/endpoint/monitor-update)
+- [Delete monitor](/api-reference/endpoint/monitor-delete)
+- [Run monitor](/api-reference/endpoint/monitor-run)
+- [List monitor checks](/api-reference/endpoint/monitor-checks-list)
+- [Get monitor check](/api-reference/endpoint/monitor-check-get)
+- [Monitor webhook payload](/api-reference/endpoint/webhook-monitor-check-completed)
