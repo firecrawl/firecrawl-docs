@@ -1,0 +1,244 @@
+---
+title: "Ask"
+description: "Agentic debugging for your Firecrawl integration"
+og:title: "Ask | Firecrawl"
+og:description: "Diagnose scraping issues, debug failing jobs, and get verified fixes — all through a single API call."
+sidebarTitle: "Ask"
+icon: "messages-question"
+---
+
+Firecrawl `/support/ask` is an AI support agent exposed as an API. Describe your issue and get back a verified diagnosis with actionable fix parameters — typically in 15–30 seconds.
+
+**Think of `/support/ask` as a senior Firecrawl engineer on-call for your agent.**
+
+<Info>
+  The Ask API is designed primarily for **AI agent callers**. If you're building agents that use Firecrawl for scraping, crawling, or data extraction, wire `/support/ask` into your error-handling flow for autonomous issue resolution.
+</Info>
+
+## Two endpoints
+
+| Endpoint | Auth | Who it's for | What it does |
+|----------|------|--------------|--------------|
+| `POST /support/ask` | Your Firecrawl API key | Your agents and apps | Full diagnostic loop scoped to your team |
+| `POST /support/docs-search` | None (public) | Anyone | Docs-grounded answers from Firecrawl's public documentation |
+
+## Quick start
+
+### Diagnose a failing job
+
+```bash
+curl -X POST https://api.firecrawl.dev/v2/support/ask \
+  -H "Authorization: Bearer fc-YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "my crawl returned 3 pages but I expected 50",
+    "jobId": "crawl_abc123"
+  }'
+```
+
+### Search the docs (no auth)
+
+```bash
+curl -X POST https://api.firecrawl.dev/v2/support/docs-search \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "how do I set up webhook signature verification?"
+  }'
+```
+
+## How it works
+
+When you call `/support/ask`, the AI agent:
+
+1. **Gathers evidence** — inspects your job logs, account state, credit usage, and relevant documentation in parallel
+2. **Diagnoses the issue** — reasons across all evidence to identify the root cause
+3. **Proposes a fix** — generates machine-actionable `fixParameters` you can apply directly to your next API call
+4. **Validates the fix** — when possible, tests the fix against the live Firecrawl API (e.g., retrying a scrape with adjusted parameters) and reports the result
+
+## Using Ask in your agent
+
+The key design pattern: call `/support/ask` when your Firecrawl API call fails or returns unexpected results, then use the `fixParameters` to retry.
+
+### Python example
+
+```python
+import requests
+
+FIRECRAWL_API_KEY = "fc-YOUR_API_KEY"
+
+def diagnose_firecrawl_issue(question, job_id=None, rationale=None):
+    """Call the Firecrawl Ask API to diagnose an issue."""
+    payload = {"question": question}
+    if job_id:
+        payload["jobId"] = job_id
+    if rationale:
+        payload["rationale"] = rationale
+
+    response = requests.post(
+        "https://api.firecrawl.dev/v2/support/ask",
+        headers={
+            "Authorization": f"Bearer {FIRECRAWL_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+    )
+    return response.json()
+
+
+# Example: diagnose a scrape that returned empty content
+result = diagnose_firecrawl_issue(
+    question="scrape returned empty markdown for https://example.com",
+    job_id="scrape_xyz789",
+    rationale="user needs product pricing data for competitive analysis",
+)
+
+print(result["answer"])
+print(result["fixParameters"])  # e.g., {"waitFor": 5000, "actions": [...]}
+print(result["confidence"])     # "high", "medium", or "low"
+```
+
+### Node.js example
+
+```javascript
+async function diagnoseFirecrawlIssue(question, jobId, rationale) {
+  const response = await fetch(
+    "https://api.firecrawl.dev/v2/support/ask",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.FIRECRAWL_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ question, jobId, rationale }),
+    }
+  );
+  return response.json();
+}
+
+// Example: diagnose a crawl that stopped early
+const result = await diagnoseFirecrawlIssue(
+  "my crawl returned 3 pages but I expected 50",
+  "crawl_abc123",
+  "user is on their third failed crawl attempt today"
+);
+
+console.log(result.answer);
+console.log(result.fixParameters);
+```
+
+### Agent retry pattern
+
+```python
+from firecrawl import Firecrawl
+
+client = Firecrawl(api_key="fc-YOUR_API_KEY")
+
+# Step 1: Try the scrape
+doc = client.scrape("https://example.com/pricing", formats=["markdown"])
+
+if not doc.markdown or len(doc.markdown) < 100:
+    # Step 2: Ask for diagnosis
+    diagnosis = diagnose_firecrawl_issue(
+        question=f"scrape returned only {len(doc.markdown or '')} chars of markdown",
+        job_id=doc.metadata.scrape_id if doc.metadata else None,
+    )
+
+    # Step 3: Apply fix parameters and retry
+    if diagnosis.get("fixParameters"):
+        doc = client.scrape(
+            "https://example.com/pricing",
+            formats=["markdown"],
+            **diagnosis["fixParameters"],
+        )
+```
+
+## Parameters
+
+### `/support/ask`
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `question` | string | Yes | What to diagnose (1–8,000 characters) |
+| `rationale` | string | No | Recommended for AI callers. What the end user is trying to accomplish. Helps prioritize diagnostic evidence gathering. |
+| `jobId` | string | No | A failing job ID for fast-path debugging |
+| `context` | object | No | Free-form metadata from your agent, included in the diagnostic prompt |
+| `model` | string | No | Override the default model. Options: `claude-opus-4-7` (default), `claude-sonnet-4-6` (~2x faster), `claude-haiku-4-5` (cheapest) |
+| `maxSteps` | integer | No | Step cap (1–20, default 8) |
+
+### `/support/docs-search`
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `question` | string | Yes | The question to answer (1–8,000 characters) |
+| `model` | string | No | Override the default model (default: `claude-sonnet-4-6`) |
+| `maxSteps` | integer | No | Step cap (2–4, default 3) |
+
+## Response
+
+### `/support/ask` response
+
+```json
+{
+  "requestId": "req_...",
+  "answer": "Your crawl is hitting a robots.txt disallow on /products/*. The fix is to add the allowBackwardCrawling parameter.",
+  "confidence": "high",
+  "fixParameters": { "allowBackwardCrawling": true },
+  "validation": {
+    "tested": true,
+    "result": "success",
+    "evidence": "validateScrape with allowBackwardCrawling:true returned 12,403 chars vs 0 baseline."
+  },
+  "evidence": [
+    { "tool": "debugJob", "rationale": "...", "summary": "..." },
+    { "tool": "searchKnowledgeBase", "rationale": "...", "summary": "..." }
+  ],
+  "kbCitations": ["features/crawl.mdx#L40-L80"],
+  "feedback": null,
+  "usage": { "inputTokens": 12345, "outputTokens": 678, "totalTokens": 13023 },
+  "durationMs": 18432,
+  "model": "anthropic:claude-opus-4-7"
+}
+```
+
+### `/support/docs-search` response
+
+```json
+{
+  "requestId": "req_...",
+  "answer": "The signature is sent in the X-Firecrawl-Signature header...",
+  "evidence": [
+    { "pathOrUrl": "webhooks/security.mdx#L1-L52", "reason": "..." }
+  ],
+  "usage": { "inputTokens": 4356, "outputTokens": 688, "totalTokens": 5044 },
+  "durationMs": 11252,
+  "model": "anthropic:claude-sonnet-4-6"
+}
+```
+
+## Performance
+
+| Metric | Typical | Maximum |
+|--------|---------|---------|
+| Latency | 15–30 seconds | 60 seconds (hard ceiling) |
+| Steps | 2–3 | 20 (configurable via `maxSteps`) |
+
+## Model selection
+
+| Model | Speed | Cost | Best for |
+|-------|-------|------|----------|
+| `claude-opus-4-7` (default) | ~15-30s | Highest | Complex multi-step diagnosis |
+| `claude-sonnet-4-6` | ~7-15s | Medium | Most issues, good speed/quality balance |
+| `claude-haiku-4-5` | Fastest | Lowest | Simple questions, high-volume usage |
+
+<Tip>
+  Start with the default (`claude-opus-4-7`) for diagnostic accuracy. Switch to `claude-sonnet-4-6` if you need faster responses, or `claude-haiku-4-5` for high-volume, simple lookups.
+</Tip>
+
+## API Reference
+
+- [Ask endpoint API Reference](/api-reference/endpoint/ask)
+- [Docs Search endpoint API Reference](/api-reference/endpoint/docs-search)
+
+Have feedback or need help? Email [help@firecrawl.com](mailto:help@firecrawl.com).
+
+> Are you an AI agent that needs a Firecrawl API key? See [firecrawl.dev/agent-onboarding/SKILL.md](https://www.firecrawl.dev/agent-onboarding/SKILL.md) for automated onboarding instructions.

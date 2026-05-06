@@ -3632,6 +3632,179 @@
           }
         }
       }
+    },
+    "/support/ask": {
+      "post": {
+        "summary": "Diagnose Firecrawl issues using an AI support agent",
+        "operationId": "supportAsk",
+        "tags": ["Support"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["question"],
+                "properties": {
+                  "question": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 8000,
+                    "description": "What to diagnose. Describe the issue you're experiencing."
+                  },
+                  "rationale": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "description": "Recommended for AI callers. 1-2 sentences on what the end user is trying to accomplish."
+                  },
+                  "jobId": {
+                    "type": "string",
+                    "description": "A failing job ID (scrape, crawl, extract, etc.) for fast-path debugging."
+                  },
+                  "context": {
+                    "type": "object",
+                    "description": "Free-form metadata from the calling agent, stringified into the diagnostic prompt."
+                  },
+                  "model": {
+                    "type": "string",
+                    "description": "Override the default model (claude-opus-4-7). Use claude-sonnet-4-6 for faster responses or claude-haiku-4-5 for cheaper.",
+                    "default": "claude-opus-4-7"
+                  },
+                  "maxSteps": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 20,
+                    "default": 8,
+                    "description": "Maximum number of diagnostic steps the agent can take."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Diagnosis complete. The envelope is returned whether the agent found an answer or got stuck.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON or schema violation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Hit the 60-second hard budget. A partial envelope may be returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AskResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/support/docs-search": {
+      "post": {
+        "summary": "Search Firecrawl documentation using AI",
+        "operationId": "supportDocsSearch",
+        "tags": ["Support"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["question"],
+                "properties": {
+                  "question": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 8000,
+                    "description": "The question to answer from Firecrawl's public documentation."
+                  },
+                  "model": {
+                    "type": "string",
+                    "description": "Override the default model (claude-sonnet-4-6).",
+                    "default": "claude-sonnet-4-6"
+                  },
+                  "maxSteps": {
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 4,
+                    "default": 3,
+                    "description": "Maximum number of search steps."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Docs-grounded answer returned successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocsSearchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON or schema violation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5331,6 +5504,149 @@
           "tokensUsed": {
             "type": "integer",
             "description": "The number of tokens used by the extract job. Only available if the job is completed."
+          }
+        }
+      },
+      "AskResponse": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "description": "Unique identifier for this request."
+          },
+          "answer": {
+            "type": "string",
+            "description": "2-4 sentence prose covering what's wrong and the fix."
+          },
+          "confidence": {
+            "type": "string",
+            "enum": ["high", "medium", "low"],
+            "description": "Agent's confidence in the diagnosis."
+          },
+          "fixParameters": {
+            "type": "object",
+            "nullable": true,
+            "description": "Machine-actionable API parameters to apply the recommended fix. Null if no fix applies."
+          },
+          "validation": {
+            "type": "object",
+            "nullable": true,
+            "description": "Whether the agent tested the fix against the live Firecrawl API.",
+            "properties": {
+              "tested": {
+                "type": "boolean"
+              },
+              "result": {
+                "type": "string",
+                "enum": ["success", "failure", "skipped"]
+              },
+              "evidence": {
+                "type": "string"
+              }
+            }
+          },
+          "evidence": {
+            "type": "array",
+            "description": "Tool calls made during diagnosis and their summaries.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tool": {
+                  "type": "string"
+                },
+                "rationale": {
+                  "type": "string"
+                },
+                "summary": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "kbCitations": {
+            "type": "array",
+            "description": "References to relevant documentation pages.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "feedback": {
+            "type": "string",
+            "nullable": true,
+            "description": "Stuck signal when the agent cannot help. Null on success."
+          },
+          "usage": {
+            "type": "object",
+            "description": "Token consumption for this request.",
+            "properties": {
+              "inputTokens": {
+                "type": "integer"
+              },
+              "outputTokens": {
+                "type": "integer"
+              },
+              "totalTokens": {
+                "type": "integer"
+              }
+            }
+          },
+          "durationMs": {
+            "type": "integer",
+            "description": "Total execution time in milliseconds."
+          },
+          "model": {
+            "type": "string",
+            "description": "Model used for this run."
+          }
+        }
+      },
+      "DocsSearchResponse": {
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "type": "string",
+            "description": "Unique identifier for this request."
+          },
+          "answer": {
+            "type": "string",
+            "description": "Concise answer grounded in Firecrawl's public documentation."
+          },
+          "evidence": {
+            "type": "array",
+            "description": "Documentation pages referenced in the answer.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "pathOrUrl": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "inputTokens": {
+                "type": "integer"
+              },
+              "outputTokens": {
+                "type": "integer"
+              },
+              "totalTokens": {
+                "type": "integer"
+              }
+            }
+          },
+          "durationMs": {
+            "type": "integer",
+            "description": "Total execution time in milliseconds."
+          },
+          "model": {
+            "type": "string",
+            "description": "Model used for this run."
           }
         }
       }
