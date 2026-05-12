@@ -31,7 +31,10 @@ client = Firecrawl(api_key=os.environ.get("FIRECRAWL_API_KEY"))
 
 * `search` : à utiliser lorsque vous partez d’une requête et avez besoin de découvrir des résultats.
 * `scrape` : à utiliser lorsque vous avez déjà une URL et souhaitez récupérer le contenu de la page.
-* `interact` : à utiliser lorsque la page nécessite des clics, des formulaires ou des actions du navigateur après le scraping.
+* `interact` : à utiliser lorsque la page nécessite des clics, des formulaires ou des actions du navigateur après le scrape.
+
+- `support/ask` : à utiliser lorsqu’un appel à l’API Firecrawl échoue ou renvoie des résultats inattendus et que vous avez besoin d’un diagnostic.
+- `support/docs-search` : à utiliser lorsque vous devez consulter la documentation Firecrawl.
 
 <div id="search">
   ## Recherche
@@ -239,12 +242,16 @@ doc = client.scrape(
     * `"attributes"`: extraction d’attributs
     * `"branding"`: sortie du profil de branding
     * `"audio"`: extraction audio
+    * `"video"`: extraction vidéo
   * Types de format uniquement sous forme d’objet :
     * `{"type": "json", ...}`: extraction JSON. Utilisez un objet, et non la chaîne simple `"json"`.
-    * `{"type": "query", "prompt": "..."}`: sortie de questions-réponses. Utilisez un objet, et non la chaîne simple `"query"`.
+    * `{"type": "question", "question": "..."}`: sortie de questions-réponses.
+    * `{"type": "highlights", "query": "..."}`: sortie de texte source pertinent.
   * Champs de l’objet de format :
-    * `type`: l’une des chaînes de format ci-dessus, ou `"json"` / `"query"` pour les formats uniquement sous forme d’objet
-    * `prompt`: pour `type: "query"` et facultatif pour `type: "json"`
+    * `type`: l’une des chaînes de format ci-dessus, ou `"json"`, `"question"` ou `"highlights"` pour les formats uniquement sous forme d’objet
+    * `question`: pour `type: "question"`
+    * `query`: pour `type: "highlights"`
+    * `prompt`: facultatif pour `type: "json"`
     * `schema`: schéma JSON pour `type: "json"` ou pour le mode JSON du suivi des modifications
     * `modes`: tableau de `"git-diff"` ou `"json"` pour `type: "changeTracking"`
     * `tag`: balise de suivi des modifications pour `type: "changeTracking"`
@@ -421,6 +428,145 @@ result = client.interact(
 </div>
 
 Renvoie `BrowserExecuteResponse` : `success`, `live_view_url` (facultatif), `interactive_live_view_url`, `output`, `stdout`, `result`, `stderr`, `exit_code`, `killed`, `error` (le camelCase de l’API est normalisé en snake&#95;case dans le modèle).
+
+<div id="ask-agentic-debugging">
+  ## Ask (Débogage par agent)
+</div>
+
+<div id="why-use-it">
+  ### Pourquoi l&#39;utiliser
+</div>
+
+Utilisez `ask` lorsqu&#39;un appel à l&#39;API Firecrawl échoue ou renvoie des résultats inattendus. L&#39;agent d&#39;assistance IA diagnostique le problème, propose les paramètres à corriger et, si besoin, valide la correction sur l&#39;API réelle. Latence typique : 15-30 secondes.
+
+<div id="preferred-sdk-method">
+  ### Méthode recommandée du SDK
+</div>
+
+Pas encore disponible dans le SDK Python. Utilisez directement `requests` ou `httpx`.
+
+<div id="simple-example">
+  ### Exemple simple
+</div>
+
+```py
+import requests
+
+response = requests.post(
+    "https://api.firecrawl.dev/v2/support/ask",
+    headers={
+        "Authorization": f"Bearer {os.environ['FIRECRAWL_API_KEY']}",
+        "Content-Type": "application/json",
+    },
+    json={"question": "my scrape returned empty markdown for https://example.com"},
+)
+result = response.json()
+print(result["answer"])
+print(result["fixParameters"])
+```
+
+<div id="complex-example">
+  ### Exemple complexe
+</div>
+
+```py
+import requests
+
+response = requests.post(
+    "https://api.firecrawl.dev/v2/support/ask",
+    headers={
+        "Authorization": f"Bearer {os.environ['FIRECRAWL_API_KEY']}",
+        "Content-Type": "application/json",
+    },
+    json={
+        "question": "crawl returned 3 pages but I expected 50",
+        "rationale": "user is on their third failed crawl attempt today",
+        "context": {"userPlan": "standard", "retryCount": 3},
+    },
+)
+result = response.json()
+```
+
+<div id="agent-retry-pattern">
+  ### Stratégie de nouvelle tentative de l’agent
+</div>
+
+```py
+from firecrawl import Firecrawl
+import requests, os
+
+client = Firecrawl(api_key=os.environ["FIRECRAWL_API_KEY"])
+
+doc = client.scrape("https://example.com/pricing", formats=["markdown"])
+
+if not doc.markdown or len(doc.markdown) < 100:
+    diagnosis = requests.post(
+        "https://api.firecrawl.dev/v2/support/ask",
+        headers={
+            "Authorization": f"Bearer {os.environ['FIRECRAWL_API_KEY']}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "question": f"scrape returned only {len(doc.markdown or '')} chars for https://example.com/pricing",
+        },
+    ).json()
+
+    if diagnosis.get("fixParameters"):
+        doc = client.scrape(
+            "https://example.com/pricing",
+            formats=["markdown"],
+            **diagnosis["fixParameters"],
+        )
+```
+
+<div id="parameters">
+  ### Paramètres
+</div>
+
+* `question`
+  * Type : str (requis, 1-8000 caractères)
+  * À utiliser lorsque : vous devez décrire le problème.
+
+* `rationale`
+  * Type : str (1-2000 caractères)
+  * À utiliser lorsque : vous êtes un agent IA qui appelle au nom d’un utilisateur.
+
+* `context`
+  * Type : dict (forme libre)
+  * À utiliser lorsque : vous souhaitez transmettre des métadonnées dans le prompt de débogage.
+
+<div id="docs-search">
+  ## Recherche dans la documentation
+</div>
+
+### Pourquoi l’utiliser
+
+Utilisez docs-search pour rechercher dans la documentation de Firecrawl.
+
+<div id="simple-example">
+  ### Exemple simple
+</div>
+
+```py
+import requests
+
+FIRECRAWL_API_KEY = "fc-YOUR_API_KEY"
+
+response = requests.post(
+    "https://api.firecrawl.dev/v2/support/docs-search",
+    headers={"Authorization": f"Bearer {FIRECRAWL_API_KEY}"},
+    json={"question": "how do I verify webhook signatures?"},
+)
+print(response.json()["answer"])
+```
+
+<div id="parameters">
+  ### Paramètres
+</div>
+
+* `question`
+  * Type : str (obligatoire, 1-8000 caractères)
+  * À utiliser lorsque : vous avez besoin d’une réponse basée sur la documentation.
 
 <div id="notes">
   ## Remarques

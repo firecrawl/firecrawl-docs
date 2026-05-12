@@ -26,6 +26,8 @@ client = Firecrawl(api_key=os.environ.get("FIRECRAWL_API_KEY"))
 - `search`: use when you start with a query and need discovery.
 - `scrape`: use when you already have a URL and want page content.
 - `interact`: use when the page needs clicks, forms, or post-scrape browser actions.
+- `support/ask`: use when a Firecrawl API call fails or returns unexpected results and you need a diagnosis.
+- `support/docs-search`: use when you need to look up Firecrawl documentation.
 
 ## Search
 
@@ -209,12 +211,16 @@ doc = client.scrape(
     - `"attributes"`: attribute extraction
     - `"branding"`: branding profile output
     - `"audio"`: audio extraction
+    - `"video"`: video extraction
   - Object-only format types:
     - `{"type": "json", ...}`: JSON extraction. Use an object, not the plain string `"json"`.
-    - `{"type": "query", "prompt": "..."}`: question-answer output. Use an object, not the plain string `"query"`.
+    - `{"type": "question", "question": "..."}`: question-answer output.
+    - `{"type": "highlights", "query": "..."}`: relevant source-text output.
   - Format object fields:
-    - `type`: one of the format strings above, or `"json"` / `"query"` for object-only formats
-    - `prompt`: for `type: "query"` and optional for `type: "json"`
+    - `type`: one of the format strings above, or `"json"`, `"question"`, or `"highlights"` for object-only formats
+    - `question`: for `type: "question"`
+    - `query`: for `type: "highlights"`
+    - `prompt`: optional for `type: "json"`
     - `schema`: JSON schema for `type: "json"` or for change tracking JSON mode
     - `modes`: array of `"git-diff"` or `"json"` for `type: "changeTracking"`
     - `tag`: change tracking tag for `type: "changeTracking"`
@@ -377,6 +383,125 @@ result = client.interact(
 ### Return value
 
 Returns `BrowserExecuteResponse`: `success`, optional `live_view_url`, `interactive_live_view_url`, `output`, `stdout`, `result`, `stderr`, `exit_code`, `killed`, `error` (API camelCase is normalized to snake_case on the model).
+
+## Ask (Agentic Debugging)
+
+### Why use it
+
+Use ask when a Firecrawl API call fails or returns unexpected results. The AI support agent diagnoses the issue, proposes fix parameters, and optionally validates the fix against the live API. Typical latency: 15-30 seconds.
+
+### Preferred SDK method
+
+Not yet available in the Python SDK. Use `requests` or `httpx` directly.
+
+### Simple Example
+
+```py
+import requests
+
+response = requests.post(
+    "https://api.firecrawl.dev/v2/support/ask",
+    headers={
+        "Authorization": f"Bearer {os.environ['FIRECRAWL_API_KEY']}",
+        "Content-Type": "application/json",
+    },
+    json={"question": "my scrape returned empty markdown for https://example.com"},
+)
+result = response.json()
+print(result["answer"])
+print(result["fixParameters"])
+```
+
+### Complex Example
+
+```py
+import requests
+
+response = requests.post(
+    "https://api.firecrawl.dev/v2/support/ask",
+    headers={
+        "Authorization": f"Bearer {os.environ['FIRECRAWL_API_KEY']}",
+        "Content-Type": "application/json",
+    },
+    json={
+        "question": "crawl returned 3 pages but I expected 50",
+        "rationale": "user is on their third failed crawl attempt today",
+        "context": {"userPlan": "standard", "retryCount": 3},
+    },
+)
+result = response.json()
+```
+
+### Agent retry pattern
+
+```py
+from firecrawl import Firecrawl
+import requests, os
+
+client = Firecrawl(api_key=os.environ["FIRECRAWL_API_KEY"])
+
+doc = client.scrape("https://example.com/pricing", formats=["markdown"])
+
+if not doc.markdown or len(doc.markdown) < 100:
+    diagnosis = requests.post(
+        "https://api.firecrawl.dev/v2/support/ask",
+        headers={
+            "Authorization": f"Bearer {os.environ['FIRECRAWL_API_KEY']}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "question": f"scrape returned only {len(doc.markdown or '')} chars for https://example.com/pricing",
+        },
+    ).json()
+
+    if diagnosis.get("fixParameters"):
+        doc = client.scrape(
+            "https://example.com/pricing",
+            formats=["markdown"],
+            **diagnosis["fixParameters"],
+        )
+```
+
+### Parameters
+
+- `question`
+  - Type: str (required, 1-8000 chars)
+  - Use when: you need to describe the issue.
+
+- `rationale`
+  - Type: str (1-2000 chars)
+  - Use when: you are an AI agent calling on behalf of a user.
+
+- `context`
+  - Type: dict (free-form)
+  - Use when: you want to pass metadata into the debugging prompt.
+
+## Docs Search
+
+### Why use it
+
+Use docs-search to look up Firecrawl documentation.
+
+### Simple Example
+
+```py
+import requests
+
+FIRECRAWL_API_KEY = "fc-YOUR_API_KEY"
+
+response = requests.post(
+    "https://api.firecrawl.dev/v2/support/docs-search",
+    headers={"Authorization": f"Bearer {FIRECRAWL_API_KEY}"},
+    json={"question": "how do I verify webhook signatures?"},
+)
+print(response.json()["answer"])
+```
+
+### Parameters
+
+- `question`
+  - Type: str (required, 1-8000 chars)
+  - Use when: you need a docs-grounded answer.
 
 ## Notes
 

@@ -32,6 +32,8 @@ client = Firecrawl(api_key=os.environ.get("FIRECRAWL_API_KEY"))
 * `search`: use quando você começa com uma consulta e precisa descobrir resultados.
 * `scrape`: use quando você já tem uma URL e quer o conteúdo da página.
 * `interact`: use quando a página exige cliques, formulários ou ações no navegador após o scraping.
+* `support/ask`: use quando uma chamada da API do Firecrawl falha ou retorna resultados inesperados e você precisa de um diagnóstico.
+* `support/docs-search`: use quando você precisa consultar a documentação do Firecrawl.
 
 <div id="search">
   ## Search
@@ -241,12 +243,16 @@ doc = client.scrape(
     * `"attributes"`: extração de atributos
     * `"branding"`: resultado do perfil de branding
     * `"audio"`: extração de áudio
+    * `"video"`: extração de vídeo
   * Tipos de formato somente por objeto:
     * `{"type": "json", ...}`: extração JSON. Use um objeto, não a string simples `"json"`.
-    * `{"type": "query", "prompt": "..."}`: resultado de perguntas e respostas. Use um objeto, não a string simples `"query"`.
+    * `{"type": "question", "question": "..."}`: resultado de perguntas e respostas.
+    * `{"type": "highlights", "query": "..."}`: resultado de trechos relevantes do texto-fonte.
   * Campos do objeto de formato:
-    * `type`: uma das strings de formato acima, ou `"json"` / `"query"` para formatos somente por objeto
-    * `prompt`: para `type: "query"` e opcional para `type: "json"`
+    * `type`: uma das strings de formato acima, ou `"json"`, `"question"` ou `"highlights"` para formatos somente por objeto
+    * `question`: para `type: "question"`
+    * `query`: para `type: "highlights"`
+    * `prompt`: opcional para `type: "json"`
     * `schema`: schema JSON para `type: "json"` ou para o modo JSON de rastreamento de mudanças
     * `modes`: array de `"git-diff"` ou `"json"` para `type: "changeTracking"`
     * `tag`: tag de rastreamento de mudanças para `type: "changeTracking"`
@@ -289,19 +295,18 @@ doc = client.scrape(
     * `{ "type": "pdf", "mode": "fast" | "auto" | "ocr", "max_pages": int }`: opções do parser de PDF
 
 * `ações`
-  * `ações`
-    * Tipo: lista de objetos de ação
-    * Use quando: precisar de ações leves antes do scraping.
-    * Tipos de ação confirmados:
-      * `wait`: `milliseconds` ou `selector` obrigatório
-      * `screenshot`: `full_page`, `quality`, `viewport` opcionais
-      * `click`: `selector` obrigatório
-      * `write`: `text` obrigatório (clique primeiro para focar o campo de entrada)
-      * `press`: `key` obrigatório
-      * `scroll`: `direction` (`up` ou `down`) obrigatório, `selector` opcional
-      * `scrape`: nenhum campo adicional
-      * `executeJavascript`: `script` obrigatório
-      * `pdf`: `format` (A0, A1, A2, A3, A4, A5, A6, Letter, Legal, Tabloid, Ledger), `landscape`, `scale` opcionais
+  * Tipo: lista de objetos de ação
+  * Use quando: precisar de ações leves antes do scraping.
+  * Tipos de ação confirmados:
+    * `wait`: `milliseconds` ou `selector` obrigatório
+    * `screenshot`: `full_page`, `quality`, `viewport` opcionais
+    * `click`: `selector` obrigatório
+    * `write`: `text` obrigatório (clique primeiro para focar o campo de entrada)
+    * `press`: `key` obrigatório
+    * `scroll`: `direction` (`up` ou `down`) obrigatório, `selector` opcional
+    * `scrape`: nenhum campo adicional
+    * `executeJavascript`: `script` obrigatório
+    * `pdf`: `format` (A0, A1, A2, A3, A4, A5, A6, Letter, Legal, Tabloid, Ledger), `landscape`, `scale` opcionais
 
 * `location`
   * Tipo: dict com `country` e `languages`
@@ -426,6 +431,143 @@ result = client.interact(
 </div>
 
 Retorna `BrowserExecuteResponse`: `success`, `live_view_url` (opcional), `interactive_live_view_url`, `output`, `stdout`, `result`, `stderr`, `exit_code`, `killed`, `error` (o camelCase da API é normalizado para snake&#95;case no modelo).
+
+<div id="ask-agentic-debugging">
+  ## Ask (Depuração com agentes)
+</div>
+
+<div id="why-use-it">
+  ### Por que usar
+</div>
+
+Use o ask quando uma chamada da API do Firecrawl falhar ou retornar resultados inesperados. O agente de suporte com IA diagnostica o problema, sugere parâmetros de correção e, opcionalmente, valida a correção na API em produção. Latência típica: 15 a 30 segundos.
+
+<div id="preferred-sdk-method">
+  ### Método recomendado do SDK
+</div>
+
+Ainda não está disponível no SDK Python. Use `requests` ou `httpx` diretamente.
+
+### Exemplo básico
+
+```py
+import requests
+
+response = requests.post(
+    "https://api.firecrawl.dev/v2/support/ask",
+    headers={
+        "Authorization": f"Bearer {os.environ['FIRECRAWL_API_KEY']}",
+        "Content-Type": "application/json",
+    },
+    json={"question": "my scrape returned empty markdown for https://example.com"},
+)
+result = response.json()
+print(result["answer"])
+print(result["fixParameters"])
+```
+
+<div id="complex-example">
+  ### Exemplo complexo
+</div>
+
+```py
+import requests
+
+response = requests.post(
+    "https://api.firecrawl.dev/v2/support/ask",
+    headers={
+        "Authorization": f"Bearer {os.environ['FIRECRAWL_API_KEY']}",
+        "Content-Type": "application/json",
+    },
+    json={
+        "question": "crawl returned 3 pages but I expected 50",
+        "rationale": "user is on their third failed crawl attempt today",
+        "context": {"userPlan": "standard", "retryCount": 3},
+    },
+)
+result = response.json()
+```
+
+<div id="agent-retry-pattern">
+  ### Padrão de retentativa do agente
+</div>
+
+```py
+from firecrawl import Firecrawl
+import requests, os
+
+client = Firecrawl(api_key=os.environ["FIRECRAWL_API_KEY"])
+
+doc = client.scrape("https://example.com/pricing", formats=["markdown"])
+
+if not doc.markdown or len(doc.markdown) < 100:
+    diagnosis = requests.post(
+        "https://api.firecrawl.dev/v2/support/ask",
+        headers={
+            "Authorization": f"Bearer {os.environ['FIRECRAWL_API_KEY']}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "question": f"scrape returned only {len(doc.markdown or '')} chars for https://example.com/pricing",
+        },
+    ).json()
+
+    if diagnosis.get("fixParameters"):
+        doc = client.scrape(
+            "https://example.com/pricing",
+            formats=["markdown"],
+            **diagnosis["fixParameters"],
+        )
+```
+
+<div id="parameters">
+  ### Parâmetros
+</div>
+
+* `question`
+  * Tipo: str (obrigatório, 1-8000 caracteres)
+  * Use quando: você precisar descrever o problema.
+
+* `rationale`
+  * Tipo: str (1-2000 caracteres)
+  * Use quando: você for um agente de IA fazendo uma chamada em nome de um usuário.
+
+* `context`
+  * Tipo: dict (formato livre)
+  * Use quando: você quiser passar metadados para o prompt de depuração.
+
+<div id="docs-search">
+  ## Busca na documentação
+</div>
+
+<div id="why-use-it">
+  ### Por que usar
+</div>
+
+Use `docs-search` para consultar a documentação do Firecrawl.
+
+### Exemplo básico
+
+```py
+import requests
+
+FIRECRAWL_API_KEY = "fc-YOUR_API_KEY"
+
+response = requests.post(
+    "https://api.firecrawl.dev/v2/support/docs-search",
+    headers={"Authorization": f"Bearer {FIRECRAWL_API_KEY}"},
+    json={"question": "how do I verify webhook signatures?"},
+)
+print(response.json()["answer"])
+```
+
+<div id="parameters">
+  ### Parâmetros
+</div>
+
+* `question`
+  * Tipo: str (obrigatório, 1-8000 caracteres)
+  * Use quando: precisar de uma resposta baseada na documentação.
 
 <div id="notes">
   ## Notas

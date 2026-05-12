@@ -1,0 +1,249 @@
+---
+title: "Ask"
+description: "为你的 Firecrawl 集成提供面向代理的调试支持"
+og:title: "Ask | Firecrawl"
+og:description: "调试抓取问题，并通过一次 API 调用获取经过验证的修复方案。"
+sidebarTitle: "Ask"
+icon: "messages-question"
+---
+
+Firecrawl `/support/ask` 是一个以 API 形式提供的 AI 支持代理。描述你遇到的问题，即可获得经过验证的诊断结果和可执行的修复参数，通常只需 15–30 秒。
+
+**你可以把 `/support/ask` 看作一位随时待命的 Firecrawl 高级工程师，专门为你的代理排障。**
+
+<Info>
+  Ask API 主要面向 **AI 代理调用方** 设计。如果你正在构建使用 Firecrawl 进行抓取、爬取或数据提取的代理，建议将 `/support/ask` 接入你的错误处理流程，以便自主解决问题。
+</Info>
+
+<div id="two-endpoints">
+  ## 两个端点
+</div>
+
+| 端点                          | 认证                  | 适用对象    | 功能说明                  |
+| --------------------------- | ------------------- | ------- | --------------------- |
+| `POST /support/ask`         | 你的 Firecrawl API 密钥 | 你的代理和应用 | 面向你团队范围的完整诊断流程        |
+| `POST /support/docs-search` | 你的 Firecrawl API 密钥 | 你的代理和应用 | 基于 Firecrawl 公开文档提供答案 |
+
+<div id="quick-start">
+  ## 快速开始
+</div>
+
+<div id="debug-a-failing-crawl">
+  ### 调试失败的爬取任务
+</div>
+
+```bash
+curl -X POST https://api.firecrawl.dev/v2/support/ask \
+  -H "Authorization: Bearer fc-YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "my crawl returned 3 pages but I expected 50"
+  }'
+```
+
+<div id="search-the-docs">
+  ### 搜索文档
+</div>
+
+```bash
+curl -X POST https://api.firecrawl.dev/v2/support/docs-search \
+  -H "Authorization: Bearer fc-YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "how do I set up webhook signature verification?"
+  }'
+```
+
+<div id="how-it-works">
+  ## 工作原理
+</div>
+
+当你调用 `/support/ask` 时，AI 代理会：
+
+1. **收集证据** — 并行查看你的任务日志、账户状态、额度使用情况以及相关文档
+2. **诊断问题** — 综合所有证据进行推理，找出根本原因
+3. **提出修复方案** — 生成机器可直接执行的 `fixParameters`，你可以将其直接应用到下一次 API 调用中
+4. **验证修复方案** — 在可能的情况下，在真实的 Firecrawl API 上测试该修复方案 (例如使用调整后的参数重试抓取) ，并报告结果
+
+<div id="using-ask-in-your-agent">
+  ## 在你的代理中使用 Ask
+</div>
+
+关键设计模式：当 Firecrawl API 调用失败或返回非预期结果时，调用 `/support/ask`，然后使用 `fixParameters` 重试。
+
+<div id="python-example">
+  ### Python 示例
+</div>
+
+```python
+import requests
+
+FIRECRAWL_API_KEY = "fc-YOUR_API_KEY"
+
+def diagnose_firecrawl_issue(question, rationale=None):
+    """Call the Firecrawl Ask API to debug an issue."""
+    payload = {"question": question}
+    if rationale:
+        payload["rationale"] = rationale
+
+    response = requests.post(
+        "https://api.firecrawl.dev/v2/support/ask",
+        headers={
+            "Authorization": f"Bearer {FIRECRAWL_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+    )
+    return response.json()
+
+
+# 示例：调试返回空内容的爬取请求
+result = diagnose_firecrawl_issue(
+    question="scrape returned empty markdown for https://example.com",
+    rationale="user needs product pricing data for competitive analysis",
+)
+
+print(result["answer"])
+print(result["fixParameters"])  # 例如，{"waitFor": 5000, "actions": [...]}
+print(result["confidence"])     # "high"、"medium" 或 "low"
+```
+
+<div id="nodejs-example">
+  ### Node.js 示例
+</div>
+
+```javascript
+async function diagnoseFirecrawlIssue(question, rationale) {
+  const response = await fetch(
+    "https://api.firecrawl.dev/v2/support/ask",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.FIRECRAWL_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ question, rationale }),
+    }
+  );
+  return response.json();
+}
+
+// 示例：调试提前停止的爬取任务
+const result = await diagnoseFirecrawlIssue(
+  "my crawl returned 3 pages but I expected 50",
+  "user is on their third failed crawl attempt today"
+);
+
+console.log(result.answer);
+console.log(result.fixParameters);
+```
+
+<div id="agent-retry-pattern">
+  ### 代理重试模式
+</div>
+
+```python
+from firecrawl import Firecrawl
+
+client = Firecrawl(api_key="fc-YOUR_API_KEY")
+
+# 步骤 1：尝试抓取
+doc = client.scrape("https://example.com/pricing", formats=["markdown"])
+
+if not doc.markdown or len(doc.markdown) < 100:
+    # 步骤 2：请求调试帮助
+    diagnosis = diagnose_firecrawl_issue(
+        question=f"scrape returned only {len(doc.markdown or '')} chars of markdown for https://example.com/pricing",
+    )
+
+    # 步骤 3：应用修复参数并重试
+    if diagnosis.get("fixParameters"):
+        doc = client.scrape(
+            "https://example.com/pricing",
+            formats=["markdown"],
+            **diagnosis["fixParameters"],
+        )
+```
+
+<div id="parameters">
+  ## 参数
+</div>
+
+<div id="supportask">
+  ### `/support/ask`
+</div>
+
+| 参数          | 类型     | 必填 | 描述                                   |
+| ----------- | ------ | -- | ------------------------------------ |
+| `question`  | string | 是  | 要调试的问题 (1–8,000 个字符)                 |
+| `rationale` | string | 否  | 建议 AI 调用方提供。说明最终用户想要达成的目标，有助于优先收集证据。 |
+| `context`   | object | 否  | 来自你的代理的自由格式元数据，会包含在调试 prompt 中       |
+
+<div id="supportdocs-search">
+  ### `/support/docs-search`
+</div>
+
+| 参数         | 类型     | 必填 | 描述                     |
+| ---------- | ------ | -- | ---------------------- |
+| `question` | string | 是  | 需要回答的问题 (1–8,000 个字符)  |
+
+<div id="response">
+  ## 响应
+</div>
+
+<div id="supportask-response">
+  ### `/support/ask` 响应
+</div>
+
+```json
+{
+  "requestId": "req_...",
+  "answer": "<2-4 sentence prose diagnosis of the issue plus the recommended fix.>",
+  "confidence": "high",
+  "fixParameters": { "<param>": "<value>" },
+  "validation": {
+    "tested": true,
+    "result": "success",
+    "evidence": "<short summary of the validation tool call the agent ran to confirm the fix>"
+  },
+  "feedback": null,
+  "durationMs": 18432
+}
+```
+
+实际的 `answer`、`fixParameters` 和 `validation.evidence` 会由代理根据你本次运行的具体情况在每次请求时生成；上面的示例展示的是响应的结构，而不是真实的诊断结果。
+
+<div id="supportdocs-search-response">
+  ### `/support/docs-search` 响应
+</div>
+
+```json
+{
+  "requestId": "req_...",
+  "answer": "The signature is sent in the X-Firecrawl-Signature header...",
+  "evidence": [
+    { "pathOrUrl": "webhooks/security.mdx#L1-L52", "reason": "..." }
+  ],
+  "usage": { "inputTokens": 4356, "outputTokens": 688, "totalTokens": 5044 },
+  "durationMs": 11252
+}
+```
+
+<div id="performance">
+  ## 性能
+</div>
+
+| 指标 | 典型值     | 最大值         |
+| -- | ------- | ----------- |
+| 延迟 | 15–30 秒 | 60 秒 (硬上限)  |
+
+<div id="api-reference">
+  ## API 参考
+</div>
+
+* [Ask 端点 API 参考](/zh/api-reference/endpoint/ask)
+* [Docs Search 端点 API 参考](/zh/api-reference/endpoint/docs-search)
+
+有反馈或需要帮助？请发送邮件至 [help@firecrawl.com](mailto:help@firecrawl.com)。
+
+> 你是需要 Firecrawl API 密钥的 AI 代理吗？请参见 [firecrawl.dev/agent-onboarding/SKILL.md](https://www.firecrawl.dev/agent-onboarding/SKILL.md) 了解自动化接入说明。
