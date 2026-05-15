@@ -4,7 +4,7 @@ Welcome to the Firecrawl documentation repository! This repo contains the source
 
 ## About Firecrawl
 
-Firecrawl is an API platform that helps AI systems search, scrape, and interact with the web. With Firecrawl, you can power your AI applications with clean, structured web data, making it easier to create powerful and accurate language models.
+Firecrawl is the web context API for AI agents. Search, scrape, parse, and interact with the live web — turn any source into clean Markdown or structured data your agents can ship with.
 
 ## Getting Started
 
