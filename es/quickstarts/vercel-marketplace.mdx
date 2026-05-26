@@ -1,0 +1,201 @@
+---
+title: "Vercel Marketplace"
+description: "Instala Firecrawl desde Vercel Marketplace, vincúlalo a un proyecto y usa la `FIRECRAWL_API_KEY` inyectada en tu aplicación de Vercel."
+og:title: "Integración de Vercel Marketplace | Firecrawl"
+og:description: "Instala Firecrawl desde Vercel Marketplace, vincúlalo a un proyecto y usa la `FIRECRAWL_API_KEY` inyectada en tu aplicación de Vercel."
+---
+
+Firecrawl está disponible como una [integración nativa de Vercel Marketplace](https://vercel.com/marketplace/firecrawl). Al instalarla, se aprovisiona Firecrawl para tu proyecto de Vercel y se añade automáticamente `FIRECRAWL_API_KEY` a las variables de entorno del proyecto.
+
+Usa esta guía si quieres que la facturación de Firecrawl, la configuración de la clave de API y la configuración del proyecto se gestionen a través de Vercel.
+
+<div id="what-the-integration-does">
+  ## Qué hace la integración
+</div>
+
+Cuando instalas Firecrawl desde Vercel Marketplace, Vercel conecta Firecrawl a un proyecto seleccionado y pone la clave de API a disposición como variable de entorno.
+
+* Crea una cuenta de Firecrawl y una clave de API durante el proceso del Marketplace
+* Añade `FIRECRAWL_API_KEY` al entorno de tu proyecto de Vercel
+* Mantiene la facturación de Firecrawl en tu factura de Vercel
+* Te permite abrir Firecrawl desde Vercel una vez conectada la integración
+
+<Note>
+  Si ya tienes una clave de API de Firecrawl y quieres configurar Vercel manualmente, usa en su lugar el [inicio rápido de Función de Vercel](/es/quickstarts/vercel-functions).
+</Note>
+
+<div id="install-from-vercel">
+  ## Instalar desde Vercel
+</div>
+
+1. Abre la [página de Firecrawl en Vercel Marketplace](https://vercel.com/marketplace/firecrawl).
+2. Haz clic en **Conectar cuenta**.
+3. Selecciona el plan de Firecrawl que quieras usar.
+4. Selecciona el proyecto de Vercel que debe recibir la variable de entorno.
+5. Completa el flujo de instalación.
+
+Después de la instalación, vuelve a desplegar tu proyecto para que las Funciones de Vercel y el código del servidor del framework puedan leer la nueva variable de entorno.
+
+<div id="install-the-sdk">
+  ## Instala el SDK
+</div>
+
+En tu proyecto de Vercel, instala el SDK de Firecrawl para Node.js:
+
+```bash
+npm install @mendable/firecrawl-js
+```
+
+No necesitas pegar una clave de API en tu código. Lee `process.env.FIRECRAWL_API_KEY` en el servidor.
+
+<div id="scrape-a-page">
+  ## Hacer scraping de una página
+</div>
+
+Crea un Route Handler en `app/api/scrape/route.ts`:
+
+```typescript
+import { NextResponse } from "next/server";
+import Firecrawl from "@mendable/firecrawl-js";
+
+const firecrawl = new Firecrawl({
+  apiKey: process.env.FIRECRAWL_API_KEY,
+});
+
+export async function POST(request: Request) {
+  const { url } = await request.json();
+  const result = await firecrawl.scrape(url, {
+    formats: ["markdown"],
+  });
+
+  return NextResponse.json(result);
+}
+```
+
+Prueba la ruta tras el despliegue:
+
+```bash
+curl -X POST https://your-project.vercel.app/api/scrape \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.firecrawl.dev"}'
+```
+
+<div id="search-the-web">
+  ## Buscar en la web
+</div>
+
+Usa `search` cuando tu app necesite resultados web actualizados además del contenido de la página:
+
+```typescript
+import { NextResponse } from "next/server";
+import Firecrawl from "@mendable/firecrawl-js";
+
+const firecrawl = new Firecrawl({
+  apiKey: process.env.FIRECRAWL_API_KEY,
+});
+
+export async function POST(request: Request) {
+  const { query } = await request.json();
+  const results = await firecrawl.search(query, {
+    limit: 5,
+    scrapeOptions: {
+      formats: ["markdown"],
+    },
+  });
+
+  return NextResponse.json(results);
+}
+```
+
+<div id="interact-with-dynamic-pages">
+  ## Interactúa con páginas dinámicas
+</div>
+
+Usa `interact` cuando tu aplicación necesite hacer clic, desplazarse o rellenar formularios antes de extraer contenido.
+
+```typescript
+import { NextResponse } from "next/server";
+import Firecrawl from "@mendable/firecrawl-js";
+
+const firecrawl = new Firecrawl({
+  apiKey: process.env.FIRECRAWL_API_KEY,
+});
+
+export async function POST() {
+  const result = await firecrawl.scrape("https://news.ycombinator.com", {
+    formats: ["markdown"],
+  });
+  const scrapeId = result.metadata?.scrapeId;
+
+  if (!scrapeId) {
+    return NextResponse.json(
+      { error: "No interactive scrape session was created" },
+      { status: 500 }
+    );
+  }
+
+  const response = await firecrawl.interact(scrapeId, {
+    prompt: "Open the first story and summarize the page.",
+  });
+
+  await firecrawl.stopInteraction(scrapeId);
+
+  return NextResponse.json({ output: response.output });
+}
+```
+
+<Note>
+  Las interacciones más largas pueden superar los tiempos de espera cortos de los entornos serverless. Para flujos de trabajo de producción que puedan tardar más, ejecuta el trabajo en segundo plano o usa las API async de Firecrawl con webhooks.
+</Note>
+
+<div id="use-firecrawl-with-the-vercel-ai-sdk">
+  ## Usa Firecrawl con el Vercel AI SDK
+</div>
+
+Si estás desarrollando un agente con el [Vercel AI SDK](/es/developer-guides/llm-sdks-and-frameworks/vercel-ai-sdk), instala las herramientas del SDK de IA de Firecrawl:
+
+```bash
+npm install firecrawl-aisdk ai
+```
+
+Luego, pasa las herramientas de Firecrawl a tu modelo. La `FIRECRAWL_API_KEY` instalada desde Marketplace se lee del entorno.
+
+<Note>
+  El ejemplo de abajo usa el formato de cadena del modelo de Vercel AI Gateway. Configura por separado tu proveedor de modelos de AI SDK o las credenciales de AI Gateway.
+</Note>
+
+```typescript
+import { generateText, stepCountIs } from "ai";
+import { FirecrawlTools } from "firecrawl-aisdk";
+
+const { text } = await generateText({
+  model: "anthropic/claude-sonnet-4-5",
+  tools: FirecrawlTools(),
+  stopWhen: stepCountIs(20),
+  prompt: "Search for recent Vercel AI SDK examples, scrape the best sources, and summarize them.",
+});
+
+console.log(text);
+```
+
+<div id="next-steps">
+  ## Próximos pasos
+</div>
+
+<CardGroup cols={2}>
+  <Card title="Inicio rápido de Función de Vercel" icon="bolt" href="/es/quickstarts/vercel-functions">
+    Usa Firecrawl en Función de Vercel con configuración manual del entorno
+  </Card>
+
+  <Card title="Guía de Vercel AI SDK" icon="puzzle-piece" href="/es/developer-guides/llm-sdks-and-frameworks/vercel-ai-sdk">
+    Añade herramientas de Firecrawl a los agentes de Vercel AI SDK
+  </Card>
+
+  <Card title="Documentación de scraping" icon="file-lines" href="/es/features/scrape">
+    Convierte páginas web en Markdown, JSON, capturas de pantalla y más
+  </Card>
+
+  <Card title="Documentación de búsqueda" icon="magnifying-glass" href="/es/features/search">
+    Busca en la web y obtén el contenido de las páginas a partir de los resultados
+  </Card>
+</CardGroup>

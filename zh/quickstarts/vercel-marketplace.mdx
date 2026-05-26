@@ -1,0 +1,201 @@
+---
+title: "Vercel Marketplace"
+description: "从 Vercel Marketplace 安装 Firecrawl，将其关联到项目，并在你的 Vercel 应用中使用注入的 FIRECRAWL_API_KEY。"
+og:title: "Vercel Marketplace 集成 | Firecrawl"
+og:description: "从 Vercel Marketplace 安装 Firecrawl，将其关联到项目，并在你的 Vercel 应用中使用注入的 FIRECRAWL_API_KEY。"
+---
+
+Firecrawl 提供原生的 [Vercel Marketplace 集成](https://vercel.com/marketplace/firecrawl)。安装后，它会为你的 Vercel 项目配置 Firecrawl，并自动将 `FIRECRAWL_API_KEY` 添加到项目环境变量中。
+
+如果你希望通过 Vercel 完成 Firecrawl 的计费、API 密钥设置和项目配置，请参考本指南。
+
+<div id="what-the-integration-does">
+  ## 集成的作用
+</div>
+
+当你通过 Vercel Marketplace 安装 Firecrawl 时，Vercel 会将 Firecrawl 连接到所选项目，并将 API 密钥作为环境变量提供给你。
+
+* 通过 Marketplace 流程创建 Firecrawl 账户并提供 API 密钥
+* 将 `FIRECRAWL_API_KEY` 添加到你的 Vercel 项目环境变量中
+* 将 Firecrawl 的计费保留在你的 Vercel 账单中
+* 集成连接后，你可以直接从 Vercel 打开 Firecrawl
+
+<Note>
+  如果你已经有 Firecrawl API 密钥，并且想手动配置 Vercel，请改用 [Vercel Functions 快速入门](/zh/quickstarts/vercel-functions)。
+</Note>
+
+<div id="install-from-vercel">
+  ## 从 Vercel 安装
+</div>
+
+1. 打开 [Vercel Marketplace 上的 Firecrawl 页面](https://vercel.com/marketplace/firecrawl)。
+2. 点击 **连接账户**。
+3. 选择你想使用的 Firecrawl 套餐。
+4. 选择要接收该环境变量的 Vercel 项目。
+5. 完成安装流程。
+
+安装完成后，重新部署你的项目，以便 Vercel Functions 和框架的服务器端代码能够读取新的环境变量。
+
+<div id="install-the-sdk">
+  ## 安装 SDK
+</div>
+
+在你的 Vercel 项目中安装 Firecrawl Node SDK：
+
+```bash
+npm install @mendable/firecrawl-js
+```
+
+无需将 API 密钥粘贴到代码中。请在服务端读取 `process.env.FIRECRAWL_API_KEY`。
+
+<div id="scrape-a-page">
+  ## 抓取网页
+</div>
+
+在 `app/api/scrape/route.ts` 中创建一个路由处理程序：
+
+```typescript
+import { NextResponse } from "next/server";
+import Firecrawl from "@mendable/firecrawl-js";
+
+const firecrawl = new Firecrawl({
+  apiKey: process.env.FIRECRAWL_API_KEY,
+});
+
+export async function POST(request: Request) {
+  const { url } = await request.json();
+  const result = await firecrawl.scrape(url, {
+    formats: ["markdown"],
+  });
+
+  return NextResponse.json(result);
+}
+```
+
+部署完成后，测试该路由：
+
+```bash
+curl -X POST https://your-project.vercel.app/api/scrape \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.firecrawl.dev"}'
+```
+
+<div id="search-the-web">
+  ## 进行网页搜索
+</div>
+
+当你的应用需要最新的网页搜索结果以及页面内容时，使用 `search`：
+
+```typescript
+import { NextResponse } from "next/server";
+import Firecrawl from "@mendable/firecrawl-js";
+
+const firecrawl = new Firecrawl({
+  apiKey: process.env.FIRECRAWL_API_KEY,
+});
+
+export async function POST(request: Request) {
+  const { query } = await request.json();
+  const results = await firecrawl.search(query, {
+    limit: 5,
+    scrapeOptions: {
+      formats: ["markdown"],
+    },
+  });
+
+  return NextResponse.json(results);
+}
+```
+
+<div id="interact-with-dynamic-pages">
+  ## 与动态页面交互
+</div>
+
+当应用需要在提取内容前先点击、滚动或填写表单时，请使用 `interact`。
+
+```typescript
+import { NextResponse } from "next/server";
+import Firecrawl from "@mendable/firecrawl-js";
+
+const firecrawl = new Firecrawl({
+  apiKey: process.env.FIRECRAWL_API_KEY,
+});
+
+export async function POST() {
+  const result = await firecrawl.scrape("https://news.ycombinator.com", {
+    formats: ["markdown"],
+  });
+  const scrapeId = result.metadata?.scrapeId;
+
+  if (!scrapeId) {
+    return NextResponse.json(
+      { error: "No interactive scrape session was created" },
+      { status: 500 }
+    );
+  }
+
+  const response = await firecrawl.interact(scrapeId, {
+    prompt: "Open the first story and summarize the page.",
+  });
+
+  await firecrawl.stopInteraction(scrapeId);
+
+  return NextResponse.json({ output: response.output });
+}
+```
+
+<Note>
+  较长时间的交互可能会超过较短的无服务器超时时限。对于在生产环境中可能耗时更久的工作流，请将这类工作放到后台任务中运行，或使用 Firecrawl 的异步 API 并配合 Webhook。
+</Note>
+
+<div id="use-firecrawl-with-the-vercel-ai-sdk">
+  ## 将 Firecrawl 与 Vercel AI SDK 结合使用
+</div>
+
+如果你在使用 [Vercel AI SDK](/zh/developer-guides/llm-sdks-and-frameworks/vercel-ai-sdk) 构建代理，请安装 Firecrawl AI SDK 工具：
+
+```bash
+npm install firecrawl-aisdk ai
+```
+
+然后将 Firecrawl 工具传给你的模型。通过 Marketplace 安装的 `FIRECRAWL_API_KEY` 会从环境变量中读取。
+
+<Note>
+  以下示例使用 Vercel AI Gateway 的模型字符串格式。请分别配置你的 AI SDK 模型提供商或 AI Gateway 凭证。
+</Note>
+
+```typescript
+import { generateText, stepCountIs } from "ai";
+import { FirecrawlTools } from "firecrawl-aisdk";
+
+const { text } = await generateText({
+  model: "anthropic/claude-sonnet-4-5",
+  tools: FirecrawlTools(),
+  stopWhen: stepCountIs(20),
+  prompt: "Search for recent Vercel AI SDK examples, scrape the best sources, and summarize them.",
+});
+
+console.log(text);
+```
+
+<div id="next-steps">
+  ## 后续步骤
+</div>
+
+<CardGroup cols={2}>
+  <Card title="Vercel Functions 快速入门" icon="bolt" href="/zh/quickstarts/vercel-functions">
+    在 Vercel Functions 中手动配置环境并使用 Firecrawl
+  </Card>
+
+  <Card title="Vercel AI SDK 指南" icon="puzzle-piece" href="/zh/developer-guides/llm-sdks-and-frameworks/vercel-ai-sdk">
+    为 Vercel AI SDK 代理添加 Firecrawl 工具
+  </Card>
+
+  <Card title="Scrape 文档" icon="file-lines" href="/zh/features/scrape">
+    将网页转换为 Markdown、JSON、截图等格式
+  </Card>
+
+  <Card title="Search 文档" icon="magnifying-glass" href="/zh/features/search">
+    进行网页搜索，并从结果中获取页面内容
+  </Card>
+</CardGroup>
