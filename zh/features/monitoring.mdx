@@ -1,0 +1,305 @@
+---
+title: "监控"
+description: "设置定期抓取和爬取，检测内容变更，并接收 Webhook 或电子邮件通知"
+og:title: "监控 | Firecrawl"
+og:description: "设置定期抓取和爬取，检测内容变更，并接收 Webhook 或电子邮件通知"
+icon: "radar"
+---
+
+import CreateScrapeCURL from "/snippets/zh/v2/monitor/create/scrape/curl.mdx";
+import CreateScrapeNode from "/snippets/zh/v2/monitor/create/scrape/js.mdx";
+import CreateScrapePython from "/snippets/zh/v2/monitor/create/scrape/python.mdx";
+import CreateCrawlCURL from "/snippets/zh/v2/monitor/create/crawl/curl.mdx";
+import CreateCrawlNode from "/snippets/zh/v2/monitor/create/crawl/js.mdx";
+import CreateCrawlPython from "/snippets/zh/v2/monitor/create/crawl/python.mdx";
+import CreateJsonCURL from "/snippets/zh/v2/monitor/create/json/curl.mdx";
+import CreateJsonNode from "/snippets/zh/v2/monitor/create/json/js.mdx";
+import CreateJsonPython from "/snippets/zh/v2/monitor/create/json/python.mdx";
+import CreateOutput from "/snippets/zh/v2/monitor/create/output.mdx";
+import ScheduleCron from "/snippets/zh/v2/monitor/schedule/cron.mdx";
+import ScheduleText from "/snippets/zh/v2/monitor/schedule/text.mdx";
+import TargetScrape from "/snippets/zh/v2/monitor/target/scrape.mdx";
+import TargetCrawl from "/snippets/zh/v2/monitor/target/crawl.mdx";
+import TargetJsonMixed from "/snippets/zh/v2/monitor/target/json-mixed.mdx";
+import WebhookConfig from "/snippets/zh/v2/monitor/notification/webhook.mdx";
+import EmailConfig from "/snippets/zh/v2/monitor/notification/email.mdx";
+import PagePayload from "/snippets/zh/v2/monitor/notification/page-payload.mdx";
+import CheckCompletedPayload from "/snippets/zh/v2/monitor/notification/check-completed-payload.mdx";
+import GetCheckCURL from "/snippets/zh/v2/monitor/check/get/curl.mdx";
+import GetCheckNode from "/snippets/zh/v2/monitor/check/get/js.mdx";
+import GetCheckPython from "/snippets/zh/v2/monitor/check/get/python.mdx";
+import CheckOutputMarkdown from "/snippets/zh/v2/monitor/check/output/markdown.mdx";
+import CheckOutputJson from "/snippets/zh/v2/monitor/check/output/json.mdx";
+import CheckOutputMixed from "/snippets/zh/v2/monitor/check/output/mixed.mdx";
+import DiffMarkdown from "/snippets/zh/v2/monitor/diff/markdown.mdx";
+import DiffJson from "/snippets/zh/v2/monitor/diff/json.mdx";
+import DiffMixed from "/snippets/zh/v2/monitor/diff/mixed.mdx";
+
+Firecrawl 监控会定期执行抓取或爬取，并将每次结果与上一次保留的快照进行比较。你可以使用监控来跟踪产品页面、文档、博客、更新日志、竞争对手网站，或任何变化值得关注的页面。
+
+每次检查都会将页面级结果记录为 `same`、`new`、`changed`、`removed` 或 `error`。你可以在每个受监控页面处理完成时接收 Webhook，也可以在每次检查完成后接收一个 Webhook；还可以在发生更改或错误时接收电子邮件摘要，或组合使用这些通知方式。
+
+<Note>
+  监控功能依赖保留的快照和差异比较。不适用于启用 零数据保留 的团队。
+</Note>
+
+<div id="create-a-monitor">
+  ## 创建监控
+</div>
+
+为一个或多个指定 URL 创建抓取监控：
+
+<CodeGroup>
+  <CreateScrapePython />
+
+  <CreateScrapeNode />
+
+  <CreateScrapeCURL />
+</CodeGroup>
+
+创建爬取监控，以便在每次检查时，对爬取过程中发现的每个页面进行差异比对：
+
+<CodeGroup>
+  <CreateCrawlPython />
+
+  <CreateCrawlNode />
+
+  <CreateCrawlCURL />
+</CodeGroup>
+
+每次创建调用都会返回新创建的监控，其中包含规范化后的 cron、计算得出的 `nextRunAt` 和 `estimatedCreditsPerMonth`。启用判定后，`estimatedCreditsPerMonth` 是一个上限估算值，因为判定额度只会对实际发生变化且被判定的页面计费：
+
+<CreateOutput />
+
+你也可以通过 Firecrawl CLI 创建监控：
+
+```bash CLI
+firecrawl monitor create --name "Hacker News AI" \
+  --schedule "every 30 minutes" \
+  --goal "Alert when a new Hacker News story related to AI enters the top 10. Ignore changes to stories that are not about AI. Do not alert on changes outside the top 10." \
+  --page https://news.ycombinator.com
+```
+
+<div id="goals-and-judging">
+  ## 目标与判定
+</div>
+
+如果你只想在发生有意义的变化时收到告警，请添加一个通俗易懂的 `goal`。如果设置了 `goal` 但省略了 `judgeEnabled`，Firecrawl 会自动启用判定。判定会在已发生变化的页面上运行，并返回一个 `judgment`，其中包含 `meaningful`、`confidence`、`reason` 和 `meaningfulChanges`。
+
+如果你想先保存目标、暂时不对变化进行判定，请使用 `judgeEnabled: false`。只有当监控同时设置了 `judgeEnabled` 且 `goal` 非空时，判定器才会运行。
+
+<Note>
+  每次检查都会对底层抓取或爬取照常计费。如果启用了判定，判定器还会为其验证的每个已发生变化的页面额外收取 1 个额度。没有已发生变化页面的检查不会消耗判定额度。
+</Note>
+
+好的目标应简短且明确：说明什么情况应触发告警，重申任何范围限制，例如前 N 项、价格、角色类型、公司、地区、主题、状态或实体，并且仅在排除条件本身属于目标意图时才写入。如果目标范围较宽泛，就保持宽泛；例如，&quot;任何变化&quot; 不应再加入会掩盖变化的噪声过滤条件。
+
+例如，一个具有以下目标的监控：
+
+```text
+当与 AI 相关的新 Hacker News 故事进入前 10 时发出告警。忽略与 AI 无关的故事的变动。不对前 10 以外的变动发出告警。
+```
+
+可以从 `monitor.page` Webhook 中解析出有效结果：
+
+```ts
+app.post("/webhooks/firecrawl", async (req, res) => {
+  const event = req.body;
+
+  if (event.type !== "monitor.page") {
+    return res.sendStatus(204);
+  }
+
+  for (const page of event.data) {
+    if (!page.isMeaningful || !page.judgment?.meaningful) continue;
+
+    for (const change of page.judgment.meaningfulChanges ?? []) {
+      console.log(change.type, change.reason);
+      console.log("before:", change.before);
+      console.log("after:", change.after);
+    }
+  }
+
+  res.sendStatus(204);
+});
+```
+
+<div id="schedules">
+  ## 调度计划
+</div>
+
+调度计划可以使用 cron 表达式或简单的自然语言文本来设置。
+
+<CodeGroup>
+  <ScheduleCron />
+
+  <ScheduleText />
+</CodeGroup>
+
+支持的自然语言示例：
+
+* `every 30 minutes`
+* `every 15 minutes starting at :07`
+* `hourly`
+* `every 2 hours`
+* `daily`
+* `daily at 9:00`
+* `weekly`
+
+最短间隔为 15 分钟。API 响应始终返回规范化后的 cron 表达式。文本调度计划在转换为 cron 之前，会先按监控 ID 错开分布，因此多个监控不会在同一时刻同时运行。
+
+<div id="targets">
+  ## 目标
+</div>
+
+监控支持两种目标类型：
+
+* `scrape`：对 `urls` 中的每个 URL 执行一次抓取。
+* `crawl`：每次检查时，对 `url` 执行一次完整爬取，然后对所有发现的页面进行差异比对。
+
+每个监控可接受 1 到 50 个目标。`retentionDays` 的默认值为 `30`，最大可设置为 `365`。
+
+目标的抓取选项会传递到底层抓取任务。由监控触发的抓取默认将 `maxAge` 设为 `0`，因此除非你显式设置其他 `maxAge`，否则每次检查都会执行一次新的抓取。
+
+<TargetScrape />
+
+对于爬取目标，使用 `crawlOptions` 控制爬取行为，并使用 `scrapeOptions` 控制每个页面的抓取：
+
+<TargetCrawl />
+
+<div id="change-tracking">
+  ## 变更追踪
+</div>
+
+默认情况下，Firecrawl 会比较每个页面的 markdown 差异，并报告 `same`、`changed`、`new`、`removed` 或 `error`。如果你想检测**特定结构化字段** (如价格、标题、库存状态标记、列表中的条目等) 的变化，请在目标的 `scrapeOptions` 中添加 `changeTracking` 格式，并设置 `modes: ["json"]`，以启用 JSON 模式的变更追踪。
+
+<div id="markdown-mode-default">
+  ### Markdown 模式 (默认)
+</div>
+
+当 `scrapeOptions.formats` 仅为 `["markdown"]` 时，检查 响应中的每个已变更页面都会附带统一文本 diff，以及一个 [parseDiff](https://github.com/sergeyt/parse-diff) 风格的 AST：
+
+<DiffMarkdown />
+
+<div id="json-mode">
+  ### JSON 模式
+</div>
+
+传入 `changeTracking` 格式并设置 `modes: ["json"]`，同时提供一个 JSON schema (或用于描述你关注字段的 `prompt`) 。Firecrawl 会在每次检查时提取该 JSON，并输出一个**按字段区分的差异**，以字段路径作为键；此外还会附带一个包含当前完整提取结果的 `snapshot.json`，这样消费方就无需重新获取底层 抓取 结果。
+
+<CodeGroup>
+  <CreateJsonPython />
+
+  <CreateJsonNode />
+
+  <CreateJsonCURL />
+</CodeGroup>
+
+diff 载荷 如下所示——键是提取结果中的 JSON 路径，每个值都是一个 `{previous, current}` 对：
+
+<DiffJson />
+
+<Note>
+  即使被跟踪的字段都没有变化，但周围的 markdown 发生了变化，JSON 模式监控器仍会报告 `same`，除非你同时启用 git-diff (请参见下方的混合模式) 。该 diff 只关注 schema 中定义的字段。
+</Note>
+
+<div id="mixed-mode-json-git-diff">
+  ### 混合模式 (JSON + git-diff)
+</div>
+
+如果你同时需要两种结果形式——结构化的逐字段差异 **以及** 原始 markdown 统一 diff——请同时传入这两种模式：
+
+<TargetJsonMixed />
+
+随后，检查 响应会同时包含 `diff.text` (markdown sidecar) 和 `diff.json` (逐字段差异) ，以及提取得到的 `snapshot.json`：
+
+<DiffMixed />
+
+混合模式页面会在**任一**结果形式发生变化时报告 `changed`。
+
+<div id="notifications">
+  ## 通知
+</div>
+
+<div id="webhooks">
+  ### Webhooks
+</div>
+
+当监控配置了 `webhook` 时，Firecrawl 可以发送两种监控事件：
+
+* `monitor.page`：每个被监控的 抓取 在 抓取 worker 中完成后发送。
+* `monitor.check.completed`：在完整检查完成汇总后发送。包含检查状态和汇总计数。页面级结果请使用 `monitor.page` 事件或监控检查 API。
+
+如果对已变更页面执行了有意义变更判定，`monitor.page` 会包含 `isMeaningful` 和 `judgment`。
+
+<WebhookConfig />
+
+`monitor.page` 载荷：
+
+<PagePayload />
+
+`monitor.check.completed` 载荷：
+
+<CheckCompletedPayload />
+
+当检查在没有页面级错误的情况下完成时，`success` 为 `true`。对于失败或部分完成的检查，它为 `false`；如果可用，`error` 会包含失败原因。
+
+<div id="email">
+  ### 电子邮件
+</div>
+
+仅当某次检查出现页面变更、新增、移除或报错时，才会发送电子邮件摘要。
+
+<EmailConfig />
+
+当某个监控设置了目标并启用判定后，电子邮件摘要会优先展示有意义的变更页面。如果所有变更页面都被判定为噪声，且没有新增、移除或报错的页面，则会抑制发送该电子邮件。
+
+如果省略 `recipients`，Firecrawl 会将邮件发送给有资格接收系统告警邮件的团队成员。
+你最多可以配置 25 个明确指定的收件人。
+
+<div id="check-results">
+  ## 查看检查结果
+</div>
+
+使用 `GET /v2/monitor/{monitorId}/checks` 获取检查列表，使用 `GET /v2/monitor/{monitorId}/checks/{checkId}` 查看某次检查的详情。SDKs 默认会自动处理分页。
+
+<CodeGroup>
+  <GetCheckPython />
+
+  <GetCheckNode />
+
+  <GetCheckCURL />
+</CodeGroup>
+
+检查列表可按检查 `status` 过滤：`queued`、`running`、`completed`、`failed`、`partial` 或 `skipped_overlap`。
+
+检查详情响应包含 `estimatedCredits`、`actualCredits`、汇总计数以及分页的 `pages` 数组。`estimatedCredits` 是该检查预留额度的上限；`actualCredits` 是 Firecrawl 在确认有多少页面发生变化并需要判定后，最终收取的额度。使用顶层 `next` URL 获取下一页结果，其分页方式与 爬取 保持一致。你还可以按页面 `status` 过滤：`same`、`new`、`changed`、`removed` 或 `error`。每个已变更页面都包含内联 `diff` 数据；来自 JSON 模式监控的页面还会包含带有当前提取结果的 `snapshot`。
+
+<Tabs>
+  <Tab title="Markdown 模式">
+    <CheckOutputMarkdown />
+  </Tab>
+
+  <Tab title="JSON 模式">
+    <CheckOutputJson />
+  </Tab>
+
+  <Tab title="混合模式">
+    <CheckOutputMixed />
+  </Tab>
+</Tabs>
+
+<div id="api-reference">
+  ## API 参考
+</div>
+
+* [创建监控](/zh/api-reference/endpoint/monitor-create)
+* [查看监控列表](/zh/api-reference/endpoint/monitor-list)
+* [获取监控](/zh/api-reference/endpoint/monitor-get)
+* [更新监控](/zh/api-reference/endpoint/monitor-update)
+* [删除监控](/zh/api-reference/endpoint/monitor-delete)
+* [运行监控](/zh/api-reference/endpoint/monitor-run)
+* [查看监控检查列表](/zh/api-reference/endpoint/monitor-checks-list)
+* [获取监控检查](/zh/api-reference/endpoint/monitor-check-get)
+* [监控页面 Webhook 载荷](/zh/api-reference/endpoint/webhook-monitor-page)
+* [监控检查完成 Webhook 载荷](/zh/api-reference/endpoint/webhook-monitor-check-completed)

@@ -1,0 +1,305 @@
+---
+title: "モニタリング"
+description: "スクレイピングとクロールを定期実行し、コンテンツの変更を検出して、webhook またはメールで通知を受け取ります"
+og:title: "モニタリング | Firecrawl"
+og:description: "スクレイピングとクロールを定期実行し、コンテンツの変更を検出して、webhook またはメールで通知を受け取ります"
+icon: "radar"
+---
+
+import CreateScrapeCURL from "/snippets/ja/v2/monitor/create/scrape/curl.mdx";
+import CreateScrapeNode from "/snippets/ja/v2/monitor/create/scrape/js.mdx";
+import CreateScrapePython from "/snippets/ja/v2/monitor/create/scrape/python.mdx";
+import CreateCrawlCURL from "/snippets/ja/v2/monitor/create/crawl/curl.mdx";
+import CreateCrawlNode from "/snippets/ja/v2/monitor/create/crawl/js.mdx";
+import CreateCrawlPython from "/snippets/ja/v2/monitor/create/crawl/python.mdx";
+import CreateJsonCURL from "/snippets/ja/v2/monitor/create/json/curl.mdx";
+import CreateJsonNode from "/snippets/ja/v2/monitor/create/json/js.mdx";
+import CreateJsonPython from "/snippets/ja/v2/monitor/create/json/python.mdx";
+import CreateOutput from "/snippets/ja/v2/monitor/create/output.mdx";
+import ScheduleCron from "/snippets/ja/v2/monitor/schedule/cron.mdx";
+import ScheduleText from "/snippets/ja/v2/monitor/schedule/text.mdx";
+import TargetScrape from "/snippets/ja/v2/monitor/target/scrape.mdx";
+import TargetCrawl from "/snippets/ja/v2/monitor/target/crawl.mdx";
+import TargetJsonMixed from "/snippets/ja/v2/monitor/target/json-mixed.mdx";
+import WebhookConfig from "/snippets/ja/v2/monitor/notification/webhook.mdx";
+import EmailConfig from "/snippets/ja/v2/monitor/notification/email.mdx";
+import PagePayload from "/snippets/ja/v2/monitor/notification/page-payload.mdx";
+import CheckCompletedPayload from "/snippets/ja/v2/monitor/notification/check-completed-payload.mdx";
+import GetCheckCURL from "/snippets/ja/v2/monitor/check/get/curl.mdx";
+import GetCheckNode from "/snippets/ja/v2/monitor/check/get/js.mdx";
+import GetCheckPython from "/snippets/ja/v2/monitor/check/get/python.mdx";
+import CheckOutputMarkdown from "/snippets/ja/v2/monitor/check/output/markdown.mdx";
+import CheckOutputJson from "/snippets/ja/v2/monitor/check/output/json.mdx";
+import CheckOutputMixed from "/snippets/ja/v2/monitor/check/output/mixed.mdx";
+import DiffMarkdown from "/snippets/ja/v2/monitor/diff/markdown.mdx";
+import DiffJson from "/snippets/ja/v2/monitor/diff/json.mdx";
+import DiffMixed from "/snippets/ja/v2/monitor/diff/mixed.mdx";
+
+Firecrawl のモニターでは、定期的なスクレイピングまたはクロールを実行し、各結果を最後に保持されたスナップショットと比較します。モニターを使うと、商品ページ、ドキュメント、ブログ、変更履歴、競合サイトなど、変更の追跡が重要なページを監視できます。
+
+各チェックでは、ページ単位の結果が `same`、`new`、`changed`、`removed`、`error` として記録されます。監視対象の各ページの処理完了時に webhook を受け取ることも、チェックが完了するたびに webhook を受け取ることも、変更やエラーが発生した際にメールで要約を受け取ることもでき、これらを自由に組み合わせることもできます。
+
+<Note>
+  モニタリングには、保持されたスナップショットと差分が必要です。ゼロデータ保持のチームでは利用できません。
+</Note>
+
+<div id="create-a-monitor">
+  ## モニターを作成する
+</div>
+
+1 つ以上の明示的な URL を対象としたスクレイピングモニターを作成します:
+
+<CodeGroup>
+  <CreateScrapePython />
+
+  <CreateScrapeNode />
+
+  <CreateScrapeCURL />
+</CodeGroup>
+
+各 チェック で、クロールによって検出されたすべてのページの差分を比較するクロールモニターを作成します:
+
+<CodeGroup>
+  <CreateCrawlPython />
+
+  <CreateCrawlNode />
+
+  <CreateCrawlCURL />
+</CodeGroup>
+
+create の各呼び出しでは、正規化された cron、計算済みの `nextRunAt`、および `estimatedCreditsPerMonth` を含む新しいモニターが返されます。判定が有効な場合、`estimatedCreditsPerMonth` は上限見積もりになります。これは、判定クレジットが実際に判定された変更ページに対してのみ課金されるためです:
+
+<CreateOutput />
+
+Firecrawl CLI からモニターを作成することもできます:
+
+```bash CLI
+firecrawl monitor create --name "Hacker News AI" \
+  --schedule "every 30 minutes" \
+  --goal "Alert when a new Hacker News story related to AI enters the top 10. Ignore changes to stories that are not about AI. Do not alert on changes outside the top 10." \
+  --page https://news.ycombinator.com
+```
+
+<div id="goals-and-judging">
+  ## ゴールと判定
+</div>
+
+意味のある変更があったときだけ通知を受けたい場合は、平易な表現で `goal` を追加します。`goal` が指定されていて `judgeEnabled` が省略されている場合、Firecrawl は自動的に判定を有効にします。判定は変更のあったページで実行され、`meaningful`、`confidence`、`reason`、`meaningfulChanges` を含む `judgment` を返します。
+
+変更の判定はまだ行わず、ゴールだけを保存したい場合は、`judgeEnabled: false` を使用します。判定が実行されるのは、モニター に `judgeEnabled` と空でない `goal` の両方が設定されている場合だけです。
+
+<Note>
+  各 チェック では、常に元となるスクレイピングまたはクロールの料金が発生します。判定が有効な場合、judge は検証した変更済みページごとに 1 credit を追加で消費します。変更されたページがない チェック では、judge credits は消費されません。
+</Note>
+
+適切なゴールは、短く明確であることが重要です。何を alert のトリガーにするかを示し、top N、価格、役割の種類、会社、地域、トピック、status、またはエンティティなどの対象範囲も明記してください。除外条件は、意図に含まれる場合にのみ追加します。ゴールが広い場合は、その広さを保ってください。たとえば、&quot;any change&quot; の場合は、変更を見逃すようなノイズ除去の絞り込みを加えるべきではありません。
+
+たとえば、次のような goal を持つ モニター では:
+
+```text
+AIに関連する新しいHacker Newsのストーリーがトップ10に入ったときに通知する。AIに関係のないストーリーの変更は無視する。トップ10外の変更には通知しない。
+```
+
+`monitor.page` webhookの結果を有用な形で解析できます:
+
+```ts
+app.post("/webhooks/firecrawl", async (req, res) => {
+  const event = req.body;
+
+  if (event.type !== "monitor.page") {
+    return res.sendStatus(204);
+  }
+
+  for (const page of event.data) {
+    if (!page.isMeaningful || !page.judgment?.meaningful) continue;
+
+    for (const change of page.judgment.meaningfulChanges ?? []) {
+      console.log(change.type, change.reason);
+      console.log("before:", change.before);
+      console.log("after:", change.after);
+    }
+  }
+
+  res.sendStatus(204);
+});
+```
+
+<div id="schedules">
+  ## スケジュール
+</div>
+
+スケジュールは、cron またはシンプルな自然言語テキストで指定できます。
+
+<CodeGroup>
+  <ScheduleCron />
+
+  <ScheduleText />
+</CodeGroup>
+
+サポートされている自然言語の例:
+
+* `every 30 minutes`
+* `every 15 minutes starting at :07`
+* `hourly`
+* `every 2 hours`
+* `daily`
+* `daily at 9:00`
+* `weekly`
+
+最小間隔は 15 分です。API レスポンスでは常に正規化された cron 式が返されます。テキストによるスケジュールは、cron に変換される前にモニター ID ごとに分散されるため、多数のモニターがまったく同じタイミングで実行されることはありません。
+
+<div id="targets">
+  ## ターゲット
+</div>
+
+モニターでは、2 種類のターゲットをサポートしています。
+
+* `scrape`: `urls` 内の各 URL に対して 1 回スクレイピングを実行します。
+* `crawl`: 各チェックで `url` に対して完全なクロールを実行し、検出されたすべてのページの差分を比較します。
+
+各モニターには 1～50 個のターゲットを指定できます。`retentionDays` のデフォルトは `30` で、最大 `365` まで設定できます。
+
+ターゲットのスクレイピングのオプションは、そのまま基盤となるスクレイピング ジョブに渡されます。モニターによってトリガーされたスクレイピングでは、`maxAge` のデフォルトが `0` になるため、明示的に別の `maxAge` を設定しない限り、各チェックで毎回新しくスクレイピングが実行されます。
+
+<TargetScrape />
+
+クロール ターゲットでは、クロールの動作には `crawlOptions` を、各ページのスクレイピングには `scrapeOptions` を使用します。
+
+<TargetCrawl />
+
+<div id="change-tracking">
+  ## 変更追跡
+</div>
+
+デフォルトでは、Firecrawl は各ページの Markdown の差分を比較し、`same`、`changed`、`new`、`removed`、`error` のいずれかを返します。**特定の構造化フィールド** (価格、見出し、在庫フラグ、リスト内の項目など) の変更を検出したい場合は、対象の `scrapeOptions` に `modes: ["json"]` を指定した `changeTracking` フォーマットを追加して、JSON モードの変更追跡を有効にします。
+
+<div id="markdown-mode-default">
+  ### Markdown モード (デフォルト)
+</div>
+
+`scrapeOptions.formats` が `["markdown"]` のみの場合、チェック レスポンス内の変更された各ページには、unified 形式のテキスト差分と、[parseDiff](https://github.com/sergeyt/parse-diff) スタイルの AST が含まれます。
+
+<DiffMarkdown />
+
+<div id="json-mode">
+  ### JSONモード
+</div>
+
+`modes: ["json"]` を指定した `changeTracking` フォーマットを、注目するフィールドを定義した JSON schema (または `prompt`) とあわせて渡します。Firecrawl はチェックのたびにその JSON を抽出し、フィールドパスをキーとする**フィールド単位の差分**を出力します。さらに、利用側で元のスクレイピング結果を再取得しなくて済むよう、現在の抽出結果全体を含む `snapshot.json` も出力します。
+
+<CodeGroup>
+  <CreateJsonPython />
+
+  <CreateJsonNode />
+
+  <CreateJsonCURL />
+</CodeGroup>
+
+差分の ペイロード は次のようになります。キーは抽出結果内の JSON パスで、各値は `{previous, current}` のペアです。
+
+<DiffJson />
+
+<Note>
+  追跡対象のフィールドに変更がなく、周囲の Markdown だけが変わった場合でも、git-diff も有効にしない限り (下記の mixed mode を参照) 、JSONモードのモニターは `same` を返します。この差分は、schema 内のフィールドだけに焦点を当てています。
+</Note>
+
+<div id="mixed-mode-json-git-diff">
+  ### Mixedモード (JSON + git-diff)
+</div>
+
+構造化されたフィールド単位の差分 **と** 生の markdown の unified diff の両方が必要な場合は、両方のモードを指定します。
+
+<TargetJsonMixed />
+
+すると、チェック レスポンスには `snapshot.json` の抽出結果に加えて、`diff.text` (markdown のサイドカー) と `diff.json` (フィールド単位の差分) の両方が含まれます。
+
+<DiffMixed />
+
+mixed-mode のページでは、**いずれか** 一方でも変更があれば `changed` が報告されます。
+
+<div id="notifications">
+  ## 通知
+</div>
+
+<div id="webhooks">
+  ### Webhooks
+</div>
+
+モニター に `webhook` が設定されている場合、Firecrawl は 2 つの モニター event を送信できます。
+
+* `monitor.page`: 監視対象の各ページのスクレイピングが scrape worker で完了するたびに送信されます。
+* `monitor.check.completed`: チェック全体の整合処理が完了した後に送信されます。チェック の status と集計数が含まれます。ページ単位の結果を確認するには、`monitor.page` event または モニター check API を使用してください。
+
+`monitor.page` には、変更されたページに対して意味のある変更の判定が実行された場合、`isMeaningful` と `judgment` が含まれます。
+
+<WebhookConfig />
+
+`monitor.page` の ペイロード:
+
+<PagePayload />
+
+`monitor.check.completed` の ペイロード:
+
+<CheckCompletedPayload />
+
+`success` は、ページエラーなしで チェック が完了した場合に `true` です。失敗した チェック または部分的な チェック の場合は `false` となり、利用可能であれば `error` に失敗理由が含まれます。
+
+<div id="email">
+  ### メール
+</div>
+
+メールの要約は、チェックで変更・新規追加・削除・エラーのいずれかに該当するページがあった場合にのみ送信されます。
+
+<EmailConfig />
+
+モニターでゴールが設定され、判定が有効になっている場合、メールの要約では重要な変更ページが優先されます。変更されたすべてのページがノイズと判定され、新規追加・削除・エラーに該当するページもない場合、メールは送信されません。
+
+`recipients` を省略すると、Firecrawl はシステムアラートメールの受信対象となるチームメンバーに送信します。
+明示的な受信者は最大 25 件まで設定できます。
+
+<div id="check-results">
+  ## チェック結果
+</div>
+
+`GET /v2/monitor/{monitorId}/checks` でチェックの一覧を取得し、`GET /v2/monitor/{monitorId}/checks/{checkId}` で個別のチェック詳細を確認できます。SDKs はデフォルトで自動的にページネーションに対応しています。
+
+<CodeGroup>
+  <GetCheckPython />
+
+  <GetCheckNode />
+
+  <GetCheckCURL />
+</CodeGroup>
+
+チェック一覧は、チェックの `status` で絞り込めます: `queued`、`running`、`completed`、`failed`、`partial`、`skipped_overlap`。
+
+チェック詳細のレスポンスには、`estimatedCredits`、`actualCredits`、集計件数、およびページネーションされた `pages` 配列が含まれます。`estimatedCredits` はそのチェックに対して上限として予約されるクレジット数で、`actualCredits` は Firecrawl が変更されたページ数と判定が必要なページ数を把握した後に確定する最終的な請求量です。結果の次のページを取得するには、トップレベルの `next` URL を使用します。これはクロールのページネーションと同じです。ページは `status` で絞り込めます: `same`、`new`、`changed`、`removed`、`error`。変更された各ページにはインラインの `diff` データが含まれます。JSONモードのモニターによるページには、現在の抽出結果を含む `snapshot` も含まれます。
+
+<Tabs>
+  <Tab title="Markdownモード">
+    <CheckOutputMarkdown />
+  </Tab>
+
+  <Tab title="JSONモード">
+    <CheckOutputJson />
+  </Tab>
+
+  <Tab title="Mixedモード">
+    <CheckOutputMixed />
+  </Tab>
+</Tabs>
+
+<div id="api-reference">
+  ## API リファレンス
+</div>
+
+* [モニターを作成](/ja/api-reference/endpoint/monitor-create)
+* [モニター一覧](/ja/api-reference/endpoint/monitor-list)
+* [モニターを取得](/ja/api-reference/endpoint/monitor-get)
+* [モニターを更新](/ja/api-reference/endpoint/monitor-update)
+* [モニターを削除](/ja/api-reference/endpoint/monitor-delete)
+* [モニターを実行](/ja/api-reference/endpoint/monitor-run)
+* [モニターチェック一覧](/ja/api-reference/endpoint/monitor-checks-list)
+* [モニターチェックを取得](/ja/api-reference/endpoint/monitor-check-get)
+* [モニターページの webhookペイロード](/ja/api-reference/endpoint/webhook-monitor-page)
+* [モニターチェック完了の webhookペイロード](/ja/api-reference/endpoint/webhook-monitor-check-completed)

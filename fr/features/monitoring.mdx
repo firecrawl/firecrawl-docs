@@ -1,0 +1,305 @@
+---
+title: "Monitoring"
+description: "Programmez des scrapes et des crawls récurrents, détectez les changements de contenu et recevez des notifications par webhook ou e-mail"
+og:title: "Monitoring | Firecrawl"
+og:description: "Programmez des scrapes et des crawls récurrents, détectez les changements de contenu et recevez des notifications par webhook ou e-mail"
+icon: "radar"
+---
+
+import CreateScrapeCURL from "/snippets/fr/v2/monitor/create/scrape/curl.mdx";
+import CreateScrapeNode from "/snippets/fr/v2/monitor/create/scrape/js.mdx";
+import CreateScrapePython from "/snippets/fr/v2/monitor/create/scrape/python.mdx";
+import CreateCrawlCURL from "/snippets/fr/v2/monitor/create/crawl/curl.mdx";
+import CreateCrawlNode from "/snippets/fr/v2/monitor/create/crawl/js.mdx";
+import CreateCrawlPython from "/snippets/fr/v2/monitor/create/crawl/python.mdx";
+import CreateJsonCURL from "/snippets/fr/v2/monitor/create/json/curl.mdx";
+import CreateJsonNode from "/snippets/fr/v2/monitor/create/json/js.mdx";
+import CreateJsonPython from "/snippets/fr/v2/monitor/create/json/python.mdx";
+import CreateOutput from "/snippets/fr/v2/monitor/create/output.mdx";
+import ScheduleCron from "/snippets/fr/v2/monitor/schedule/cron.mdx";
+import ScheduleText from "/snippets/fr/v2/monitor/schedule/text.mdx";
+import TargetScrape from "/snippets/fr/v2/monitor/target/scrape.mdx";
+import TargetCrawl from "/snippets/fr/v2/monitor/target/crawl.mdx";
+import TargetJsonMixed from "/snippets/fr/v2/monitor/target/json-mixed.mdx";
+import WebhookConfig from "/snippets/fr/v2/monitor/notification/webhook.mdx";
+import EmailConfig from "/snippets/fr/v2/monitor/notification/email.mdx";
+import PagePayload from "/snippets/fr/v2/monitor/notification/page-payload.mdx";
+import CheckCompletedPayload from "/snippets/fr/v2/monitor/notification/check-completed-payload.mdx";
+import GetCheckCURL from "/snippets/fr/v2/monitor/check/get/curl.mdx";
+import GetCheckNode from "/snippets/fr/v2/monitor/check/get/js.mdx";
+import GetCheckPython from "/snippets/fr/v2/monitor/check/get/python.mdx";
+import CheckOutputMarkdown from "/snippets/fr/v2/monitor/check/output/markdown.mdx";
+import CheckOutputJson from "/snippets/fr/v2/monitor/check/output/json.mdx";
+import CheckOutputMixed from "/snippets/fr/v2/monitor/check/output/mixed.mdx";
+import DiffMarkdown from "/snippets/fr/v2/monitor/diff/markdown.mdx";
+import DiffJson from "/snippets/fr/v2/monitor/diff/json.mdx";
+import DiffMixed from "/snippets/fr/v2/monitor/diff/mixed.mdx";
+
+Les moniteurs Firecrawl exécutent régulièrement des scrapes ou des crawls et comparent chaque résultat au dernier instantané conservé. Utilisez les moniteurs pour suivre des pages produit, de la documentation, des blogs, des journaux des modifications, des sites concurrents ou toute autre page où les changements sont importants.
+
+Chaque vérification enregistre, pour chaque page, un résultat `same`, `new`, `changed`, `removed` ou `error`. Vous pouvez recevoir un webhook dès qu’une page surveillée a fini d’être traitée, un webhook pour chaque vérification terminée, des récapitulatifs par e-mail lorsque des changements ou des erreurs surviennent, ou n’importe quelle combinaison de ces notifications.
+
+<Note>
+  La surveillance nécessite des instantanés conservés et des diffs. Elle n’est pas disponible pour les équipes Zero Data Retention.
+</Note>
+
+<div id="create-a-monitor">
+  ## Créer un moniteur
+</div>
+
+Créez un moniteur de scrape pour une ou plusieurs URL spécifiques :
+
+<CodeGroup>
+  <CreateScrapePython />
+
+  <CreateScrapeNode />
+
+  <CreateScrapeCURL />
+</CodeGroup>
+
+Créez un moniteur de crawl pour comparer chaque page découverte lors d’un crawl à chaque vérification :
+
+<CodeGroup>
+  <CreateCrawlPython />
+
+  <CreateCrawlNode />
+
+  <CreateCrawlCURL />
+</CodeGroup>
+
+Chaque appel de création renvoie le nouveau moniteur avec son cron normalisé, son `nextRunAt` calculé et `estimatedCreditsPerMonth`. Lorsque l’évaluation est activée, `estimatedCreditsPerMonth` est une estimation maximale, car les crédits d’évaluation ne sont facturés que pour les pages modifiées effectivement évaluées :
+
+<CreateOutput />
+
+Vous pouvez également créer des moniteurs depuis la CLI Firecrawl :
+
+```bash CLI
+firecrawl monitor create --name "Hacker News AI" \
+  --schedule "every 30 minutes" \
+  --goal "Alert when a new Hacker News story related to AI enters the top 10. Ignore changes to stories that are not about AI. Do not alert on changes outside the top 10." \
+  --page https://news.ycombinator.com
+```
+
+<div id="goals-and-judging">
+  ## Objectifs et évaluation
+</div>
+
+Ajoutez un `goal` en langage clair si vous souhaitez être alerté uniquement en cas de changements significatifs. Si `goal` est présent et que `judgeEnabled` est omis, Firecrawl active automatiquement l’évaluation. L’évaluation s’exécute sur les pages modifiées et renvoie un `judgment` avec `meaningful`, `confidence`, `reason` et `meaningfulChanges`.
+
+Utilisez `judgeEnabled: false` si vous souhaitez enregistrer un objectif sans encore évaluer les changements. L’évaluation ne s’exécute que lorsque le moniteur comporte à la fois `judgeEnabled` et un `goal` non vide.
+
+<Note>
+  Chaque vérification facture toujours les scrapes ou crawls sous-jacents. Si l’évaluation est activée, elle ajoute 1 crédit pour chaque page modifiée qu’elle valide. Les vérifications sans page modifiée n’utilisent pas de crédits d’évaluation.
+</Note>
+
+Les bons objectifs sont courts et explicites : indiquez ce qui doit déclencher une alerte, précisez tout critère de portée comme top N, prix, type de poste, entreprise, région, sujet, état ou entité, et n’incluez des exclusions que lorsqu’elles font partie de l’intention. Si l’objectif est large, laissez-le large ; par exemple, &quot;any change&quot; ne doit pas ajouter de filtres antiparasite qui masqueraient des changements.
+
+Par exemple, un moniteur avec cet objectif :
+
+```text
+Alerter lorsqu'un nouvel article Hacker News lié à l'IA entre dans le top 10. Ignorer les modifications d'articles qui ne concernent pas l'IA. Ne pas alerter pour les modifications en dehors du top 10.
+```
+
+peut extraire des résultats pertinents du webhook `monitor.page` :
+
+```ts
+app.post("/webhooks/firecrawl", async (req, res) => {
+  const event = req.body;
+
+  if (event.type !== "monitor.page") {
+    return res.sendStatus(204);
+  }
+
+  for (const page of event.data) {
+    if (!page.isMeaningful || !page.judgment?.meaningful) continue;
+
+    for (const change of page.judgment.meaningfulChanges ?? []) {
+      console.log(change.type, change.reason);
+      console.log("before:", change.before);
+      console.log("after:", change.after);
+    }
+  }
+
+  res.sendStatus(204);
+});
+```
+
+<div id="schedules">
+  ## Planifications
+</div>
+
+Les planifications peuvent être définies au format cron ou sous forme de texte simple en langage naturel.
+
+<CodeGroup>
+  <ScheduleCron />
+
+  <ScheduleText />
+</CodeGroup>
+
+Exemples pris en charge en langage naturel :
+
+* `every 30 minutes`
+* `every 15 minutes starting at :07`
+* `hourly`
+* `every 2 hours`
+* `daily`
+* `daily at 9:00`
+* `weekly`
+
+L&#39;intervalle minimal est de 15 minutes. Les réponses de l&#39;API renvoient toujours l&#39;expression cron normalisée. Les planifications en texte libre sont réparties selon l&#39;identifiant du moniteur avant d&#39;être converties en cron, afin que de nombreux moniteurs ne s&#39;exécutent pas tous au même instant.
+
+<div id="targets">
+  ## Cibles
+</div>
+
+Les moniteurs prennent en charge deux types de cibles :
+
+* `scrape` : exécute un scraping par URL dans `urls`.
+* `crawl` : exécute un crawl complet pour `url` à chaque vérification, puis compare toutes les pages découvertes.
+
+Chaque moniteur accepte de 1 à 50 cibles. `retentionDays` vaut par défaut `30` et peut être défini jusqu’à `365`.
+
+Les options de scraping de chaque cible sont transmises aux tâches de scraping sous-jacentes. Pour les scrapes déclenchés par le moniteur, `maxAge` vaut par défaut `0`, de sorte que chaque vérification lance un nouveau scraping, sauf si vous définissez explicitement une autre valeur pour `maxAge`.
+
+<TargetScrape />
+
+Pour les cibles de crawl, utilisez `crawlOptions` pour le comportement du crawl et `scrapeOptions` pour le scraping de chaque page :
+
+<TargetCrawl />
+
+<div id="change-tracking">
+  ## Suivi des modifications
+</div>
+
+Par défaut, Firecrawl calcule les différences dans le markdown de chaque page et indique `same`, `changed`, `new`, `removed` ou `error`. Si vous souhaitez détecter des modifications dans des **champs structurés précis** (prix, titre, indicateur de disponibilité, éléments d’une liste, etc.), activez le suivi des modifications en mode JSON en ajoutant le format `suiviDesModifications` avec `modes: ["json"]` aux `scrapeOptions` de la cible.
+
+<div id="markdown-mode-default">
+  ### Mode markdown (par défaut)
+</div>
+
+Lorsque `scrapeOptions.formats` vaut simplement `["markdown"]`, chaque page modifiée dans la réponse de vérification inclut un diff textuel unifié ainsi qu’un AST au format [parseDiff](https://github.com/sergeyt/parse-diff) :
+
+<DiffMarkdown />
+
+<div id="json-mode">
+  ### mode JSON
+</div>
+
+Transmettez un format `changeTracking` avec `modes: ["json"]`, ainsi qu’un schéma JSON (ou un `prompt`) décrivant les champs qui vous intéressent. Firecrawl extrait ce JSON à chaque vérification et génère un **diff par champ** indexé par le chemin du champ, ainsi qu’un `snapshot.json` contenant l’extraction complète actuelle, afin que les consommateurs n’aient pas à récupérer à nouveau le scrape sous-jacent.
+
+<CodeGroup>
+  <CreateJsonPython />
+
+  <CreateJsonNode />
+
+  <CreateJsonCURL />
+</CodeGroup>
+
+Le payload du diff ressemble à ceci : les clés sont des chemins JSON dans l’extraction, et chaque valeur est une paire `{previous, current}` :
+
+<DiffJson />
+
+<Note>
+  Même si aucun champ suivi n’a changé, mais que le markdown environnant a changé, les moniteurs en mode JSON continuent de signaler `same`, sauf si vous activez aussi git-diff (voir le mode mixte ci-dessous). Le diff se concentre uniquement sur les champs de votre schéma.
+</Note>
+
+<div id="mixed-mode-json-git-diff">
+  ### Mode mixte (JSON + git-diff)
+</div>
+
+Si vous voulez les deux représentations — le diff structuré champ par champ **et** le diff unifié Markdown brut — passez les deux modes :
+
+<TargetJsonMixed />
+
+La réponse de vérification contient alors à la fois `diff.text` (sidecar Markdown) et `diff.json` (diff champ par champ), ainsi que l&#39;extraction `snapshot.json` :
+
+<DiffMixed />
+
+Une page en mode mixte est marquée comme `changed` dès que **l&#39;une ou l&#39;autre** de ces deux représentations a changé.
+
+<div id="notifications">
+  ## Notifications
+</div>
+
+<div id="webhooks">
+  ### Webhooks
+</div>
+
+Lorsqu&#39;un moniteur dispose d&#39;un `webhook`, Firecrawl peut envoyer deux événements de moniteur :
+
+* `monitor.page` : envoyé à mesure que chaque scrape surveillé se termine dans le worker de scrape.
+* `monitor.check.completed` : envoyé une fois la vérification complète consolidée. Inclut l&#39;état de la vérification et des totaux récapitulatifs. Utilisez les événements `monitor.page` ou l&#39;API de vérification du moniteur pour obtenir des résultats au niveau des pages.
+
+`monitor.page` inclut `isMeaningful` et `judgment` lorsque l&#39;évaluation des changements significatifs a été exécutée pour une page modifiée.
+
+<WebhookConfig />
+
+payload de `monitor.page` :
+
+<PagePayload />
+
+payload de `monitor.check.completed` :
+
+<CheckCompletedPayload />
+
+`success` vaut `true` lorsque la vérification s&#39;est terminée sans erreur de page. Il vaut `false` pour les vérifications en échec ou partielles, et `error` contient la raison de l&#39;échec lorsqu&#39;elle est disponible.
+
+<div id="email">
+  ### E-mail
+</div>
+
+Les résumés par e-mail ne sont envoyés que lorsqu&#39;une vérification comporte des pages modifiées, nouvelles, supprimées ou en erreur.
+
+<EmailConfig />
+
+Lorsqu&#39;un moniteur a un objectif et que l&#39;évaluation est activée, les résumés par e-mail donnent la priorité aux pages modifiées pertinentes. Si toutes les pages modifiées sont considérées comme du bruit et qu&#39;il n&#39;y a aucune page nouvelle, supprimée ou en erreur, l&#39;e-mail n&#39;est pas envoyé.
+
+Si `recipients` est omis, Firecrawl envoie les e-mails aux membres de l&#39;équipe autorisés à recevoir les e-mails d&#39;alerte système.
+Vous pouvez configurer jusqu&#39;à 25 destinataires spécifiés explicitement.
+
+<div id="check-results">
+  ## Résultats des vérifications
+</div>
+
+Utilisez `GET /v2/monitor/{monitorId}/checks` pour lister les vérifications, et `GET /v2/monitor/{monitorId}/checks/{checkId}` pour consulter le détail d’une vérification. Les SDKs gèrent automatiquement la pagination par défaut.
+
+<CodeGroup>
+  <GetCheckPython />
+
+  <GetCheckNode />
+
+  <GetCheckCURL />
+</CodeGroup>
+
+La liste des vérifications peut être filtrée selon le `status` de la vérification : `queued`, `running`, `completed`, `failed`, `partial` ou `skipped_overlap`.
+
+La réponse détaillée d’une vérification inclut `estimatedCredits`, `actualCredits`, des compteurs récapitulatifs et un tableau `pages` paginé. `estimatedCredits` correspond au plafond réservé pour la vérification ; `actualCredits` correspond au montant final facturé une fois que Firecrawl sait combien de pages ont changé et ont nécessité une analyse. Utilisez l’URL `next` au niveau racine pour récupérer la page de résultats suivante, conformément à la pagination du crawl. Vous pouvez filtrer les pages par `status` : `same`, `new`, `changed`, `removed` ou `error`. Chaque page modifiée inclut des données `diff` inline ; les pages des moniteurs en mode JSON incluent également un `snapshot` avec l’extraction actuelle.
+
+<Tabs>
+  <Tab title="Mode Markdown">
+    <CheckOutputMarkdown />
+  </Tab>
+
+  <Tab title="Mode JSON">
+    <CheckOutputJson />
+  </Tab>
+
+  <Tab title="Mode mixte">
+    <CheckOutputMixed />
+  </Tab>
+</Tabs>
+
+<div id="api-reference">
+  ## Référence de l’API
+</div>
+
+* [Créer un moniteur](/fr/api-reference/endpoint/monitor-create)
+* [Lister les moniteurs](/fr/api-reference/endpoint/monitor-list)
+* [Obtenir un moniteur](/fr/api-reference/endpoint/monitor-get)
+* [Mettre à jour un moniteur](/fr/api-reference/endpoint/monitor-update)
+* [Supprimer un moniteur](/fr/api-reference/endpoint/monitor-delete)
+* [Exécuter un moniteur](/fr/api-reference/endpoint/monitor-run)
+* [Lister les vérifications du moniteur](/fr/api-reference/endpoint/monitor-checks-list)
+* [Obtenir une vérification du moniteur](/fr/api-reference/endpoint/monitor-check-get)
+* [Payload du webhook de page du moniteur](/fr/api-reference/endpoint/webhook-monitor-page)
+* [Payload du webhook de vérification du moniteur terminé](/fr/api-reference/endpoint/webhook-monitor-check-completed)
