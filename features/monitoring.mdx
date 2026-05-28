@@ -1,0 +1,268 @@
+---
+title: "Monitoring"
+description: "Schedule recurring scrapes and crawls, detect content changes, and receive webhook or email notifications"
+og:title: "Monitoring | Firecrawl"
+og:description: "Schedule recurring scrapes and crawls, detect content changes, and receive webhook or email notifications"
+icon: "radar"
+---
+
+import CreateScrapeCURL from "/snippets/v2/monitor/create/scrape/curl.mdx";
+import CreateScrapeNode from "/snippets/v2/monitor/create/scrape/js.mdx";
+import CreateScrapePython from "/snippets/v2/monitor/create/scrape/python.mdx";
+import CreateCrawlCURL from "/snippets/v2/monitor/create/crawl/curl.mdx";
+import CreateCrawlNode from "/snippets/v2/monitor/create/crawl/js.mdx";
+import CreateCrawlPython from "/snippets/v2/monitor/create/crawl/python.mdx";
+import CreateJsonCURL from "/snippets/v2/monitor/create/json/curl.mdx";
+import CreateJsonNode from "/snippets/v2/monitor/create/json/js.mdx";
+import CreateJsonPython from "/snippets/v2/monitor/create/json/python.mdx";
+import CreateOutput from "/snippets/v2/monitor/create/output.mdx";
+import ScheduleCron from "/snippets/v2/monitor/schedule/cron.mdx";
+import ScheduleText from "/snippets/v2/monitor/schedule/text.mdx";
+import TargetScrape from "/snippets/v2/monitor/target/scrape.mdx";
+import TargetCrawl from "/snippets/v2/monitor/target/crawl.mdx";
+import TargetJsonMixed from "/snippets/v2/monitor/target/json-mixed.mdx";
+import WebhookConfig from "/snippets/v2/monitor/notification/webhook.mdx";
+import EmailConfig from "/snippets/v2/monitor/notification/email.mdx";
+import PagePayload from "/snippets/v2/monitor/notification/page-payload.mdx";
+import CheckCompletedPayload from "/snippets/v2/monitor/notification/check-completed-payload.mdx";
+import GetCheckCURL from "/snippets/v2/monitor/check/get/curl.mdx";
+import GetCheckNode from "/snippets/v2/monitor/check/get/js.mdx";
+import GetCheckPython from "/snippets/v2/monitor/check/get/python.mdx";
+import CheckOutputMarkdown from "/snippets/v2/monitor/check/output/markdown.mdx";
+import CheckOutputJson from "/snippets/v2/monitor/check/output/json.mdx";
+import CheckOutputMixed from "/snippets/v2/monitor/check/output/mixed.mdx";
+import DiffMarkdown from "/snippets/v2/monitor/diff/markdown.mdx";
+import DiffJson from "/snippets/v2/monitor/diff/json.mdx";
+import DiffMixed from "/snippets/v2/monitor/diff/mixed.mdx";
+
+Firecrawl monitors run recurring scrapes or crawls and compare each result against the last retained snapshot. Use monitors to track product pages, docs, blogs, changelogs, competitor sites, or any page where changes matter.
+
+Each check records page-level results as `same`, `new`, `changed`, `removed`, or `error`. You can receive a webhook as each monitored page finishes, a webhook for every completed check, email summaries when changes or errors happen, or any combination of those notifications.
+
+<Note>
+  Monitoring requires retained snapshots and diffs. It is not available for zero data retention teams.
+</Note>
+
+## Create a monitor
+
+Create a scrape monitor for one or more explicit URLs:
+
+<CodeGroup>
+  <CreateScrapePython />
+  <CreateScrapeNode />
+  <CreateScrapeCURL />
+</CodeGroup>
+
+Create a crawl monitor to diff every page discovered by a crawl on each check:
+
+<CodeGroup>
+  <CreateCrawlPython />
+  <CreateCrawlNode />
+  <CreateCrawlCURL />
+</CodeGroup>
+
+Every create call returns the new monitor with its normalized cron, computed `nextRunAt`, and `estimatedCreditsPerMonth`. When judging is enabled, `estimatedCreditsPerMonth` is an upper-bound estimate because judge credits are only charged for changed pages that are actually judged:
+
+<CreateOutput />
+
+You can also create monitors from the Firecrawl CLI:
+
+```bash CLI
+firecrawl monitor create --name "Hacker News AI" \
+  --schedule "every 30 minutes" \
+  --goal "Alert when a new Hacker News story related to AI enters the top 10. Ignore changes to stories that are not about AI. Do not alert on changes outside the top 10." \
+  --page https://news.ycombinator.com
+```
+
+## Goals and judging
+
+Add a plain-language `goal` when you only want to be alerted for meaningful changes. If `goal` is present and `judgeEnabled` is omitted, Firecrawl enables judging automatically. Judging runs on changed pages and returns a `judgment` with `meaningful`, `confidence`, `reason`, and `meaningfulChanges`.
+
+Use `judgeEnabled: false` if you want to store a goal without judging changes yet. The judge only runs when the monitor has both `judgeEnabled` and a non-empty `goal`.
+
+<Note>
+  Each check always charges for the underlying scrapes or crawls. If judging is enabled, the judge adds 1 credit for each changed page it validates. Checks with no changed pages do not use judge credits.
+</Note>
+
+Good goals are short and explicit: say what should trigger an alert, restate any scope such as top N, price, role type, company, region, topic, status, or entity, and include exclusions only when they are part of the intent. If the goal is broad, keep it broad; for example, "any change" should not add noise filters that would hide changes.
+
+For example, a monitor with this goal:
+
+```text
+Alert when a new Hacker News story related to AI enters the top 10. Ignore changes to stories that are not about AI. Do not alert on changes outside the top 10.
+```
+
+can parse meaningful results from the `monitor.page` webhook:
+
+```ts
+app.post("/webhooks/firecrawl", async (req, res) => {
+  const event = req.body;
+
+  if (event.type !== "monitor.page") {
+    return res.sendStatus(204);
+  }
+
+  for (const page of event.data) {
+    if (!page.isMeaningful || !page.judgment?.meaningful) continue;
+
+    for (const change of page.judgment.meaningfulChanges ?? []) {
+      console.log(change.type, change.reason);
+      console.log("before:", change.before);
+      console.log("after:", change.after);
+    }
+  }
+
+  res.sendStatus(204);
+});
+```
+
+## Schedules
+
+Schedules can be provided as cron or as simple natural language text.
+
+<CodeGroup>
+  <ScheduleCron />
+  <ScheduleText />
+</CodeGroup>
+
+Supported natural language examples:
+
+- `every 30 minutes`
+- `every 15 minutes starting at :07`
+- `hourly`
+- `every 2 hours`
+- `daily`
+- `daily at 9:00`
+- `weekly`
+
+The minimum interval is 15 minutes. API responses always return the normalized cron expression. Text schedules are spread by monitor ID before they are converted to cron so many monitors do not all run at the same instant.
+
+## Targets
+
+Monitors support two target types:
+
+- `scrape`: Runs one scrape per URL in `urls`.
+- `crawl`: Runs a full crawl for `url` on each check, then diffs all discovered pages.
+
+Each monitor accepts 1-50 targets. `retentionDays` defaults to `30` and can be set up to `365`.
+
+Target scrape options are passed through to the underlying scrape jobs. Monitor-triggered scrapes default `maxAge` to `0`, so each check performs a fresh scrape unless you explicitly set a different `maxAge`.
+
+<TargetScrape />
+
+For crawl targets, use `crawlOptions` for crawl behavior and `scrapeOptions` for each page scrape:
+
+<TargetCrawl />
+
+## Change tracking
+
+By default Firecrawl diffs each page's markdown and reports `same`, `changed`, `new`, `removed`, or `error`. When you want to detect changes in **specific structured fields** (price, headline, in-stock flag, the items in a list, etc.), enable JSON-mode change tracking by adding a `changeTracking` format with `modes: ["json"]` to the target's `scrapeOptions`.
+
+### Markdown mode (default)
+
+When `scrapeOptions.formats` is just `["markdown"]`, each changed page in the check response carries a unified text diff plus a [parseDiff](https://github.com/sergeyt/parse-diff)-style AST:
+
+<DiffMarkdown />
+
+### JSON mode
+
+Pass a `changeTracking` format with `modes: ["json"]` together with a JSON schema (or a `prompt`) describing the fields you care about. Firecrawl extracts that JSON on every check and emits a **per-field diff** keyed by the field path, plus a `snapshot.json` with the full current extraction so consumers don't need to re-fetch the underlying scrape.
+
+<CodeGroup>
+  <CreateJsonPython />
+  <CreateJsonNode />
+  <CreateJsonCURL />
+</CodeGroup>
+
+The diff payload looks like this — keys are JSON paths into the extraction, and each value is a `{previous, current}` pair:
+
+<DiffJson />
+
+<Note>
+  Even if no tracked field changed but the surrounding markdown did, JSON-mode monitors still report `same` unless you also enable git-diff (see mixed mode below). The diff focuses purely on the fields in your schema.
+</Note>
+
+### Mixed mode (JSON + git-diff)
+
+If you want both surfaces — the structured per-field diff **and** the raw markdown unified diff — pass both modes:
+
+<TargetJsonMixed />
+
+The check response then contains both `diff.text` (markdown sidecar) and `diff.json` (per-field diff), along with the `snapshot.json` extraction:
+
+<DiffMixed />
+
+A mixed-mode page reports `changed` whenever **either** surface changed.
+
+## Notifications
+
+### Webhooks
+
+When a monitor has a `webhook`, Firecrawl can send two monitor events:
+
+- `monitor.page`: Sent as each monitored scrape finishes in the scrape worker.
+- `monitor.check.completed`: Sent after the full check is reconciled. Includes check status and summary counts. Use `monitor.page` events or the monitor check API for page-level results.
+
+`monitor.page` includes `isMeaningful` and `judgment` when meaningful-change judging ran for a changed page.
+
+<WebhookConfig />
+
+`monitor.page` payload:
+
+<PagePayload />
+
+`monitor.check.completed` payload:
+
+<CheckCompletedPayload />
+
+`success` is `true` when the check completed without page errors. It is `false` for failed or partial checks, and `error` contains the failure reason when available.
+
+### Email
+
+Email summaries are sent only when a check has changed, new, removed, or errored pages.
+
+<EmailConfig />
+
+When a monitor has a goal and judging enabled, email summaries prioritize meaningful changed pages. If every changed page is judged as noise and there are no new, removed, or errored pages, the email is suppressed.
+
+If `recipients` is omitted, Firecrawl sends to team members who are eligible for system alert emails.
+You can configure up to 25 explicit recipients.
+
+## Check results
+
+Use `GET /v2/monitor/{monitorId}/checks` to list checks and `GET /v2/monitor/{monitorId}/checks/{checkId}` to inspect a check. The SDKs auto-paginate by default.
+
+<CodeGroup>
+  <GetCheckPython />
+  <GetCheckNode />
+  <GetCheckCURL />
+</CodeGroup>
+
+List checks can be filtered by check `status`: `queued`, `running`, `completed`, `failed`, `partial`, or `skipped_overlap`.
+
+The check detail response includes `estimatedCredits`, `actualCredits`, summary counts, and a paginated `pages` array. `estimatedCredits` is the upper-bound reservation for the check; `actualCredits` is the final amount charged after Firecrawl knows how many pages changed and needed judging. Use the top-level `next` URL to fetch the next page of results, matching crawl pagination. You can filter pages by `status`: `same`, `new`, `changed`, `removed`, or `error`. Each changed page includes inline `diff` data; pages from JSON-mode monitors also include a `snapshot` with the current extraction.
+
+<Tabs>
+  <Tab title="Markdown mode">
+    <CheckOutputMarkdown />
+  </Tab>
+  <Tab title="JSON mode">
+    <CheckOutputJson />
+  </Tab>
+  <Tab title="Mixed mode">
+    <CheckOutputMixed />
+  </Tab>
+</Tabs>
+
+## API reference
+
+- [Create monitor](/api-reference/endpoint/monitor-create)
+- [List monitors](/api-reference/endpoint/monitor-list)
+- [Get monitor](/api-reference/endpoint/monitor-get)
+- [Update monitor](/api-reference/endpoint/monitor-update)
+- [Delete monitor](/api-reference/endpoint/monitor-delete)
+- [Run monitor](/api-reference/endpoint/monitor-run)
+- [List monitor checks](/api-reference/endpoint/monitor-checks-list)
+- [Get monitor check](/api-reference/endpoint/monitor-check-get)
+- [Monitor page webhook payload](/api-reference/endpoint/webhook-monitor-page)
+- [Monitor check completed webhook payload](/api-reference/endpoint/webhook-monitor-check-completed)
