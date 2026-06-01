@@ -66,9 +66,9 @@ Scrapez une page pour obtenir des données propres, puis appelez `/interact` pou
   ## Comment ça fonctionne
 </div>
 
-1. **Scrape** une URL avec `POST /v2/scrape`. La réponse inclut un `scrapeId` dans `data.metadata.scrapeId`. Vous pouvez éventuellement transmettre un `profile` pour conserver l’état du navigateur entre les sessions.
-2. **Interagissez** en appelant `POST /v2/scrape/{scrapeId}/interact` avec un `prompt` ou du code `playwright`. Lors du premier appel, la session de scraping est reprise et vous pouvez commencer à interagir avec la page.
-3. **Arrêtez** la session avec `DELETE /v2/scrape/{scrapeId}/interact` lorsque vous avez terminé.
+1. **Scrape** une URL avec `POST /v2/scrape`. La réponse inclut un `scrapeId` dans `data.metadata.scrapeId`. Si vous souhaitez conserver l’état du navigateur, transmettez `profile` dans cette requête.
+2. **Interact** en appelant `POST /v2/scrape/{scrapeId}/interact` avec un `prompt` ou du code `playwright`. Ne transmettez pas `profile` ici ; la session d’interaction hérite du profil de la tâche de scraping.
+3. **Arrêtez** la session avec `DELETE /v2/scrape/{scrapeId}/interact` lorsque vous avez terminé. Pour les profils inscriptibles, les modifications sont enregistrées à l’arrêt de la session.
 
 <div id="quick-start">
   ## Démarrage rapide
@@ -286,13 +286,44 @@ Les sessions expirent également automatiquement en fonction du TTL (default : 
   Arrêtez toujours les sessions une fois terminé afin d&#39;éviter une facturation inutile. Les credits sont calculés au prorata à la seconde.
 </Warning>
 
-<div id="persistent-profiles">
-  ## Profils persistants
+<div id="persistent-profiles-with-scrape-interact">
+  ## Profils persistants avec Scrape + Interact
 </div>
 
 Par défaut, chaque session de scrape + interact démarre avec un navigateur propre. Avec `profile`, vous pouvez enregistrer et réutiliser l’état du navigateur (cookies, localStorage, sessions) entre plusieurs scrapes. C’est utile pour rester connecté et conserver les préférences.
 
-Passez le paramètre `profile` lors de l’appel à scrape. Les sessions portant le même nom de profil partagent le même état.
+Passez l’objet `profile` dans la requête initiale `POST /v2/scrape`. Ne passez pas `profile` à `POST /v2/scrape/{scrapeId}/interact` ; la session interact réutilise la session de navigateur et les paramètres de profil de la tâche de scraping. Arrêtez la session interact avec `DELETE /v2/scrape/{scrapeId}/interact` afin que les modifications apportées au profil puissent être enregistrées.
+
+```bash cURL
+curl -X POST "https://api.firecrawl.dev/v2/scrape" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com",
+    "formats": ["markdown"],
+    "profile": {
+      "name": "my-profile",
+      "saveChanges": true
+    }
+  }'
+
+curl -X POST "https://api.firecrawl.dev/v2/scrape/SCRAPE_ID/interact" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Click the login button"
+  }'
+
+curl -X DELETE "https://api.firecrawl.dev/v2/scrape/SCRAPE_ID/interact" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY"
+```
+
+Le cycle de vie du profil est :
+
+1. Créez le scrape avec `profile.name` et `saveChanges: true`.
+2. Exécutez des interactions par prompt ou par code sur le `scrapeId` renvoyé.
+3. Arrêtez la session pour enregistrer les cookies, le localStorage et les autres données d’état du navigateur.
+4. Démarrez plus tard un scrape avec le même `profile.name`. Utilisez `saveChanges: false` lorsque vous voulez uniquement lire l’état existant sans réécrire les modifications.
 
 <CodeGroup>
   <ProfilePython />
@@ -314,6 +345,64 @@ Passez le paramètre `profile` lors de l’appel à scrape. Les sessions portant
 </Note>
 
 L’état du navigateur est enregistré lorsque la session interact est arrêtée. Arrêtez toujours la session une fois terminé afin que le profil puisse être réutilisé.
+
+<div id="validate-persistence">
+  ### Vérifier la persistance
+</div>
+
+Vous pouvez tester la persistance sans dépendre d’une véritable procédure de connexion en écrivant une valeur dans `localStorage` lors d’une session, en l’arrêtant, puis en lisant cette valeur dans une seconde session avec le même profil.
+
+```bash cURL
+# Session 1 : écrire l'état du navigateur et le sauvegarder
+RESPONSE=$(curl -s -X POST "https://api.firecrawl.dev/v2/scrape" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com",
+    "formats": ["markdown"],
+    "profile": { "name": "profile-validation", "saveChanges": true }
+  }')
+
+SCRAPE_ID=$(echo "$RESPONSE" | jq -r ".data.metadata.scrapeId")
+
+curl -s -X POST "https://api.firecrawl.dev/v2/scrape/$SCRAPE_ID/interact" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "await page.evaluate(() => { localStorage.setItem(\"firecrawlProfileCheck\", \"saved\"); document.cookie = \"firecrawl_profile_check=saved; path=/; max-age=3600\"; return localStorage.getItem(\"firecrawlProfileCheck\"); });"
+  }'
+
+curl -s -X DELETE "https://api.firecrawl.dev/v2/scrape/$SCRAPE_ID/interact" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY"
+
+# Session 2 : charger le même profil en mode lecture seule et vérifier la valeur
+RESPONSE=$(curl -s -X POST "https://api.firecrawl.dev/v2/scrape" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com",
+    "formats": ["markdown"],
+    "profile": { "name": "profile-validation", "saveChanges": false }
+  }')
+
+SCRAPE_ID=$(echo "$RESPONSE" | jq -r ".data.metadata.scrapeId")
+
+curl -s -X POST "https://api.firecrawl.dev/v2/scrape/$SCRAPE_ID/interact" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "await page.evaluate(() => ({ localStorage: localStorage.getItem(\"firecrawlProfileCheck\"), cookie: document.cookie.includes(\"firecrawl_profile_check=saved\") }));"
+  }'
+
+curl -s -X DELETE "https://api.firecrawl.dev/v2/scrape/$SCRAPE_ID/interact" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY"
+```
+
+La deuxième réponse Interact devrait afficher `localStorage` avec la valeur `"saved"` et `cookie` avec la valeur `true`.
+
+<Info>
+  Les profils créés via l’API peuvent ne pas encore apparaître dans Dashboard &gt; Interact &gt; Profiles. Le dashboard ne fournit pas encore un inventaire complet des profils persistants créés via l’API.
+</Info>
 
 <div id="when-to-use-what">
   ## Quand utiliser chaque option
