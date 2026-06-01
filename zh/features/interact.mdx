@@ -66,9 +66,9 @@ import ProfileCLI from "/snippets/zh/v2/interact/profile/cli.mdx";
   ## 工作原理
 </div>
 
-1. 使用 `POST /v2/scrape` **抓取**一个 URL。响应会在 `data.metadata.scrapeId` 中返回 `scrapeId`。你也可以选择传入 `profile`，以在不同会话间持久保存浏览器状态。
-2. 调用 `POST /v2/scrape/{scrapeId}/interact`，并传入 `prompt` 或 Playwright `code` 进行**交互**。首次调用时，会恢复已抓取的会话，此时你可以开始与页面交互。
-3. 完成后，使用 `DELETE /v2/scrape/{scrapeId}/interact` **停止**该会话。
+1. 使用 `POST /v2/scrape` **抓取**一个 URL。响应会在 `data.metadata.scrapeId` 中返回 `scrapeId`。如果你想持久保存浏览器状态，请在此请求中传入 `profile`。
+2. 调用 `POST /v2/scrape/{scrapeId}/interact`，并传入 `prompt` 或 Playwright `code` 进行**交互**。此处不要传入 `profile`；交互会话会继承抓取任务中的 `profile`。
+3. 完成后，使用 `DELETE /v2/scrape/{scrapeId}/interact` **停止**该会话。对于可写的 `profile`，会话停止时会保存更改。
 
 <div id="quick-start">
   ## 快速开始
@@ -286,13 +286,44 @@ import ProfileCLI from "/snippets/zh/v2/interact/profile/cli.mdx";
   请务必在使用完毕后停止会话，以避免不必要的计费。额度按秒折算。
 </Warning>
 
-<div id="persistent-profiles">
-  ## 持久化配置文件
+<div id="persistent-profiles-with-scrape-interact">
+  ## 使用 Scrape + 交互 的持久化配置文件
 </div>
 
-默认情况下，每个 scrape + interact 会话都会从全新的浏览器状态开始。使用 `profile`，你可以在多次抓取之间保存并复用浏览器状态 (cookies、localStorage、会话) 。这对于保持登录状态和保留偏好设置非常有用。
+默认情况下，每个 scrape + 交互 会话都会从全新的浏览器状态开始。使用 `profile`，你可以在多次抓取之间保存并复用浏览器状态 (cookies、localStorage、会话) 。这对于保持登录状态和保留偏好设置非常有用。
 
-调用 scrape 时传入 `profile` 参数。`profile` 名称相同的会话会共享状态。
+在初始 `POST /v2/scrape` 请求中传入 `profile` 对象。不要在 `POST /v2/scrape/{scrapeId}/interact` 中传入 `profile`；交互 会话会复用抓取任务的浏览器会话和 `profile` 设置。使用 `DELETE /v2/scrape/{scrapeId}/interact` 停止 交互 会话，以便保存对可写配置文件所做的更改。
+
+```bash cURL
+curl -X POST "https://api.firecrawl.dev/v2/scrape" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com",
+    "formats": ["markdown"],
+    "profile": {
+      "name": "my-profile",
+      "saveChanges": true
+    }
+  }'
+
+curl -X POST "https://api.firecrawl.dev/v2/scrape/SCRAPE_ID/interact" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Click the login button"
+  }'
+
+curl -X DELETE "https://api.firecrawl.dev/v2/scrape/SCRAPE_ID/interact" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY"
+```
+
+配置文件的生命周期如下：
+
+1. 使用 `profile.name` 和 `saveChanges: true` 创建抓取。
+2. 针对返回的 `scrapeId` 运行 prompt 或代码交互。
+3. 停止会话以保存 cookies、localStorage 和其他浏览器状态。
+4. 稍后使用相同的 `profile.name` 启动新的抓取。当你只想读取现有状态而不将更改写回时，使用 `saveChanges: false`。
 
 <CodeGroup>
   <ProfilePython />
@@ -307,13 +338,71 @@ import ProfileCLI from "/snippets/zh/v2/interact/profile/cli.mdx";
 | 参数            | 默认值    | 描述                                                                                       |
 | ------------- | ------ | ---------------------------------------------------------------------------------------- |
 | `name`        | —      | 持久化配置文件的名称。名称相同的抓取会共享浏览器状态。                                                              |
-| `saveChanges` | `true` | 当为 `true` 时，interact 会话停止后会将浏览器状态保存回该配置文件。设为 `false` 可在不写入的情况下加载现有数据——适用于你需要多个并发只读会话的场景。 |
+| `saveChanges` | `true` | 当为 `true` 时，交互 会话停止后会将浏览器状态保存回该配置文件。设为 `false` 可在不写入的情况下加载现有数据——适用于你需要多个并发只读会话的场景。 |
 
 <Note>
   同一时间只能有一个会话保存到某个配置文件。如果另一个会话已在保存，你将收到 `409` 错误。你仍然可以使用 `saveChanges: false` 打开同一个配置文件，或稍后重试。
 </Note>
 
-浏览器状态会在 interact 会话停止时保存。完成后请务必停止该会话，以便该配置文件可以被复用。
+浏览器状态会在 交互 会话停止时保存。完成后请务必停止该会话，以便该配置文件可以被复用。
+
+<div id="validate-persistence">
+  ### 验证持久化
+</div>
+
+你可以在一个会话中写入 `localStorage` 值并停止该会话，然后在第二个使用相同配置文件的会话中读取该值，以此测试持久化，而无需依赖真实的登录流程。
+
+```bash cURL
+# 会话 1：写入浏览器状态并保存
+RESPONSE=$(curl -s -X POST "https://api.firecrawl.dev/v2/scrape" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com",
+    "formats": ["markdown"],
+    "profile": { "name": "profile-validation", "saveChanges": true }
+  }')
+
+SCRAPE_ID=$(echo "$RESPONSE" | jq -r ".data.metadata.scrapeId")
+
+curl -s -X POST "https://api.firecrawl.dev/v2/scrape/$SCRAPE_ID/interact" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "await page.evaluate(() => { localStorage.setItem(\"firecrawlProfileCheck\", \"saved\"); document.cookie = \"firecrawl_profile_check=saved; path=/; max-age=3600\"; return localStorage.getItem(\"firecrawlProfileCheck\"); });"
+  }'
+
+curl -s -X DELETE "https://api.firecrawl.dev/v2/scrape/$SCRAPE_ID/interact" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY"
+
+# 会话 2：以只读模式加载相同配置文件并验证值
+RESPONSE=$(curl -s -X POST "https://api.firecrawl.dev/v2/scrape" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com",
+    "formats": ["markdown"],
+    "profile": { "name": "profile-validation", "saveChanges": false }
+  }')
+
+SCRAPE_ID=$(echo "$RESPONSE" | jq -r ".data.metadata.scrapeId")
+
+curl -s -X POST "https://api.firecrawl.dev/v2/scrape/$SCRAPE_ID/interact" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "await page.evaluate(() => ({ localStorage: localStorage.getItem(\"firecrawlProfileCheck\"), cookie: document.cookie.includes(\"firecrawl_profile_check=saved\") }));"
+  }'
+
+curl -s -X DELETE "https://api.firecrawl.dev/v2/scrape/$SCRAPE_ID/interact" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY"
+```
+
+第二个交互响应应显示 `localStorage` 为 `"saved"`，`cookie` 为 `true`。
+
+<Info>
+  通过 API 创建的 Profiles 可能暂时还不会显示在 Dashboard &gt; Interact &gt; Profiles 中。Dashboard 目前尚未提供通过 API 创建的持久化 Profiles 的完整列表。
+</Info>
 
 <div id="when-to-use-what">
   ## 何时使用什么
