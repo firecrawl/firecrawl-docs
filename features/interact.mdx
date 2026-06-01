@@ -62,9 +62,9 @@ Scrape a page to get clean data, then call `/interact` to start taking actions i
 
 ## How It Works
 
-1. **Scrape** a URL with `POST /v2/scrape`. The response includes a `scrapeId` in `data.metadata.scrapeId`. Optionally pass a `profile` to persist browser state across sessions.
-2. **Interact** by calling `POST /v2/scrape/{scrapeId}/interact` with a `prompt` or with playwright `code`. On the first call, the scraped session is resumed and you can start interacting with the page.
-3. **Stop** the session with `DELETE /v2/scrape/{scrapeId}/interact` when you're done.
+1. **Scrape** a URL with `POST /v2/scrape`. The response includes a `scrapeId` in `data.metadata.scrapeId`. If you want persistent browser state, pass `profile` on this request.
+2. **Interact** by calling `POST /v2/scrape/{scrapeId}/interact` with a `prompt` or with playwright `code`. Do not pass `profile` here; the interact session inherits the profile from the scrape job.
+3. **Stop** the session with `DELETE /v2/scrape/{scrapeId}/interact` when you're done. For writable profiles, changes are saved when the session stops.
 
 ## Quick Start
 
@@ -253,11 +253,42 @@ Sessions also expire automatically based on TTL (default: 10 minutes) or inactiv
 Always stop sessions when you're done to avoid unnecessary billing. Credits are prorated by the second.
 </Warning>
 
-## Persistent Profiles
+## Persistent Profiles with Scrape + Interact
 
 By default, each scrape + interact session starts with a clean browser. With `profile`, you can save and reuse browser state (cookies, localStorage, sessions) across scrapes. This is useful for staying logged in and preserving preferences.
 
-Pass the `profile` parameter when calling scrape. Sessions with the same profile name share state.
+Pass the `profile` object to the initial `POST /v2/scrape` request. Do not pass `profile` to `POST /v2/scrape/{scrapeId}/interact`; the interact session reuses the scrape job's browser session and profile settings. Stop the interact session with `DELETE /v2/scrape/{scrapeId}/interact` so writable profile changes can be saved.
+
+```bash cURL
+curl -X POST "https://api.firecrawl.dev/v2/scrape" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com",
+    "formats": ["markdown"],
+    "profile": {
+      "name": "my-profile",
+      "saveChanges": true
+    }
+  }'
+
+curl -X POST "https://api.firecrawl.dev/v2/scrape/SCRAPE_ID/interact" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Click the login button"
+  }'
+
+curl -X DELETE "https://api.firecrawl.dev/v2/scrape/SCRAPE_ID/interact" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY"
+```
+
+The profile lifecycle is:
+
+1. Create the scrape with `profile.name` and `saveChanges: true`.
+2. Run prompt or code interactions against the returned `scrapeId`.
+3. Stop the session to save cookies, localStorage, and other browser state.
+4. Start a later scrape with the same `profile.name`. Use `saveChanges: false` when you only want to read existing state without writing changes back.
 
 <CodeGroup>
 
@@ -278,6 +309,62 @@ Only one session can save to a profile at a time. If another session is already 
 </Note>
 
 The browser state is saved when the interact session is stopped. Always stop the session when you're done so the profile can be reused.
+
+### Validate Persistence
+
+You can test persistence without relying on a real login flow by writing a localStorage value in one session, stopping it, then reading the value in a second session with the same profile.
+
+```bash cURL
+# Session 1: write browser state and save it
+RESPONSE=$(curl -s -X POST "https://api.firecrawl.dev/v2/scrape" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com",
+    "formats": ["markdown"],
+    "profile": { "name": "profile-validation", "saveChanges": true }
+  }')
+
+SCRAPE_ID=$(echo "$RESPONSE" | jq -r ".data.metadata.scrapeId")
+
+curl -s -X POST "https://api.firecrawl.dev/v2/scrape/$SCRAPE_ID/interact" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "await page.evaluate(() => { localStorage.setItem(\"firecrawlProfileCheck\", \"saved\"); document.cookie = \"firecrawl_profile_check=saved; path=/; max-age=3600\"; return localStorage.getItem(\"firecrawlProfileCheck\"); });"
+  }'
+
+curl -s -X DELETE "https://api.firecrawl.dev/v2/scrape/$SCRAPE_ID/interact" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY"
+
+# Session 2: load the same profile in read-only mode and verify the value
+RESPONSE=$(curl -s -X POST "https://api.firecrawl.dev/v2/scrape" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com",
+    "formats": ["markdown"],
+    "profile": { "name": "profile-validation", "saveChanges": false }
+  }')
+
+SCRAPE_ID=$(echo "$RESPONSE" | jq -r ".data.metadata.scrapeId")
+
+curl -s -X POST "https://api.firecrawl.dev/v2/scrape/$SCRAPE_ID/interact" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "code": "await page.evaluate(() => ({ localStorage: localStorage.getItem(\"firecrawlProfileCheck\"), cookie: document.cookie.includes(\"firecrawl_profile_check=saved\") }));"
+  }'
+
+curl -s -X DELETE "https://api.firecrawl.dev/v2/scrape/$SCRAPE_ID/interact" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY"
+```
+
+The second interact response should show `localStorage` as `"saved"` and `cookie` as `true`.
+
+<Info>
+Profiles created through the API may not appear in Dashboard > Interact > Profiles yet. The dashboard currently does not provide a complete inventory of API-created persistent profiles.
+</Info>
 
 ## When to Use What
 
