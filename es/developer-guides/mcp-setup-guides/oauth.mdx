@@ -1,0 +1,116 @@
+---
+title: "Conecta clientes MCP con OAuth"
+description: "Autentica clientes MCP con Firecrawl utilizando OAuth en lugar de incluir tu clave de API en la URL"
+---
+
+La mayoría de las guías de configuración de MCP indican conectarse poniendo tu clave de API directamente en la URL del servidor (`https://mcp.firecrawl.dev/YOUR_API_KEY/v2/mcp`). Si tu cliente MCP es compatible con OAuth, puedes conectarte al endpoint sin clave e iniciar sesión desde tu navegador. Firecrawl emite un token de corta duración y alcance limitado para el cliente, de modo que tu clave de API real nunca se copia en la configuración del cliente.
+
+<Note>
+  La compatibilidad con OAuth es automática en los clientes que implementan la especificación de autorización de MCP (por ejemplo, los conectores personalizados de Claude.ai). No tienes que habilitar nada previamente en tu cuenta de Firecrawl.
+</Note>
+
+<div id="why-use-oauth">
+  ## Por qué usar OAuth
+</div>
+
+* **Sin clave de API en la URL.** El cliente nunca almacena tu clave `fc-` original. En su lugar, usa un token de acceso de corta duración.
+* **Tokens de corta duración y rotativos.** Los tokens de acceso caducan al cabo de 1 hora; los tokens de actualización se renuevan con cada uso.
+* **Con permisos limitados y por cliente.** Cada cliente conectado obtiene su propio token, por lo que el acceso puede gestionarse y revocarse de forma independiente.
+* **Menor impacto potencial.** Un token de cliente filtrado tiene permisos limitados y una duración corta, no la clave completa de tu cuenta.
+
+<div id="connect">
+  ## Conectar
+</div>
+
+<div id="1-use-the-keyless-mcp-url">
+  ### 1. Usa la URL de MCP sin clave
+</div>
+
+Configura tu cliente MCP para que apunte al endpoint base, sin clave de API en la ruta:
+
+```
+https://mcp.firecrawl.dev/v2/mcp
+```
+
+Si tu cliente te pide un **OAuth Client ID** y un **OAuth Client Secret**, deja ambos campos en blanco. Firecrawl usa [Dynamic Client Registration](#supported-standards), así que el cliente se registra automáticamente.
+
+<div id="2-sign-in-and-authorize">
+  ### 2. Inicia sesión y autoriza
+</div>
+
+Cuando el cliente se conecta por primera vez, abre una página de Firecrawl en tu navegador. Inicia sesión en tu cuenta de Firecrawl si todavía no lo has hecho y luego revisa la pantalla de consentimiento:
+
+> **Autorizar a &lt;nombre del cliente&gt;**
+> Esta aplicación quiere tener acceso completo a la API de Firecrawl usando tu cuenta de Firecrawl.
+
+Haz clic en **Permitir**. El cliente recibe su token y la conexión se completa. Todas las solicitudes que haga el cliente se facturan a tu cuenta de Firecrawl y se realizan en nombre de esta.
+
+<Tip>
+  Si tu cliente te permite elegir el equipo o la cuenta antes de autorizar, asegúrate de iniciar sesión en la cuenta cuyos créditos quieres que use el conector. Puedes ver el uso en cualquier momento en [firecrawl.dev/app/usage](https://www.firecrawl.dev/app/usage).
+</Tip>
+
+<div id="which-account-the-connector-uses">
+  ### Qué cuenta usa el conector
+</div>
+
+El token se genera para la cuenta de Firecrawl con la que inicias sesión durante el paso de consentimiento, y cada solicitud que hace el conector se descuenta de los créditos de esa cuenta. Si perteneces a varios equipos, cambia al equipo que quieras antes de aprobar (usa el selector de equipo en la esquina superior izquierda del [Firecrawl dashboard](https://www.firecrawl.dev/app)). Si más adelante quieres conectar otra cuenta, desconecta el conector en tu cliente y vuelve a conectarlo iniciando sesión con la cuenta que quieras.
+
+<div id="connect-from-other-clients">
+  ## Conectarse desde otros clientes
+</div>
+
+Cualquier cliente que implemente la especificación de autorización de MCP puede usar el endpoint sin clave apuntando a `https://mcp.firecrawl.dev/v2/mcp` y completando el inicio de sesión en el navegador cuando se le solicite.
+
+<Warning>
+  **Compatibilidad del URI de redirección del cliente.** El servidor de autorización de Firecrawl acepta URI de redirección de OAuth que sean **HTTPS** o de **loopback** (`http://localhost` / `http://127.0.0.1`). Algunos clientes (por ejemplo, **Cursor** y **VS Code**) registran como redirección un esquema de URL personalizado como `cursor://`, que actualmente no se admite, por lo que la conexión directa a la URL sin clave falla antes de que se abra el navegador. Con esos clientes, usa el wrapper [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) (usa una redirección loopback) o la [URL con clave de API](#oauth-vs-api-key-in-the-url).
+</Warning>
+
+El wrapper `mcp-remote` funciona con cualquier cliente que ejecute un comando local, incluidos Cursor y VS Code. Realiza el flujo de OAuth mediante una redirección loopback y abre el navegador para autorizar:
+
+```json
+{
+  "mcpServers": {
+    "firecrawl": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mcp.firecrawl.dev/v2/mcp"]
+    }
+  }
+}
+```
+
+Para los clientes que solo admiten una clave de API, usa en su lugar el formato con la clave de API en la URL (`https://mcp.firecrawl.dev/YOUR_API_KEY/v2/mcp`).
+
+<div id="oauth-vs-api-key-in-the-url">
+  ## OAuth vs. clave de API en la URL
+</div>
+
+Ambos métodos funcionan y usan las mismas herramientas de MCP. Selecciona según tu cliente:
+
+|                                | clave de API en la URL                          | OAuth                                                   |
+| ------------------------------ | ----------------------------------------------- | ------------------------------------------------------- |
+| **URL**                        | `https://mcp.firecrawl.dev/YOUR_API_KEY/v2/mcp` | `https://mcp.firecrawl.dev/v2/mcp`                      |
+| **Configuración**              | Pega la clave de API en la URL                  | Inicia sesión desde el navegador y haz clic en Permitir |
+| **Lo que almacena el cliente** | Tu clave de API sin procesar                    | Un token de corta duración y con alcance limitado       |
+| **Ideal para**                 | Clientes sin compatibilidad con OAuth           | Clientes que implementan MCP OAuth (p. ej., Claude.ai)  |
+
+<div id="supported-standards">
+  ## Estándares compatibles
+</div>
+
+Firecrawl ejecuta un servidor de autorización OAuth 2.0 conforme a los estándares, por lo que cualquier cliente MCP que siga la [especificación de autorización de MCP](https://modelcontextprotocol.io/specification) puede conectarse sin necesidad de código personalizado:
+
+* **OAuth 2.0 Authorization Code + PKCE** (solo S256)
+* **RFC 8414** — Descubrimiento de metadatos del servidor de autorización
+* **RFC 9728** — Metadatos de recurso protegido (el servidor MCP devuelve un `401` con una cabecera `WWW-Authenticate` que dirige a los clientes al proceso de descubrimiento)
+* **RFC 7591** — Registro dinámico de clientes
+* **RFC 8707** — Indicadores de recursos
+
+Los clientes descubren todo lo que necesitan a partir del documento de metadatos:
+
+```bash
+curl -s "https://www.firecrawl.dev/.well-known/oauth-authorization-server" | jq .
+```
+
+<Note>
+  Al solicitar un token para el MCP Server, los clientes compatibles con la especificación envían `resource=https://mcp.firecrawl.dev/v2/mcp` en las llamadas a `/authorize` y `/token` (según la RFC 8707). La mayoría de los clientes MCP gestionan esto automáticamente al leer los metadatos anteriores.
+</Note>
