@@ -1,0 +1,116 @@
+---
+title: "OAuth で MCP クライアントを接続する"
+description: "URL に API キーを埋め込む代わりに、OAuth を使って Firecrawl で MCP クライアントを認証します"
+---
+
+ほとんどの MCP セットアップガイドでは、サーバー URL (`https://mcp.firecrawl.dev/YOUR_API_KEY/v2/mcp`) に API キーを直接入れて接続します。MCP クライアントが OAuth をサポートしている場合は、代わりにキーレスエンドポイントに接続し、ブラウザからサインインできます。Firecrawl はクライアント向けに短期間有効でスコープが限定されたトークンを発行するため、API キーそのものがクライアントの設定にコピーされることはありません。
+
+<Note>
+  MCP 認可仕様を実装しているクライアント (たとえば Claude.ai の custom connectors) では、OAuth サポートは自動的に有効になります。事前に Firecrawl アカウント側で何かを有効にする必要はありません。
+</Note>
+
+<div id="why-use-oauth">
+  ## OAuth を使う理由
+</div>
+
+* **URL に APIキー を含めない。** クライアントが生の `fc-` キーを保存することはありません。代わりに、有効期間の短いアクセストークンを保持します。
+* **有効期間が短く、ローテーションされるトークン。** アクセストークンは 1 時間で期限切れになり、リフレッシュトークンは使用するたびにローテーションされます。
+* **スコープ付きで、クライアントごとに管理可能。** 接続された各クライアントにはそれぞれ固有のトークンが発行されるため、アクセスを個別に管理したり取り消したりできます。
+* **影響範囲を抑えられる。** クライアントトークンが漏えいしても、漏えいするのはスコープ付きで有効期間の短いトークンであり、アカウント全体のキーではありません。
+
+<div id="connect">
+  ## 接続
+</div>
+
+<div id="1-use-the-keyless-mcp-url">
+  ### 1. キーなしのMCP URLを使用する
+</div>
+
+パスにAPIキーを含めず、MCPクライアントでベースエンドポイントを指定します。
+
+```
+https://mcp.firecrawl.dev/v2/mcp
+```
+
+クライアントから **OAuth Client ID** と **OAuth Client Secret** の入力を求められた場合は、どちらも空欄のままにしてください。Firecrawl は [動的クライアント登録](#supported-standards) を使用しているため、クライアントは自動的に登録されます。
+
+<div id="2-sign-in-and-authorize">
+  ### 2. サインインして承認する
+</div>
+
+クライアントが初めて接続すると、ブラウザで Firecrawl のページが開きます。まだサインインしていない場合は Firecrawl アカウントにサインインし、同意画面を確認します。
+
+> **&lt;client name&gt; を承認**
+> このアプリケーションは、Firecrawl アカウントを使用して Firecrawl API へのフルアクセスを求めています。
+
+**Allow** をクリックします。クライアントがトークンを受け取り、接続が完了します。クライアントが送信するすべてのリクエストは、Firecrawl アカウントに請求され、そのアカウントとして実行されます。
+
+<Tip>
+  クライアントで承認前に Team またはアカウントを選択できる場合は、コネクタで使いたい クレジット があるアカウントにサインインしていることを確認してください。Usage はいつでも [firecrawl.dev/app/usage](https://www.firecrawl.dev/app/usage) で確認できます。
+</Tip>
+
+<div id="which-account-the-connector-uses">
+  ### コネクタが使用するアカウント
+</div>
+
+トークンは、同意ステップでサインインした Firecrawl アカウントに対して発行され、コネクタが行うすべてのリクエストで、そのアカウントのクレジットが消費されます。複数のチームに所属している場合は、承認する前に、使用したいチームに切り替えてください ([Firecrawl dashboard](https://www.firecrawl.dev/app) の左上にあるチームセレクターを使用します) 。後で別のアカウントを接続するには、クライアントでコネクタを切断し、接続したいアカウントでサインインして再接続してください。
+
+<div id="connect-from-other-clients">
+  ## 他のクライアントから接続する
+</div>
+
+MCP 認可仕様を実装しているクライアントであれば、`https://mcp.firecrawl.dev/v2/mcp` を指定し、求められたときにブラウザでのサインインを完了することで、キーレスエンドポイントを利用できます。
+
+<Warning>
+  **クライアントのリダイレクト URI 対応。** Firecrawl の認可サーバーは、**HTTPS** または **ループバック** (`http://localhost` / `http://127.0.0.1`) の OAuth リダイレクト URI を受け付けます。一部のクライアント (たとえば **Cursor** や **VS Code**) は、リダイレクト先として `cursor://` のようなカスタム URL スキームを登録しますが、これは現在受け付けられていません。そのため、これらをキーレス URL に直接接続しようとすると、ブラウザが開く前に失敗します。これらのクライアントでは、[`mcp-remote`](https://www.npmjs.com/package/mcp-remote) ラッパー (ループバックリダイレクトを使用) か、代わりに [API キー URL](#oauth-vs-api-key-in-the-url) を使用してください。
+</Warning>
+
+`mcp-remote` ラッパーは、Cursor や VS Code を含め、ローカルコマンドを実行できるあらゆるクライアントで動作します。OAuth フローをループバックリダイレクト経由で実行し、認可のためにブラウザを開きます。
+
+```json
+{
+  "mcpServers": {
+    "firecrawl": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mcp.firecrawl.dev/v2/mcp"]
+    }
+  }
+}
+```
+
+APIキーのみをサポートするクライアントでは、代わりに API-key-in-URL 形式 (`https://mcp.firecrawl.dev/YOUR_API_KEY/v2/mcp`) を使用してください。
+
+<div id="oauth-vs-api-key-in-the-url">
+  ## URL の API キーと OAuth
+</div>
+
+どちらの方法でも利用でき、使用する MCP ツールは同じです。クライアントに応じて選択してください。
+
+|                    | URL 内の API キー                                   | OAuth                                   |
+| ------------------ | ----------------------------------------------- | --------------------------------------- |
+| **URL**            | `https://mcp.firecrawl.dev/YOUR_API_KEY/v2/mcp` | `https://mcp.firecrawl.dev/v2/mcp`      |
+| **設定**             | URL に API キーを貼り付ける                              | ブラウザでサインインし、`Allow` をクリックする             |
+| **クライアントに保存されるもの** | API キーそのもの                                      | 有効期間が短く、スコープが限定されたトークン                  |
+| **最適な用途**          | OAuth をサポートしていないクライアント                          | MCP OAuth を実装しているクライアント (例: Claude.ai)  |
+
+<div id="supported-standards">
+  ## 対応している標準
+</div>
+
+Firecrawl は標準準拠の OAuth 2.0 認可サーバーを提供しているため、[MCP 認可仕様](https://modelcontextprotocol.io/specification) に準拠した MCP クライアントであれば、カスタムコードなしで接続できます。
+
+* **OAuth 2.0 Authorization Code + PKCE** (S256 のみ) 
+* **RFC 8414** — 認可サーバーメタデータのディスカバリー
+* **RFC 9728** — 保護対象リソースメタデータ (MCP サーバーは、クライアントをディスカバリーに誘導する `WWW-Authenticate` ヘッダー付きの `401` を返します) 
+* **RFC 7591** — 動的クライアント登録
+* **RFC 8707** — リソースインジケーター
+
+クライアントは、必要な情報をすべてメタデータドキュメントから取得できます。
+
+```bash
+curl -s "https://www.firecrawl.dev/.well-known/oauth-authorization-server" | jq .
+```
+
+<Note>
+  MCP Server のトークンをリクエストする際、仕様準拠のクライアントは `/authorize` と `/token` の呼び出し時に `resource=https://mcp.firecrawl.dev/v2/mcp` を渡します (RFC 8707 に準拠) 。通常、ほとんどの MCP クライアントは、上記のメタデータを読み取ってこれを自動的に処理します。
+</Note>

@@ -1,0 +1,116 @@
+---
+title: "使用 OAuth 连接 MCP 客户端"
+description: "使用 OAuth 通过 Firecrawl 验证 MCP 客户端，而不是将 API 密钥嵌入 URL 中"
+---
+
+大多数 MCP 设置指南都会将 API 密钥直接放在服务器 URL 中来建立连接 (`https://mcp.firecrawl.dev/YOUR_API_KEY/v2/mcp`) 。如果你的 MCP 客户端支持 OAuth，则可以改为连接到无密钥 端点，并通过浏览器登录。Firecrawl 会为客户端签发一个短期有效且带作用域限制的令牌，因此你的原始 API 密钥不会被复制到客户端配置中。
+
+<Note>
+  对于实现了 MCP 授权规范的客户端 (例如 Claude.ai 的自定义连接器) ，OAuth 支持会自动生效。你无需先在 Firecrawl 账户中启用任何设置。
+</Note>
+
+<div id="why-use-oauth">
+  ## 为什么使用 OAuth
+</div>
+
+* **URL 中不包含 API 密钥。** 客户端绝不会存储你的原始 `fc-` 密钥，而是持有一个短时有效的访问令牌。
+* **短时有效且会轮换的令牌。** 访问令牌会在 1 小时后过期；刷新令牌每次使用时都会轮换。
+* **作用域受限，且按客户端隔离。** 每个已连接的客户端都会获得自己的令牌，因此可以独立管理和撤销访问权限。
+* **降低泄露影响范围。** 即使客户端令牌泄露，其作用域也受限且有效期较短，不会暴露你的完整账户密钥。
+
+<div id="connect">
+  ## 接入
+</div>
+
+<div id="1-use-the-keyless-mcp-url">
+  ### 1. 使用无需密钥的 MCP URL
+</div>
+
+将 MCP 客户端指向基础端点，路径中不包含 API 密钥：
+
+```
+https://mcp.firecrawl.dev/v2/mcp
+```
+
+如果客户端要求填写 **OAuth Client ID** 和 **OAuth Client Secret**，请将这两项都留空。Firecrawl 使用[动态客户端注册](#supported-standards)，因此客户端会自动完成注册。
+
+<div id="2-sign-in-and-authorize">
+  ### 2. 登录并授权
+</div>
+
+当客户端首次连接时，会在你的浏览器中打开一个 Firecrawl 页面。如果你还没有登录 Firecrawl 账户，请先登录，然后查看授权页面：
+
+> **授权 &lt;client name&gt;**
+> 此应用希望使用你的 Firecrawl 账户获取 Firecrawl API 的完整访问权限。
+
+点击 **允许**。客户端会收到其令牌，连接随即完成。客户端发出的所有请求都会计入你的 Firecrawl 账户额度，并以你的 Firecrawl 账户身份执行。
+
+<Tip>
+  如果你的客户端允许你在授权前选择团队或账户，请确保登录的是你希望连接器使用其额度的那个账户。你可以随时在 [firecrawl.dev/app/usage](https://www.firecrawl.dev/app/usage) 查看使用情况。
+</Tip>
+
+<div id="which-account-the-connector-uses">
+  ### 连接器使用哪个账户
+</div>
+
+该令牌会为你在授权步骤中登录的 Firecrawl 账户生成，连接器发出的每个请求都会从该账户的额度中扣除。如果你属于多个团队，请先切换到你想使用的团队，再进行批准 (可使用 [Firecrawl dashboard](https://www.firecrawl.dev/app) 左上角的团队选择器) 。如果你之后想改连其他账户，请先在客户端中断开该连接器，再重新连接，并使用你想要的账户登录。
+
+<div id="connect-from-other-clients">
+  ## 从其他客户端连接
+</div>
+
+任何实现了 MCP 授权规范的客户端，都可以将 `https://mcp.firecrawl.dev/v2/mcp` 设为端点，并在提示时完成浏览器登录，以使用无密钥端点。
+
+<Warning>
+  **客户端重定向 URI 支持。** Firecrawl 的授权服务器接受 **HTTPS** 或 **loopback** (`http://localhost` / `http://127.0.0.1`) 形式的 OAuth 重定向 URI。某些客户端 (例如 **Cursor** 和 **VS Code**) 会将 `cursor://` 这类自定义 URL scheme 注册为重定向地址，但目前尚不支持，因此将它们直接连接到无密钥 URL 时，会在浏览器打开前失败。对于这类客户端，请改用 [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) 包装器 (它使用 loopback 重定向) ，或改用 [API 密钥 URL](#oauth-vs-api-key-in-the-url)。
+</Warning>
+
+`mcp-remote` 包装器适用于任何可运行本地命令的客户端，包括 Cursor 和 VS Code。它通过 loopback 重定向完成 OAuth 流程，并打开你的浏览器进行授权：
+
+```json
+{
+  "mcpServers": {
+    "firecrawl": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mcp.firecrawl.dev/v2/mcp"]
+    }
+  }
+}
+```
+
+对于仅支持 API 密钥的客户端，请改用在 URL 中携带 API 密钥的形式 (`https://mcp.firecrawl.dev/YOUR_API_KEY/v2/mcp`) 。
+
+<div id="oauth-vs-api-key-in-the-url">
+  ## URL 中的 OAuth 与 API 密钥
+</div>
+
+两种方法都可用，而且使用的是同一套 MCP 工具。请根据你的客户端选择：
+
+|                            | URL 中的 API 密钥                                   | OAuth                              |
+| -------------------------- | ----------------------------------------------- | ---------------------------------- |
+| **URL**                    | `https://mcp.firecrawl.dev/YOUR_API_KEY/v2/mcp` | `https://mcp.firecrawl.dev/v2/mcp` |
+| **Setup**                  | 将 API 密钥粘贴到 URL 中                               | 通过浏览器登录并点击允许                   |
+| **What the client stores** | 你的原始 API 密钥                                     | 短期有效且有权限范围限制的令牌                    |
+| **Best for**               | 不支持 OAuth 的客户端                                  | 实现了 MCP OAuth 的客户端 (例如 Claude.ai)  |
+
+<div id="supported-standards">
+  ## 支持的标准
+</div>
+
+Firecrawl 运行的是符合标准的 OAuth 2.0 授权服务器，因此，任何遵循 [MCP 授权规范](https://modelcontextprotocol.io/specification) 的 MCP 客户端都无需编写自定义代码即可连接：
+
+* **OAuth 2.0 Authorization Code + PKCE** (仅支持 S256) 
+* **RFC 8414** — 授权服务器元数据发现
+* **RFC 9728** — 受保护资源元数据 (MCP 服务器会返回带有 `WWW-Authenticate` 标头的 `401`，引导客户端进行发现) 
+* **RFC 7591** — 动态客户端注册
+* **RFC 8707** — 资源指示器
+
+客户端可从元数据文档中获取所需的全部信息：
+
+```bash
+curl -s "https://www.firecrawl.dev/.well-known/oauth-authorization-server" | jq .
+```
+
+<Note>
+  为 MCP 服务器请求令牌时，符合规范的客户端会在调用 `/authorize` 和 `/token` 时传递 `resource=https://mcp.firecrawl.dev/v2/mcp` (依据 RFC 8707) 。大多数 MCP 客户端会通过读取上述元数据自动处理这一点。
+</Note>
