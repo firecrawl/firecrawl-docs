@@ -1,0 +1,108 @@
+---
+title: "PII Redaction"
+description: "Redact personally identifiable information from scrape and parse output"
+og:title: "PII Redaction | Firecrawl"
+og:description: "Redact personally identifiable information from Firecrawl output"
+---
+
+import PIIPython from "/snippets/v2/scrape/pii/python.mdx";
+import PIINode from "/snippets/v2/scrape/pii/js.mdx";
+import PIICURL from "/snippets/v2/scrape/pii/curl.mdx";
+import PIICLI from "/snippets/v2/scrape/pii/cli.mdx";
+
+PII redaction replaces personally identifiable information in returned markdown before you send it downstream to agents, logs, vector stores, or analytics pipelines.
+
+## How it works
+
+Set `redactPII: true` on a scrape request. Firecrawl redacts the generated markdown and returns the redacted version in `markdown`.
+
+If you also include the `pii` format, Firecrawl returns a `pii` block with redaction status, detected spans, and counts. Without the `pii` format, the content is still redacted, but the diagnostic block is omitted.
+
+<CodeGroup>
+
+<PIIPython />
+
+<PIINode />
+
+<PIICURL />
+
+<PIICLI />
+
+</CodeGroup>
+
+## Redaction options
+
+For most requests, use `redactPII: true`. To tune redaction, pass an options object:
+
+```json
+{
+  "redactPII": {
+    "mode": "accurate",
+    "entities": ["EMAIL", "PHONE", "SECRET"],
+    "replaceStyle": "tag"
+  }
+}
+```
+
+| Option | Values | Default | Description |
+|---|---|---|---|
+| `mode` | `accurate`, `aggressive`, `fast` | `accurate` | Redaction strategy. `accurate` uses the model-only path, `aggressive` increases recall with additional heuristics, and `fast` skips the model call. |
+| `entities` | `PERSON`, `EMAIL`, `PHONE`, `LOCATION`, `FINANCIAL`, `SECRET` | All entities | Limit redaction to specific entity buckets. |
+| `replaceStyle` | `tag`, `mask`, `remove` | `tag` | Replace spans with tags like `<EMAIL>`, mask them with `*`, or remove the characters entirely. |
+
+<Note>
+The Firecrawl CLI and MCP server expose simple boolean redaction. Advanced options and the diagnostic `pii` format are available through the API and SDKs that expose the full `redactPII` options object.
+</Note>
+
+## Response
+
+When redaction succeeds, `markdown` contains the redacted content. If you request `formats: ["pii"]`, the response also includes:
+
+```json
+{
+  "markdown": "Contact us at <EMAIL> or <PHONE>.",
+  "pii": {
+    "status": "ok",
+    "redactedMarkdown": "Contact us at <EMAIL> or <PHONE>.",
+    "spans": [
+      {
+        "start": 14,
+        "end": 30,
+        "entity": "EMAIL",
+        "kind": "EMAIL_ADDRESS",
+        "source": "heuristics",
+        "score": 0.99
+      }
+    ],
+    "counts": {
+      "EMAIL": 1,
+      "PHONE": 1
+    }
+  }
+}
+```
+
+`pii.status` can be:
+
+- `ok`: Redaction completed and `redactedMarkdown` is the redacted result.
+- `skipped`: Redaction was not performed. `reason` explains why.
+- `failed`: Redaction was attempted but did not produce usable content. Firecrawl fails closed so raw markdown is not returned.
+
+## Billing
+
+PII redaction costs 5 credits per page: 1 base scrape credit plus 4 additional credits for redaction.
+
+For parsed PDFs, each additional PDF page still incurs the normal PDF parsing credit and also receives the additional redaction charge.
+
+## Availability
+
+PII redaction is supported anywhere Firecrawl accepts scrape options:
+
+- **Scrape** - set `redactPII` on `/v2/scrape`.
+- **Crawl, batch scrape, and search** - pass `redactPII` inside `scrapeOptions`.
+- **Parse** - pass `redactPII` inside the multipart `options` JSON.
+- **SDKs** - Python uses `redact_pii`; JavaScript and other SDKs use `redactPII` or their native option casing.
+- **CLI** - pass `--redact-pii` to `firecrawl scrape`.
+- **MCP server** - include `"redactPII": true` in `firecrawl_scrape` tool arguments for simple boolean redaction.
+
+> Are you an AI agent that needs a Firecrawl API key? See [firecrawl.dev/agent-onboarding/SKILL.md](https://www.firecrawl.dev/agent-onboarding/SKILL.md) for automated onboarding instructions.

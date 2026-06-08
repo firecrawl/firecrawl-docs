@@ -5716,6 +5716,22 @@
                 "type",
                 "query"
               ]
+            },
+            {
+              "type": "object",
+              "title": "PII",
+              "description": "Include PII redaction diagnostics in the response. Redaction itself is controlled by the `redactPII` option; this format only returns status, spans, and counts.",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "pii"
+                  ]
+                }
+              },
+              "required": [
+                "type"
+              ]
             }
           ]
         },
@@ -5840,6 +5856,22 @@
               "required": [
                 "type"
               ]
+            },
+            {
+              "type": "object",
+              "title": "PII",
+              "description": "Include PII redaction diagnostics in the response. Redaction itself is controlled by the `redactPII` option; this format only returns status, spans, and counts.",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "pii"
+                  ]
+                }
+              },
+              "required": [
+                "type"
+              ]
             }
           ]
         },
@@ -5940,6 +5972,18 @@
             "type": "boolean",
             "description": "Enable ad and cookie popup blocking.",
             "default": true
+          },
+          "redactPII": {
+            "oneOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "$ref": "#/components/schemas/RedactPIIOptions"
+              }
+            ],
+            "default": false,
+            "description": "Redact personally identifiable information from returned markdown. Pass `true` to use defaults, or an object to tune mode, entities, and replacement style. Add `pii` to `formats` to receive redaction diagnostics."
           },
           "proxy": {
             "type": "string",
@@ -6408,6 +6452,18 @@
             "description": "If true, serves the request from Firecrawl's cache only and never makes an outbound request to the target URL. Designed for compliance-constrained or air-gapped environments where the scrape request itself could leak sensitive information. On cache miss, returns a 404 with error code SCRAPE_LOCKDOWN_CACHE_MISS (the URL is never logged on miss). Lockdown requests are treated as zero data retention. Default maxAge is extended to 2 years so existing cached pages remain eligible. Billed at 5 credits on hit, 1 credit on cache miss.",
             "default": false
           },
+          "redactPII": {
+            "oneOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "$ref": "#/components/schemas/RedactPIIOptions"
+              }
+            ],
+            "default": false,
+            "description": "Redact personally identifiable information from returned markdown. Pass `true` to use defaults, or an object to tune mode, entities, and replacement style. Add `pii` to `formats` to receive redaction diagnostics."
+          },
           "profile": {
             "type": "object",
             "description": "Enable persistent browser storage across scrape and interact sessions. Pass a profile when scraping to preserve cookies, localStorage, and session data. Sessions with the same profile name share browser state.",
@@ -6481,6 +6537,10 @@
                 "type": "string",
                 "nullable": true,
                 "description": "Relevant source text selected by the `highlights` format. Only present if a `highlights` format object was included in `formats`."
+              },
+              "pii": {
+                "$ref": "#/components/schemas/PIIBlock",
+                "description": "PII redaction diagnostics if `redactPII` is enabled and `pii` is requested in `formats`."
               },
               "links": {
                 "type": "array",
@@ -7679,6 +7739,146 @@
             "description": "Support proxy or upstream error code."
           }
         }
+      },
+      "RedactPIIEntity": {
+        "type": "string",
+        "enum": [
+          "PERSON",
+          "EMAIL",
+          "PHONE",
+          "LOCATION",
+          "FINANCIAL",
+          "SECRET"
+        ],
+        "description": "Public PII entity buckets supported by Firecrawl redaction."
+      },
+      "RedactPIIOptions": {
+        "type": "object",
+        "description": "Tuning options for PII redaction.",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "accurate",
+              "aggressive",
+              "fast"
+            ],
+            "default": "accurate",
+            "description": "Redaction strategy. `accurate` is model-only and optimized for precision, `aggressive` increases recall with additional heuristics, and `fast` uses heuristics without the model call."
+          },
+          "entities": {
+            "type": "array",
+            "description": "Restrict redaction to these entity buckets. If omitted, all supported entities are redacted.",
+            "items": {
+              "$ref": "#/components/schemas/RedactPIIEntity"
+            }
+          },
+          "replaceStyle": {
+            "type": "string",
+            "enum": [
+              "tag",
+              "mask",
+              "remove"
+            ],
+            "default": "tag",
+            "description": "`tag` replaces spans with placeholders like `<EMAIL>`, `mask` replaces characters with `*`, and `remove` deletes the span text."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PIISpan": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "type": "integer",
+            "description": "Start character offset of the detected span in the source markdown."
+          },
+          "end": {
+            "type": "integer",
+            "description": "End character offset of the detected span in the source markdown."
+          },
+          "entity": {
+            "$ref": "#/components/schemas/RedactPIIEntity",
+            "description": "Unified public entity bucket. Omitted when the recognizer kind does not map to a public bucket."
+          },
+          "kind": {
+            "type": "string",
+            "description": "Granular recognizer label returned by the redaction service, such as EMAIL_ADDRESS."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "model",
+              "heuristics",
+              "unknown"
+            ],
+            "description": "Recognizer source for this span."
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Confidence score when provided by the recognizer."
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "kind",
+          "source"
+        ]
+      },
+      "PIIBlock": {
+        "type": "object",
+        "description": "PII redaction diagnostics returned when `redactPII` is enabled and `pii` is requested in formats.",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "skipped",
+              "failed"
+            ],
+            "description": "`ok` means redaction completed, `skipped` means redaction was not performed, and `failed` means redaction was attempted but did not produce usable content."
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "empty_input",
+              "too_large",
+              "upstream_skipped",
+              "service_unavailable",
+              "timeout",
+              "error"
+            ],
+            "description": "Reason redaction was skipped or failed. Present when status is not `ok`."
+          },
+          "redactedMarkdown": {
+            "type": "string",
+            "nullable": true,
+            "description": "The redacted markdown result, or null when no usable redacted content was produced."
+          },
+          "spans": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PIISpan"
+            },
+            "description": "Detected PII spans in the source markdown."
+          },
+          "counts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Count of detected spans by public entity bucket. Only non-zero entries are present."
+          }
+        },
+        "required": [
+          "status",
+          "redactedMarkdown",
+          "spans",
+          "counts"
+        ]
       }
     }
   },
