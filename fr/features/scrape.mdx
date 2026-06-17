@@ -40,6 +40,13 @@ import ScrapeBrandingOutput from "/snippets/fr/v2/scrape/branding/base/output.md
 import ScrapeBrandingCombinedPython from "/snippets/fr/v2/scrape/branding/combined/python.mdx";
 import ScrapeBrandingCombinedNode from "/snippets/fr/v2/scrape/branding/combined/js.mdx";
 import ScrapeBrandingCombinedCURL from "/snippets/fr/v2/scrape/branding/combined/curl.mdx";
+import ScrapeProductPython from "/snippets/fr/v2/scrape/product/base/python.mdx";
+import ScrapeProductNode from "/snippets/fr/v2/scrape/product/base/js.mdx";
+import ScrapeProductCURL from "/snippets/fr/v2/scrape/product/base/curl.mdx";
+import ScrapeProductOutput from "/snippets/fr/v2/scrape/product/base/output.mdx";
+import ScrapeProductCombinedPython from "/snippets/fr/v2/scrape/product/combined/python.mdx";
+import ScrapeProductCombinedNode from "/snippets/fr/v2/scrape/product/combined/js.mdx";
+import ScrapeProductCombinedCURL from "/snippets/fr/v2/scrape/product/combined/curl.mdx";
 import ScrapeAudioPython from "/snippets/fr/v2/scrape/audio/python.mdx";
 import ScrapeAudioNode from "/snippets/fr/v2/scrape/audio/js.mdx";
 import ScrapeAudioCURL from "/snippets/fr/v2/scrape/audio/curl.mdx";
@@ -54,7 +61,7 @@ import ScrapeHighlightsNode from "/snippets/fr/v2/scrape/highlights/js.mdx";
 import ScrapeHighlightsCURL from "/snippets/fr/v2/scrape/highlights/curl.mdx";
 import PlaygroundCTA from "/snippets/fr/shared/playground-cta-scrape.mdx";
 
-Firecrawl convertit les pages web en Markdown, idéal pour les applications LLM.
+Firecrawl convertit les pages web en markdown, idéal pour les applications LLM.
 
 * Il gère les complexités : proxies, mise en cache, limites de débit, contenu bloqué par JS
 * Prend en charge le contenu dynamique : sites web dynamiques, sites rendus par JS, PDF, images
@@ -138,6 +145,7 @@ Vous pouvez désormais choisir les formats de votre sortie. Vous pouvez spécifi
 * JSON (`json`) - sortie structurée
 * Images (`images`) - extrait toutes les URL d’images de la page
 * Branding (`branding`) - extrait l’identité de marque et le design system
+* Produit (`product`) - extrait un produit structuré (titre, prix, disponibilité, variantes) à partir de pages produit
 * Audio (`audio`) - extrait l’audio MP3 à partir d’URL vidéo prises en charge, par ex. YouTube (retourne une URL GCS signée, expire après 1 heure)
 * Vidéo (`video`) - extrait la vidéo de meilleure qualité à partir d’URL vidéo prises en charge, par ex. YouTube (retourne une URL GCS signée, expire après 1 heure)
 * Requête (`query`, avec `prompt` et `mode` facultatif) - posez une question en langage naturel sur la page ; la réponse est renvoyée dans le champ `answer`
@@ -153,6 +161,10 @@ Les clés de sortie correspondront au format que vous choisissez.
 </div>
 
 Permet d’extraire des données structurées à partir de pages scrappées.
+
+<Tip>
+  Vous extrayez des produits ? Pour les pages produit, le format [`product`](#extract-product-data) renvoie des champs de produit structurés (titre, prix, disponibilité, variantes) de manière déterministe — sans appel à un LLM ni schéma à définir. Utilisez `json` lorsque vous avez besoin de champs personnalisés ou pour des pages qui ne sont pas des pages produit.
+</Tip>
 
 <CodeGroup>
   <ExtractPython />
@@ -260,6 +272,83 @@ Vous pouvez combiner le format « branding » avec d’autres formats pour obten
   <ScrapeBrandingCombinedNode />
 
   <ScrapeBrandingCombinedCURL />
+</CodeGroup>
+
+<div id="extract-product-data">
+  ## Extraire les données produit
+</div>
+
+Le format `product` extrait des données produit structurées **de façon déterministe** — le même type de sortie structurée que le [format `json`](#extract-structured-data), mais sans appel à un LLM ni schéma à définir, et spécialement conçu pour les pages produit. Si vous récupériez des champs produit avec un schéma `json`, utilisez plutôt `formats: ["product"]` — c&#39;est plus rapide et moins coûteux, mais limité aux produits.
+
+Il renvoie un objet `product` avec le titre, la marque, la catégorie, la description et les variantes — chaque variante incluant le prix, le prix d&#39;origine, la disponibilité et les images — utile pour le suivi des prix, l&#39;ingestion de catalogues ou les outils de comparaison de prix.
+
+<div id="scrape-with-product-endpoint">
+  ### point de terminaison /scrape (avec le paramètre product)
+</div>
+
+<CodeGroup>
+  <ScrapeProductPython />
+
+  <ScrapeProductNode />
+
+  <ScrapeProductCURL />
+</CodeGroup>
+
+### Réponse
+
+Le format product renvoie un objet `product` avec la structure suivante :
+
+<ScrapeProductOutput />
+
+<div id="product-object-structure">
+  ### Structure de l’objet `product`
+</div>
+
+L’objet `product` contient les propriétés suivantes :
+
+* `title` : Le nom du produit
+* `brand` : La marque du produit (optionnel)
+* `category` : La catégorie du produit (optionnel)
+* `url` : L’URL canonique du produit
+* `description` : La description du produit (optionnel)
+* `variants` : Tableau des variantes du produit. La tarification, la disponibilité et les images sont définies sur chaque variante — un produit à SKU unique renvoie donc exactement une variante qui les contient. Chaque variante comprend :
+  * `id`, `sku`, `title` : les identifiants et le libellé de la variante (tous optionnels)
+  * `values` : une cartographie du nom d’option vers sa valeur, par ex. `{ "color": "Charcoal" }` (optionnel)
+  * `price` : l’objet du prix actuel (optionnel) :
+    * `amount` : La valeur numérique du prix
+    * `currency` : Le code de devise, renvoyé uniquement lorsque la page le fournit (optionnel)
+    * `formatted` : Le prix tel qu’affiché sur la page (optionnel)
+  * `sale` : présent uniquement lorsque la variante est en promotion (optionnel). Contient :
+    * `originalPrice` : Le prix d’origine (avant réduction), avec la même structure que `price`
+  * `availability` : informations de disponibilité, toujours présentes sur une variante :
+    * `inStock` : Indique si la variante est en stock
+    * `text` : Le texte brut de disponibilité extrait de la page (optionnel)
+  * `images` : tableau des images de la variante, chacune avec une `url` et un texte `alt` optionnel (optionnel)
+
+<div id="how-product-extraction-works">
+  ### Fonctionnement de l’extraction de produit
+</div>
+
+Le format `product` extrait le produit de manière déterministe à partir des données structurées présentes sur la page — aucun LLM n’intervient. Il fusionne plusieurs sources par ordre de priorité : **JSON-LD &gt; microdonnées schema.org &gt; RDFa &gt; état embarqué (`__NEXT_DATA__`/Nuxt/Apollo/Redux/Remix) &gt; `runParams` d’AliExpress &gt; `dataLayer` de GA4 &gt; OpenGraph/`<meta>`**. La fusion tient compte de l’identité, de sorte que des champs provenant de produits différents ne sont jamais combinés. La devise n’est indiquée que si la page la fournit.
+
+<Note>
+  L’extraction de produit fonctionne en mode fail-closed : les pages ambiguës ne renvoient aucun produit, et les sources moins fiables comme OpenGraph ne contribuent que lorsqu’un prix est présent. Sur une page sans produit extractible, la réponse omet l’objet `product` et ajoute un `warning` (par ex. &quot;Aucun produit trouvé...&quot;).
+</Note>
+
+<Note>
+  **Auto-hébergement :** le format `product` repose sur un service dédié d’extraction de produits. Sur Firecrawl Cloud, il fonctionne immédiatement. Si vous l’auto-hébergez, définissez `PRODUCT_EXTRACTION_SERVICE_URL` pour qu’il pointe vers ce service — lorsqu’il n’est pas défini, demander le format `product` renvoie un avertissement et aucun produit (selon le même principe que les formats audio/vidéo pour leur service).
+</Note>
+
+### Combiner avec d’autres formats
+
+Vous pouvez combiner le format product avec d’autres formats pour obtenir des données complètes sur la page :
+
+<CodeGroup>
+  <ScrapeProductCombinedPython />
+
+  <ScrapeProductCombinedNode />
+
+  <ScrapeProductCombinedCURL />
 </CodeGroup>
 
 <div id="audio-extraction">
