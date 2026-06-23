@@ -12,6 +12,7 @@ A Model Context Protocol (MCP) server implementation that integrates [Firecrawl]
 
 - Search the web and get full page content
 - Scrape any URL into clean, structured data
+- Parse local files such as PDFs, DOCX, XLSX, and HTML
 - Interact with pages — click, navigate, and operate
 - Deep research with autonomous agent
 - Browser session management
@@ -23,7 +24,7 @@ A Model Context Protocol (MCP) server implementation that integrates [Firecrawl]
 You can either use our remote hosted URL or run the server locally. Get your API key from [https://firecrawl.dev/app/api-keys](https://www.firecrawl.dev/app/api-keys)
 
 <Note>
-**No API key? Scrape, search, and interact still work.** Connect to the keyless remote URL `https://mcp.firecrawl.dev/v2/mcp` (or run the server locally without `FIRECRAWL_API_KEY`), and the `firecrawl_scrape`, `firecrawl_search`, and `firecrawl_interact` tools fall back to the keyless free tier — free, but rate-limited per IP, and unavailable for other tools (crawl, extract, map, etc.). Set `FIRECRAWL_API_KEY` to unlock every tool plus higher limits. See [Rate Limits](/rate-limits#keyless-no-api-key).
+**No API key? Scrape, search, interact, and parse work on the remote keyless URL.** Connect to `https://mcp.firecrawl.dev/v2/mcp` to use the keyless free tier — free, but rate-limited per IP, and unavailable for other tools (crawl, extract, map, etc.). Set `FIRECRAWL_API_KEY` to unlock every tool plus higher limits. See [Rate Limits](/rate-limits#keyless-no-api-key).
 </Note>
 
 ### Remote hosted URL
@@ -34,7 +35,7 @@ With an API key (unlocks every tool plus higher limits):
 https://mcp.firecrawl.dev/{FIRECRAWL_API_KEY}/v2/mcp
 ```
 
-Or connect without an API key to get started — scrape, search, and interact work on the keyless free tier (rate-limited per IP):
+Or connect without an API key to get started — scrape, search, interact, and parse work on the remote keyless free tier (rate-limited per IP):
 
 ```bash
 https://mcp.firecrawl.dev/v2/mcp
@@ -538,7 +539,43 @@ Search the web and optionally extract content from search results.
 - `scrapeOptions`: Options for scraping search result pages
 - `enterprise`: Array of enterprise options (`default`, `anon`, `zdr`)
 
-### 4. Crawl Tool (`firecrawl_crawl`)
+### 4. Parse Tool (`firecrawl_parse`)
+
+Parse a local file such as a PDF, DOCX, XLSX, or HTML document into clean, LLM-ready data.
+
+```json
+{
+  "name": "firecrawl_parse",
+  "arguments": {
+    "filePath": "/absolute/path/to/report.pdf",
+    "formats": ["markdown"]
+  }
+}
+```
+
+When you run Firecrawl MCP locally against a Firecrawl API instance with `FIRECRAWL_API_URL`, the MCP server can read `filePath` directly and sends the file bytes to `/v2/parse`.
+
+When you use the remote hosted MCP server, the hosted server cannot read files from your machine. In that case `firecrawl_parse` uses a two-step handoff that also works on the remote keyless URL:
+
+1. Call `firecrawl_parse` with `filePath`. The tool returns a pre-filled upload command and a `nextToolCall` containing an `uploadRef`.
+2. Run the upload command on the machine that can read the file, then call `firecrawl_parse` again with the returned `uploadRef`.
+
+The upload command sends the file bytes to a short-lived signed upload target. It does not include your Firecrawl API key.
+
+#### Parse Tool Options:
+
+- `filePath`: Local path to the file you want to parse. Use this for the first call.
+- `uploadRef`: Reference returned by the first hosted-MCP call. Use this for the second call after the upload succeeds.
+- `formats`: Output formats. Defaults to `markdown`.
+- `parsers`: Parser controls, such as PDF parsing options.
+- `contentType`: Optional file MIME type override.
+- `declaredSizeBytes`: Optional file size hint. Files are limited to 50 MB.
+
+**Best for:** Local or non-public documents that are not available at a public URL.
+
+**Not recommended for:** Public document URLs. Use `firecrawl_scrape` instead; it will detect and parse documents from URLs.
+
+### 5. Crawl Tool (`firecrawl_crawl`)
 
 Start an asynchronous crawl with advanced options.
 
@@ -555,7 +592,7 @@ Start an asynchronous crawl with advanced options.
 }
 ```
 
-### 5. Check Crawl Status (`firecrawl_check_crawl_status`)
+### 6. Check Crawl Status (`firecrawl_check_crawl_status`)
 
 Check the status of a crawl job.
 
@@ -570,7 +607,7 @@ Check the status of a crawl job.
 
 **Returns:** Status and progress of the crawl job, including results if available.
 
-### 6. Extract Tool (`firecrawl_extract`)
+### 7. Extract Tool (`firecrawl_extract`)
 
 Extract structured information from web pages using LLM capabilities. Supports both cloud AI and self-hosted LLM extraction.
 
@@ -625,7 +662,7 @@ Example response:
 
 When using a self-hosted instance, the extraction will use your configured LLM. For cloud API, it uses Firecrawl's managed LLM service.
 
-### 7. Agent Tool (`firecrawl_agent`)
+### 8. Agent Tool (`firecrawl_agent`)
 
 Autonomous web research agent that independently browses the internet, searches for information, navigates through pages, and extracts structured data based on your query. This runs asynchronously -- it returns a job ID immediately, and you poll `firecrawl_agent_status` to check when complete and retrieve results.
 
@@ -676,7 +713,7 @@ You can also provide specific URLs for the agent to focus on:
 
 **Returns:** Job ID for status checking. Use `firecrawl_agent_status` to poll for results.
 
-### 8. Check Agent Status (`firecrawl_agent_status`)
+### 9. Check Agent Status (`firecrawl_agent_status`)
 
 Check the status of an agent job and retrieve results when complete. Poll every 15-30 seconds and keep polling for at least 2-3 minutes before considering the request failed.
 
@@ -700,7 +737,7 @@ Check the status of an agent job and retrieve results when complete. Poll every 
 
 **Returns:** Status, progress, and results (if completed) of the agent job.
 
-### 9. Create Browser Session (`firecrawl_browser_create`)
+### 10. Create Browser Session (`firecrawl_browser_create`)
 
 Create a persistent browser session for code execution via CDP (Chrome DevTools Protocol).
 
@@ -723,7 +760,7 @@ Create a persistent browser session for code execution via CDP (Chrome DevTools 
 
 **Returns:** Session ID, CDP URL, and live view URL.
 
-### 10. Execute Code in Browser (`firecrawl_browser_execute`)
+### 11. Execute Code in Browser (`firecrawl_browser_execute`)
 
 Execute code in an active browser session. Supports agent-browser commands (bash), Python, or JavaScript.
 
@@ -768,7 +805,7 @@ Python example with Playwright:
 
 **Returns:** Execution result including stdout, stderr, and exit code.
 
-### 11. Delete Browser Session (`firecrawl_browser_delete`)
+### 12. Delete Browser Session (`firecrawl_browser_delete`)
 
 Destroy a browser session.
 
@@ -787,7 +824,7 @@ Destroy a browser session.
 
 **Returns:** Success confirmation.
 
-### 12. List Browser Sessions (`firecrawl_browser_list`)
+### 13. List Browser Sessions (`firecrawl_browser_list`)
 
 List browser sessions, optionally filtered by status.
 
@@ -806,7 +843,7 @@ List browser sessions, optionally filtered by status.
 
 **Returns:** Array of browser sessions.
 
-### 13. Interact with Scraped Page (`firecrawl_interact`)
+### 14. Interact with Scraped Page (`firecrawl_interact`)
 
 Interact with a previously scraped page in a live browser session. Scrape a page first with `firecrawl_scrape`, then use the returned `scrapeId` (from the scrape response metadata) to click buttons, fill forms, extract dynamic content, or navigate deeper. The response includes a `liveViewUrl` and `interactiveLiveViewUrl` you can open in your browser to watch or control the session in real time.
 
@@ -832,7 +869,7 @@ Interact with a previously scraped page in a live browser session. Scrape a page
 
 **Returns:** Interaction result including `liveViewUrl` and `interactiveLiveViewUrl`.
 
-### 14. Stop Interact Session (`firecrawl_interact_stop`)
+### 15. Stop Interact Session (`firecrawl_interact_stop`)
 
 Stop an interact session for a scraped page. Call this when you are done interacting to free resources.
 
