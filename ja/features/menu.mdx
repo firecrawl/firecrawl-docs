@@ -1,0 +1,105 @@
+---
+title: "メニュー抽出（ベータ）"
+description: "ページから構造化されたレストランのメニューを決定論的に抽出します。非公開ベータ機能で、チーム単位で有効化されます。"
+---
+
+import ScrapeMenuPython from "/snippets/ja/v2/scrape/menu/base/python.mdx";
+import ScrapeMenuNode from "/snippets/ja/v2/scrape/menu/base/js.mdx";
+import ScrapeMenuCURL from "/snippets/ja/v2/scrape/menu/base/curl.mdx";
+import ScrapeMenuOutput from "/snippets/ja/v2/scrape/menu/base/output.mdx";
+import ScrapeMenuCombinedPython from "/snippets/ja/v2/scrape/menu/combined/python.mdx";
+import ScrapeMenuCombinedNode from "/snippets/ja/v2/scrape/menu/combined/js.mdx";
+import ScrapeMenuCombinedCURL from "/snippets/ja/v2/scrape/menu/combined/curl.mdx";
+
+<Note>
+  **非公開ベータ。** `menu` フォーマットはチームごとに有効化されます。このページは未掲載 (ナビゲーションや Scrape 機能ページからはリンクされていません) となっており、機能がベータ版の間、参照用に共有できるようにしています。
+</Note>
+
+`menu` フォーマットは、構造化されたレストランメニューを**決定論的に**抽出します。これは [`json` format](/ja/features/scrape#extract-structured-data) と同じ種類の構造化された出力ですが、LLM の呼び出しやユーザー定義のスキーマは不要で、レストランのメニューページ向けに特化しています。これまで `json` スキーマでメニュー項目を取得していた場合は、代わりに `formats: ["menu"]` を使用してください。メニューに限定されるものの、より高速で低コストです。
+
+戻り値は `menu` オブジェクトで、merchant、currency、section のリストが含まれます。各 section には items があり、各 item には description、images、price、availability、dietary tags、calories、option groups が含まれます。メニューの取り込み、価格モニタリング、フードデリバリーや注文ツールに活用できます。
+
+<div id="scrape-with-menu-endpoint">
+  ## /scrape (メニュー付き) エンドポイント
+</div>
+
+<CodeGroup>
+  <ScrapeMenuPython />
+
+  <ScrapeMenuNode />
+
+  <ScrapeMenuCURL />
+</CodeGroup>
+
+<div id="response">
+  ## レスポンス
+</div>
+
+`menu` フォーマットでは、次の構造の `menu` オブジェクトが返されます:
+
+<ScrapeMenuOutput />
+
+<div id="menu-object-structure">
+  ## `menu` オブジェクトの構造
+</div>
+
+`menu` オブジェクトには、次のプロパティが含まれます:
+
+* `isMenu`: ページがメニューとして識別されたかどうか
+* `confidence`: メニュー抽出の信頼度スコア (`0`〜`1`)
+* `merchant`: このメニューの店舗情報 (任意) :
+  * `name`: 店舗名
+  * `type`: 店舗の種類 (例: `"restaurant"`)  (任意)
+* `currency`: メニューの通貨コード。ページにその情報がある場合にのみ返されます (任意)
+* `sections`: メニューセクションの配列。各セクションには次が含まれます:
+  * `id`: セクション識別子 (任意)
+  * `name`: セクション名 (例: `"Appetizers"`)
+  * `description`: セクションの説明 (任意)
+  * `items`: メニュー項目の配列。各項目には次が含まれます:
+    * `id`: 項目識別子 (任意)
+    * `name`: 項目名
+    * `description`: 項目の説明 (任意)
+    * `images`: 項目画像の配列。各画像には `url` と任意の `alt` テキストが含まれます (任意)
+    * `price`: 価格オブジェクト (任意) :
+      * `amount`: 数値の価格
+      * `currency`: 通貨コード。ページにその情報がある場合にのみ返されます (任意)
+      * `formatted`: ページ上に表示されている価格表記 (任意)
+    * `availability`: 提供状況に関する情報 (任意) :
+      * `inStock`: 項目を提供可能かどうか
+      * `text`: ページ上の元の提供状況テキスト (任意)
+    * `dietary`: 食事制限に関するタグの配列 (例: `["vegetarian"]`)  (任意)
+    * `calories`: 項目のカロリー量 (任意)
+    * `optionGroups`: 項目のオプション/追加項目グループの配列 (任意)
+    * `identifiers`: 項目に対する店舗固有の識別子 (任意) :
+      * `merchantItemId`: 店舗独自の項目 ID (任意)
+    * `url`: 項目の正規 URL (任意)
+    * `sourceUrl`: 項目の抽出元 URL (任意)
+* `sourceUrl`: メニューの抽出元 URL (任意)
+
+<div id="how-menu-extraction-works">
+  ## メニュー抽出の仕組み
+</div>
+
+`menu` フォーマットでは、決定論的なチェーンでメニューを抽出します。試行順は **プラットフォームアダプター (例: Toast) &gt; schema.org JSON-LD &gt; microdata / 埋め込み JSON state &gt; 可視テキスト/markdown パーサー** です。このチェーンで得られた中から最も情報量の多い結果を返し、何も見つからない場合、または結果の品質が低い場合にのみ、最後の手段として LLM による処理にフォールバックします。商品名と価格は常にページ上の情報に基づいており、抽出時に商品が捏造されることはありません。通貨は、ページ上にその情報がある場合にのみ返されます。
+
+<Note>
+  メニュー抽出は fail-closed です。メニューではないページからはメニューは返されません。抽出可能なメニューがないページでは、レスポンスには `menu` オブジェクトが含まれず、`warning` が追加されます。
+</Note>
+
+<Note>
+  **Self-hosting:** `menu` フォーマットは専用のメニュー抽出サービスによって提供されています。Firecrawl Cloud ではそのまま利用できます。セルフホストする場合は、そのサービスを指すように `MENU_EXTRACTION_SERVICE_URL` を設定してください。未設定の場合、`menu` フォーマットをリクエストすると &quot;Menu format is not available&quot; という警告が返され、`menu` フィールドは含まれません (スクレイピング自体は成功します) 。
+</Note>
+
+<div id="combining-with-other-formats">
+  ## 他のフォーマットと組み合わせる
+</div>
+
+menuフォーマットは、他のフォーマットと組み合わせて、より包括的なページデータを取得できます。
+
+<CodeGroup>
+  <ScrapeMenuCombinedPython />
+
+  <ScrapeMenuCombinedNode />
+
+  <ScrapeMenuCombinedCURL />
+</CodeGroup>

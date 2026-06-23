@@ -1,0 +1,105 @@
+---
+title: "菜单提取（Beta）"
+description: "以确定性方式从页面中提取结构化的餐厅菜单。当前为私测版，按团队开通。"
+---
+
+import ScrapeMenuPython from "/snippets/zh/v2/scrape/menu/base/python.mdx";
+import ScrapeMenuNode from "/snippets/zh/v2/scrape/menu/base/js.mdx";
+import ScrapeMenuCURL from "/snippets/zh/v2/scrape/menu/base/curl.mdx";
+import ScrapeMenuOutput from "/snippets/zh/v2/scrape/menu/base/output.mdx";
+import ScrapeMenuCombinedPython from "/snippets/zh/v2/scrape/menu/combined/python.mdx";
+import ScrapeMenuCombinedNode from "/snippets/zh/v2/scrape/menu/combined/js.mdx";
+import ScrapeMenuCombinedCURL from "/snippets/zh/v2/scrape/menu/combined/curl.mdx";
+
+<Note>
+  **私有测试版。** `menu` 格式按团队单独启用。此页面未公开列出 (不会从导航或 Scrape 功能页面跳转) ，因此在该功能处于测试阶段时，可作为参考进行分享。
+</Note>
+
+`menu` 格式会以**确定性**方式提取结构化的餐厅菜单——与 [`json` 格式](/zh/features/scrape#extract-structured-data) 产出同类的结构化输出，但无需调用 LLM，也不需要你定义 schema，专为餐厅菜单页面打造。如果你一直在用 `json` schema 提取菜单字段，请改用 `formats: ["menu"]`——它更快、成本更低，只是仅适用于菜单。
+
+它会返回一个 `menu` 对象，其中包含商家、货币以及分区列表——每个分区包含菜品，每个菜品包含描述、图片、价格、可用性、饮食标签、卡路里和选项组——适用于菜单采集、价格监控，或外卖和点餐工具。
+
+<div id="scrape-with-menu-endpoint">
+  ## /scrape (带菜单) 接口
+</div>
+
+<CodeGroup>
+  <ScrapeMenuPython />
+
+  <ScrapeMenuNode />
+
+  <ScrapeMenuCURL />
+</CodeGroup>
+
+<div id="response">
+  ## 响应
+</div>
+
+菜单格式返回一个 `menu` 对象，其结构如下：
+
+<ScrapeMenuOutput />
+
+<div id="menu-object-structure">
+  ## 菜单对象结构
+</div>
+
+`menu` 对象包含以下属性：
+
+* `isMenu`：页面是否被识别为菜单
+* `confidence`：菜单提取的置信度分数，范围在 `0` 到 `1` 之间
+* `merchant`：该菜单所属的商家 (可选) ：
+  * `name`：商家名称
+  * `type`：商家类型，例如 `"restaurant"` (可选)
+* `currency`：菜单的货币代码，仅在页面提供该信息时返回 (可选)
+* `sections`：菜单分区的数组。每个分区包含：
+  * `id`：分区标识符 (可选)
+  * `name`：分区名称，例如 `"Appetizers"`
+  * `description`：分区描述 (可选)
+  * `items`：菜单项数组。每个菜单项包含：
+    * `id`：菜单项标识符 (可选)
+    * `name`：菜单项名称
+    * `description`：菜单项描述 (可选)
+    * `images`：菜单项图片数组，每张图片都包含一个 `url` 和可选的 `alt` 文本 (可选)
+    * `price`：价格对象 (可选) ：
+      * `amount`：数值价格
+      * `currency`：货币代码，仅在页面提供该信息时返回 (可选)
+      * `formatted`：页面上显示的价格文本 (可选)
+    * `availability`：库存/可售状态信息 (可选) ：
+      * `inStock`：菜单项是否可售
+      * `text`：页面上的原始可售状态文本 (可选)
+    * `dietary`：饮食标签数组，例如 `["vegetarian"]` (可选)
+    * `calories`：菜单项的卡路里数 (可选)
+    * `optionGroups`：该菜单项的选项/修饰项分组数组 (可选)
+    * `identifiers`：商家为该菜单项定义的标识符 (可选) ：
+      * `merchantItemId`：商家自己的菜单项 ID (可选)
+    * `url`：菜单项的规范 URL (可选)
+    * `sourceUrl`：提取该菜单项的来源 URL (可选)
+* `sourceUrl`：提取该菜单的来源 URL (可选)
+
+<div id="how-menu-extraction-works">
+  ## 菜单提取的工作原理
+</div>
+
+`menu` 格式会通过一条确定性的处理链提取菜单，并按顺序依次尝试：**平台适配器 (如 Toast) &gt; schema.org JSON-LD &gt; 微数据 / 嵌入式 JSON 状态 &gt; 可见文本/Markdown 解析器**。它会返回这条处理链产出的信息最完整的结果；只有在确定性处理链未找到任何结果或结果质量较低时，才会回退到最后兜底的 LLM 处理。菜品名称和价格始终以页面内容为准——提取绝不会凭空生成条目。只有当页面中提供了货币信息时，才会返回货币。
+
+<Note>
+  菜单提取采用“失败即不返回”的策略：非菜单页面不会返回菜单。对于没有可提取菜单的页面，响应会省略 `menu` 对象，并添加一个 `warning`。
+</Note>
+
+<Note>
+  **自托管：**`menu` 格式依赖专用的菜单提取服务。在 Firecrawl Cloud 上可开箱即用。如果你是自托管，请设置 `MENU_EXTRACTION_SERVICE_URL` 指向该服务——若未设置，请求 `menu` 格式时会返回“Menu format is not available”警告，且不会包含 `menu` 字段 (但 scrape 仍会成功) 。
+</Note>
+
+<div id="combining-with-other-formats">
+  ## 与其他 formats 组合使用
+</div>
+
+你可以将 menu 格式与其他 formats 组合使用，以获取更全面的页面数据：
+
+<CodeGroup>
+  <ScrapeMenuCombinedPython />
+
+  <ScrapeMenuCombinedNode />
+
+  <ScrapeMenuCombinedCURL />
+</CodeGroup>
