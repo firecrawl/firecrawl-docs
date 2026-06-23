@@ -14,6 +14,7 @@ Une implémentation de serveur Model Context Protocol (MCP) intégrant [Firecraw
 
 * Recherche sur le web et récupération du contenu complet des pages
 * Extraction de n’importe quelle URL en données structurées propres
+* Analyse de fichiers locaux tels que des PDF, DOCX, XLSX et HTML
 * Interaction avec les pages — cliquer, naviguer et effectuer des actions
 * Recherche approfondie avec agent autonome
 * Gestion des sessions de navigateur
@@ -27,7 +28,7 @@ Une implémentation de serveur Model Context Protocol (MCP) intégrant [Firecraw
 Vous pouvez utiliser notre URL hébergée ou exécuter le serveur en local. Récupérez votre clé API sur [https://firecrawl.dev/app/api-keys](https://www.firecrawl.dev/app/api-keys)
 
 <Note>
-  **Pas de clé API ? Le scrape, la recherche et l’interaction fonctionnent quand même.** Connectez-vous à l’URL distante sans clé `https://mcp.firecrawl.dev/v2/mcp` (ou exécutez le serveur en local sans `FIRECRAWL_API_KEY`), et les outils `firecrawl_scrape`, `firecrawl_search` et `firecrawl_interact` basculent sur l’offre gratuite sans clé — gratuite, mais limitée par IP en termes de débit, et indisponible pour les autres outils (crawl, extract, map, etc.). Définissez `FIRECRAWL_API_KEY` pour activer tous les outils ainsi que des limites plus élevées. Consultez [Limite de débit](/fr/rate-limits#keyless-no-api-key).
+  **Pas de clé API ? Le scrape, la recherche, l’interaction et l’analyse fonctionnent sur l’URL distante sans clé.** Connectez-vous à `https://mcp.firecrawl.dev/v2/mcp` pour utiliser l’offre gratuite sans clé — gratuite, mais limitée par IP en termes de débit, et indisponible pour les autres outils (crawl, extract, map, etc.). Définissez `FIRECRAWL_API_KEY` pour activer tous les outils ainsi que des limites plus élevées. Consultez [Limite de débit](/fr/rate-limits#keyless-no-api-key).
 </Note>
 
 <div id="remote-hosted-url">
@@ -40,7 +41,7 @@ Avec une clé API (déverrouille tous les outils et offre des limites plus élev
 https://mcp.firecrawl.dev/{FIRECRAWL_API_KEY}/v2/mcp
 ```
 
-Ou connectez-vous sans clé API pour démarrer — scrape, search et interact fonctionnent avec l’offre Free sans clé (avec limitation de débit par IP) :
+Ou connectez-vous sans clé API pour démarrer — scrape, search, interact et parse fonctionnent avec l’offre Free sans clé à distance (avec limitation de débit par IP) :
 
 ```bash
 https://mcp.firecrawl.dev/v2/mcp
@@ -595,8 +596,48 @@ Effectuez une recherche sur le web et, si besoin, extrayez le contenu des résul
 * `scrapeOptions` : options de scraping des pages de résultats de recherche
 * `enterprise` : tableau d’options d’entreprise (`default`, `anon`, `zdr`)
 
-<div id="4-crawl-tool-firecrawl_crawl">
-  ### 4. Outil de crawl (`firecrawl_crawl`)
+<div id="4-parse-tool-firecrawl_parse">
+  ### 4. Outil de parsing (`firecrawl_parse`)
+</div>
+
+Convertissez un fichier local, tel qu’un document PDF, DOCX, XLSX ou HTML, en données propres, prêtes pour les LLM.
+
+```json
+{
+  "name": "firecrawl_parse",
+  "arguments": {
+    "filePath": "/absolute/path/to/report.pdf",
+    "formats": ["markdown"]
+  }
+}
+```
+
+Lorsque vous exécutez Firecrawl MCP localement sur une instance de l’API Firecrawl avec `FIRECRAWL_API_URL`, le serveur MCP peut lire directement `filePath` et envoie les octets du fichier à `/v2/parse`.
+
+Lorsque vous utilisez le serveur MCP distant hébergé, celui-ci ne peut pas lire les fichiers de votre machine. Dans ce cas, `firecrawl_parse` utilise un transfert en deux étapes qui fonctionne également avec l’URL distante sans clé :
+
+1. Appelez `firecrawl_parse` avec `filePath`. L’outil renvoie une commande d’upload préremplie et un `nextToolCall` contenant un `uploadRef`.
+2. Exécutez la commande d’upload sur la machine qui peut lire le fichier, puis appelez à nouveau `firecrawl_parse` avec l’`uploadRef` renvoyé.
+
+La commande d’upload envoie les octets du fichier vers une cible d’upload signée à durée de vie limitée. Elle n’inclut pas votre clé API Firecrawl.
+
+<div id="parse-tool-options">
+  #### Options de l’outil de parsing :
+</div>
+
+* `filePath` : Chemin local vers le fichier que vous souhaitez analyser. À utiliser pour le premier appel.
+* `uploadRef` : Référence renvoyée par le premier appel hosted-MCP. À utiliser pour le second appel une fois le téléversement terminé.
+* `formats` : Formats de sortie. Valeur par défaut : `markdown`.
+* `parsers` : Paramètres du parseur, comme les options d’analyse PDF.
+* `contentType` : Remplacement facultatif du type MIME du fichier.
+* `declaredSizeBytes` : Indication facultative de la taille du fichier. Les fichiers sont limités à 50 Mo.
+
+**Idéal pour :** Les documents locaux ou non publics qui ne sont pas disponibles via une URL publique.
+
+**Non recommandé pour :** Les URL de documents publics. Utilisez plutôt `firecrawl_scrape` ; il détectera et analysera les documents à partir des URL.
+
+<div id="5-crawl-tool-firecrawl_crawl">
+  ### 5. Outil de crawl (`firecrawl_crawl`)
 </div>
 
 Démarre un crawl asynchrone avec des options avancées.
@@ -614,8 +655,8 @@ Démarre un crawl asynchrone avec des options avancées.
 }
 ```
 
-<div id="5-check-crawl-status-firecrawl_check_crawl_status">
-  ### 5. Vérifier l&#39;état du crawl (`firecrawl_check_crawl_status`)
+<div id="6-check-crawl-status-firecrawl_check_crawl_status">
+  ### 6. Vérifier l&#39;état du crawl (`firecrawl_check_crawl_status`)
 </div>
 
 Vérifiez l&#39;état d&#39;une tâche de crawl.
@@ -631,8 +672,8 @@ Vérifiez l&#39;état d&#39;une tâche de crawl.
 
 **Renvoie :** le statut et l&#39;avancement du job de crawl, y compris les résultats le cas échéant.
 
-<div id="6-extract-tool-firecrawl_extract">
-  ### 6. Outil d’extraction (`firecrawl_extract`)
+<div id="7-extract-tool-firecrawl_extract">
+  ### 7. Outil d’extraction (`firecrawl_extract`)
 </div>
 
 Extrait des informations structurées depuis des pages web en utilisant les capacités des LLM. Prend en charge aussi bien l’IA dans le cloud que l’extraction avec des LLM auto-hébergés.
@@ -690,11 +731,11 @@ Exemple de réponse :
 
 Lors de l’utilisation d’une instance auto‑hébergée, l’extraction utilisera le LLM que vous avez configuré. Pour l’API cloud, elle utilise le service LLM géré de Firecrawl.
 
-<div id="7-agent-tool-firecrawl_agent">
-  ### 7. Outil Agent (`firecrawl_agent`)
+<div id="8-agent-tool-firecrawl_agent">
+  ### 8. Outil Agent (`firecrawl_agent`)
 </div>
 
-Agent autonome de recherche web qui parcourt Internet de manière indépendante, recherche des informations, navigue entre les pages et extrait des données structurées en fonction de votre requête. Ce processus s’exécute de façon asynchrone : il renvoie immédiatement un ID de job, puis vous interrogez périodiquement `firecrawl_agent_status` pour savoir quand il est terminé et récupérer les résultats.
+Agent autonome de recherche web qui parcourt Internet de manière indépendante, recherche des informations, navigue entre les pages et extrait des données structurées en fonction de votre requête. Ce processus s’exécute de façon asynchrone : il renvoie immédiatement un ID de tâche, puis vous interrogez périodiquement `firecrawl_agent_status` pour savoir quand il est terminé et récupérer les résultats.
 
 ```json
 {
@@ -745,8 +786,8 @@ Vous pouvez également fournir des URL spécifiques sur lesquelles l’agent dev
 
 **Retourne :** ID de tâche pour vérifier l’état d’avancement. Utilisez `firecrawl_agent_status` pour interroger les résultats.
 
-<div id="8-check-agent-status-firecrawl_agent_status">
-  ### 8. Vérifier l&#39;état de l&#39;agent (`firecrawl_agent_status`)
+<div id="9-check-agent-status-firecrawl_agent_status">
+  ### 9. Vérifier le statut de l&#39;agent (`firecrawl_agent_status`)
 </div>
 
 Vérifiez l&#39;état d&#39;une tâche d&#39;agent et récupérez les résultats une fois terminée. Effectuez un polling toutes les 15 à 30 secondes et continuez pendant au moins 2 à 3 minutes avant de considérer la requête comme échouée.
@@ -774,8 +815,8 @@ Vérifiez l&#39;état d&#39;une tâche d&#39;agent et récupérez les résultats
 
 **Retourne :** Le statut, la progression et les résultats (si terminé) de la tâche d&#39;agent.
 
-<div id="9-create-browser-session-firecrawl_browser_create">
-  ### 9. Créer une session de navigateur (`firecrawl_browser_create`)
+<div id="10-create-browser-session-firecrawl_browser_create">
+  ### 10. Créer une session de navigateur (`firecrawl_browser_create`)
 </div>
 
 Crée une session de navigateur persistante pour exécuter du code via CDP (Chrome DevTools Protocol).
@@ -801,11 +842,11 @@ Crée une session de navigateur persistante pour exécuter du code via CDP (Chro
 
 **Renvoie :** ID de session, URL CDP et URL de vue en direct.
 
-<div id="10-execute-code-in-browser-firecrawl_browser_execute">
-  ### 10. Exécuter du code dans le navigateur (`firecrawl_browser_execute`)
+<div id="11-execute-code-in-browser-firecrawl_browser_execute">
+  ### 11. Exécuter du code dans le navigateur (`firecrawl_browser_execute`)
 </div>
 
-Exécute du code dans une session de navigation active. Prend en charge les commandes agent-browser (bash), Python ou JavaScript.
+Exécute du code dans une session de navigateur active. Prend en charge les commandes agent-browser (bash), Python ou JavaScript.
 
 ```json
 {
@@ -851,8 +892,8 @@ Exemple en Python avec Playwright :
 
 **Renvoie :** Le résultat de l’exécution, incluant `stdout`, `stderr` et le code de sortie.
 
-<div id="11-delete-browser-session-firecrawl_browser_delete">
-  ### 11. Supprimer une session de navigateur (`firecrawl_browser_delete`)
+<div id="12-delete-browser-session-firecrawl_browser_delete">
+  ### 12. Supprimer une session de navigateur (`firecrawl_browser_delete`)
 </div>
 
 Supprime une session de navigateur.
@@ -874,8 +915,8 @@ Supprime une session de navigateur.
 
 **Renvoie :** Une confirmation de réussite.
 
-<div id="12-list-browser-sessions-firecrawl_browser_list">
-  ### 12. Lister les sessions de navigateur (`firecrawl_browser_list`)
+<div id="13-list-browser-sessions-firecrawl_browser_list">
+  ### 13. Lister les sessions de navigateur (`firecrawl_browser_list`)
 </div>
 
 Affiche la liste des sessions de navigateur, avec possibilité de filtrer par statut.
@@ -884,7 +925,7 @@ Affiche la liste des sessions de navigateur, avec possibilité de filtrer par st
 {
   "name": "firecrawl_browser_list",
   "arguments": {
-    "status": "actif"
+    "status": "active"
   }
 }
 ```
@@ -897,8 +938,8 @@ Affiche la liste des sessions de navigateur, avec possibilité de filtrer par st
 
 **Renvoie :** Tableau de sessions de navigateur.
 
-<div id="13-interact-with-scraped-page-firecrawl_interact">
-  ### 13. Interact avec une page déjà scrapée (`firecrawl_interact`)
+<div id="14-interact-with-scraped-page-firecrawl_interact">
+  ### 14. Interact avec une page déjà scrapée (`firecrawl_interact`)
 </div>
 
 Interactez avec une page précédemment scrapée dans une session de navigateur en direct. Scrapez d’abord une page avec `firecrawl_scrape`, puis utilisez le `scrapeId` renvoyé (dans les métadonnées de la réponse de scrape) pour cliquer sur des boutons, remplir des formulaires, extraire du contenu dynamique ou naviguer plus en profondeur. La réponse inclut un `liveViewUrl` et un `interactiveLiveViewUrl` que vous pouvez ouvrir dans votre navigateur pour suivre ou contrôler la session en temps réel.
@@ -927,8 +968,8 @@ Interactez avec une page précédemment scrapée dans une session de navigateur 
 
 **Renvoie :** Le résultat de l’interaction, y compris `liveViewUrl` et `interactiveLiveViewUrl`.
 
-<div id="14-stop-interact-session-firecrawl_interact_stop">
-  ### 14. Arrêter une session Interact (`firecrawl_interact_stop`)
+<div id="15-stop-interact-session-firecrawl_interact_stop">
+  ### 15. Arrêter une session Interact (`firecrawl_interact_stop`)
 </div>
 
 Arrêtez une session Interact pour une page scrapée. Appelez cette opération une fois l’interaction terminée afin de libérer des ressources.

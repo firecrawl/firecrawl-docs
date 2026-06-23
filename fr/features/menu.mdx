@@ -1,0 +1,105 @@
+---
+title: "Extraction de menu (bêta)"
+description: "Extraire de façon déterministe un menu de restaurant structuré depuis une page. Bêta privée, activée pour chaque Équipe."
+---
+
+import ScrapeMenuPython from "/snippets/fr/v2/scrape/menu/base/python.mdx";
+import ScrapeMenuNode from "/snippets/fr/v2/scrape/menu/base/js.mdx";
+import ScrapeMenuCURL from "/snippets/fr/v2/scrape/menu/base/curl.mdx";
+import ScrapeMenuOutput from "/snippets/fr/v2/scrape/menu/base/output.mdx";
+import ScrapeMenuCombinedPython from "/snippets/fr/v2/scrape/menu/combined/python.mdx";
+import ScrapeMenuCombinedNode from "/snippets/fr/v2/scrape/menu/combined/js.mdx";
+import ScrapeMenuCombinedCURL from "/snippets/fr/v2/scrape/menu/combined/curl.mdx";
+
+<Note>
+  **Bêta privée.** Le format `menu` est activé pour chaque équipe. Cette page n’est pas répertoriée (elle n’est liée ni depuis la navigation ni depuis la page de la fonctionnalité Scrape) afin de pouvoir être partagée comme référence pendant que la fonctionnalité est en bêta.
+</Note>
+
+Le format `menu` extrait un menu de restaurant structuré **de façon déterministe** — le même type de sortie structurée que le [format `json`](/fr/features/scrape#extract-structured-data), mais sans appel à un LLM ni schéma à définir, et spécialement conçu pour les pages de menu de restaurant. Si vous extrayez des champs de menu avec un schéma `json`, utilisez plutôt `formats: ["menu"]` — c’est plus rapide et moins coûteux, mais limité aux menus.
+
+Il renvoie un objet `menu` avec l’établissement, la devise et une liste de sections — chaque section contenant des éléments, et chaque élément une description, des images, un prix, une disponibilité, des mentions diététiques, des calories et des groupes d’options — utile pour l’ingestion de menus, le suivi des prix ou les outils de livraison et de commande de repas.
+
+<div id="scrape-with-menu-endpoint">
+  ## Point de terminaison /scrape (avec menu)
+</div>
+
+<CodeGroup>
+  <ScrapeMenuPython />
+
+  <ScrapeMenuNode />
+
+  <ScrapeMenuCURL />
+</CodeGroup>
+
+<div id="response">
+  ## Réponse
+</div>
+
+Le format `menu` renvoie un objet `menu` ayant la structure suivante :
+
+<ScrapeMenuOutput />
+
+<div id="menu-object-structure">
+  ## Structure de l’objet menu
+</div>
+
+L’objet `menu` contient les propriétés suivantes :
+
+* `isMenu` : Indique si la page a été identifiée comme un menu
+* `confidence` : Un score de confiance entre `0` et `1` pour l’extraction de menu
+* `merchant` : L’établissement auquel appartient le menu (facultatif) :
+  * `name` : Le nom de l’établissement
+  * `type` : Le type d’établissement, par ex. `"restaurant"` (facultatif)
+* `currency` : Le code de devise du menu, indiqué uniquement lorsque la page le fournit (facultatif)
+* `sections` : Tableau des sections du menu. Chaque section comporte :
+  * `id` : L’identifiant de la section (facultatif)
+  * `name` : Le nom de la section, par ex. `"Appetizers"`
+  * `description` : La description de la section (facultatif)
+  * `items` : Tableau des éléments du menu. Chaque élément comporte :
+    * `id` : L’identifiant de l’élément (facultatif)
+    * `name` : Le nom de l’élément
+    * `description` : La description de l’élément (facultatif)
+    * `images` : tableau des images de l’élément, chacune avec une `url` et un texte `alt` facultatif (facultatif)
+    * `price` : l’objet prix (facultatif) :
+      * `amount` : La valeur numérique du prix
+      * `currency` : Le code de devise, indiqué uniquement lorsque la page le fournit (facultatif)
+      * `formatted` : Le prix tel qu’affiché sur la page (facultatif)
+    * `availability` : informations de disponibilité (facultatif) :
+      * `inStock` : Indique si l’élément est disponible
+      * `text` : Le texte brut de disponibilité extrait de la page (facultatif)
+    * `dietary` : tableau des étiquettes alimentaires, par ex. `["vegetarian"]` (facultatif)
+    * `calories` : Le nombre de calories de l’élément (facultatif)
+    * `optionGroups` : Tableau des groupes d’options/modificateurs pour l’élément (facultatif)
+    * `identifiers` : identifiants propres à l’établissement pour l’élément (facultatif) :
+      * `merchantItemId` : L’identifiant propre à l’établissement pour cet élément (facultatif)
+    * `url` : L’URL canonique de l’élément (facultatif)
+    * `sourceUrl` : L’URL depuis laquelle l’élément a été extrait (facultatif)
+* `sourceUrl` : L’URL depuis laquelle le menu a été extrait (facultatif)
+
+<div id="how-menu-extraction-works">
+  ## Fonctionnement de l&#39;extraction de menu
+</div>
+
+Le format `menu` extrait le menu via une chaîne déterministe, appliquée dans l&#39;ordre suivant : **adaptateurs de plateforme (p. ex. Toast) &gt; JSON-LD schema.org &gt; microdonnées / état JSON intégré &gt; un parseur de texte visible/markdown**. Il renvoie le résultat le plus riche produit par cette chaîne et ne recourt à un dernier passage par LLM qu&#39;en dernier ressort, lorsque la chaîne déterministe ne trouve rien ou renvoie un résultat de faible qualité. Les noms des plats et les prix proviennent toujours de la page — l&#39;extraction n&#39;invente jamais d&#39;éléments. La devise n&#39;est indiquée que si la page la mentionne.
+
+<Note>
+  L&#39;extraction de menu fonctionne selon un principe de fermeture par défaut : les pages qui ne sont pas des menus ne renvoient aucun menu. Sur une page sans menu extractible, la réponse omet l&#39;objet `menu` et ajoute un `warning`.
+</Note>
+
+<Note>
+  **Auto-hébergement :** le format `menu` repose sur un service dédié à l&#39;extraction de menus. Sur Firecrawl Cloud, il fonctionne immédiatement. Si vous l&#39;auto-hébergez, définissez `MENU_EXTRACTION_SERVICE_URL` pour qu&#39;il pointe vers ce service — si elle n&#39;est pas définie, une requête du format `menu` renvoie un avertissement &quot;Menu format is not available&quot; et aucun champ `menu` (le scrape réussit quand même).
+</Note>
+
+<div id="combining-with-other-formats">
+  ## Combiner avec d’autres formats
+</div>
+
+Vous pouvez combiner le format menu avec d’autres formats pour obtenir des données complètes sur la page :
+
+<CodeGroup>
+  <ScrapeMenuCombinedPython />
+
+  <ScrapeMenuCombinedNode />
+
+  <ScrapeMenuCombinedCURL />
+</CodeGroup>
