@@ -35,7 +35,7 @@ import DiffMarkdown from "/snippets/v2/monitor/diff/markdown.mdx";
 import DiffJson from "/snippets/v2/monitor/diff/json.mdx";
 import DiffMixed from "/snippets/v2/monitor/diff/mixed.mdx";
 
-Firecrawl monitoring detects when content on a website changes and get notified by webhook or email. It runs recurring scrapes or crawls and compare each result against the last retained snapshot. Use monitors to track product pages, docs, blogs, changelogs, competitor sites, or any page where changes matter.
+Firecrawl monitoring detects when content on a website changes and get notified by webhook or email. It runs recurring scrapes, crawls, or web searches and compares each result against the last retained snapshot. Use monitors to track product pages, docs, blogs, changelogs, competitor sites, or any page where changes matter — or to watch the whole web for new results that match a goal (see [Search monitoring](#search-monitoring)).
 
 Each check records page-level results as `same`, `new`, `changed`, `removed`, or `error`. You can receive a webhook as each monitored page finishes, a webhook for every completed check, email summaries when changes or errors happen, or any combination of those notifications.
 
@@ -154,10 +154,11 @@ The minimum interval is 15 minutes. API responses always return the normalized c
 
 ## Targets
 
-Monitors support two target types:
+Monitors support three target types:
 
 - `scrape`: Runs one scrape per URL in `urls`.
 - `crawl`: Runs a full crawl for `url` on each check, then diffs all discovered pages.
+- `search`: Runs web search `queries` on each check and alerts on new matching results. See [Search monitoring](#search-monitoring) for its fields and behavior.
 
 Each monitor accepts 1-50 targets. `retentionDays` defaults to `30` and can be set up to `365`.
 
@@ -315,7 +316,23 @@ How much work each check does per result is controlled by the monitor's `judgeEn
 
 ### Statuses and dedup
 
-Search results are recorded as `new` or `already_seen`, rather than scrape and crawl's `same`, `changed`, and `removed`. A result alerts once when it first appears as `new`. If its title or snippet changes on re-index it fingerprints differently and can fire again. One real-world event spread across many articles alerts only once.
+Search results use the **same page-level `status` enum** as scrape and crawl monitors, so existing webhook and check-result consumers work unchanged. A search result maps to:
+
+- `new` — a result that matched the goal for the first time. This is what alerts.
+- `same` — a result already seen on a previous check (no new alert).
+- `error` — a result that could not be evaluated (for example, the scrape for judging was skipped).
+
+The finer-grained search disposition is exposed on each page's `metadata.searchStatus`, one of:
+
+| `searchStatus` | Page `status` | Meaning |
+|----------------|---------------|---------|
+| `alert` | `new` | New result the judge considers meaningful — fires a notification. |
+| `already_seen` | `same` | Fingerprint matched a result from an earlier check. |
+| `watching` | `same` | New result the judge isn't confident about yet; tracked but not alerted. |
+| `ignored` | `same` | New result the judge scored as not meaningful to the goal. |
+| `skipped` | `error` | Result could not be judged this check (for example, scrape failure or degraded judging). |
+
+A result alerts once when it first appears as `new`. If its title or snippet changes on re-index it fingerprints differently (canonical URL plus title plus snippet) and can fire again. One real-world event spread across many articles alerts only once.
 
 Editing the monitor's `goal` or `queries` bumps its `goalVersion`, which invalidates prior judge verdicts. Re-evaluation is lazy rather than a bulk re-judge: existing results are not all re-judged at once. Instead, each result is re-judged the next time it resurfaces in a check, picking up the new `goalVersion` then. Results that don't resurface keep their old verdict and `goalVersion` until they reappear.
 
