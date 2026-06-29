@@ -309,6 +309,39 @@ A search target uses `type: "search"` and replaces `urls` with the queries to ru
 
 The monitor-level `goal` and `judgeEnabled` apply just as in [Goals and judging](#goals-and-judging). Firecrawl expands the goal into queries when you don't supply your own, and the judge scores each new result against the goal.
 
+### Writing good goals and queries
+
+A web monitor's quality comes down to two levers that do different jobs:
+
+- **`queries` control recall** — what each search pulls in. Too narrow and real events never surface; too broad and the judge spends credits filtering noise.
+- **`goal` controls precision** — which retrieved results actually alert. The judge scores every new result against the goal, so the goal is what separates a real match from an on-topic-but-irrelevant one.
+
+Tune both. A perfect goal cannot alert on a result the queries never retrieved, and broad queries paired with a vague goal produce constant low-value alerts.
+
+**Good queries read like search terms, not sentences:**
+
+- Use keywords, not prose — `OpenAI new model release`, not `tell me when OpenAI releases a new model`.
+- Quote multi-word entities (`"Llama 4"`) and group synonyms with `OR` (`launch OR release OR announcement`).
+- Keep each query tight (about 2–6 terms). One broad query usually beats several narrow ones — extra queries split the `maxResults` budget without adding coverage.
+- Use one query per *distinct* subject. A single subject with several facets ("launches, benchmarks, docs") is still one query; only split when the goal names genuinely separate entities (for example, "OpenAI, Anthropic, and Google").
+- Keep `site:` / `-site:` operators out of queries — use `includeDomains` / `excludeDomains` instead.
+
+**Good goals state the match in plain language and add exclusions only when they are part of the intent:**
+
+- Name the subject and what counts as a match: *"Alert when OpenAI announces a brand-new model."*
+- Disambiguate overloaded terms: *"Firecrawl (the web scraping API)"* keeps the judge off fire-fighting equipment.
+- Add `Ignore ...` only for intent-specific non-matches: *"Ignore opinion pieces, tutorials, and unrelated AI news."* Do not restate generic noise — the judge already handles formatting, tracking params, and re-indexing churn.
+- If the intent is broad, keep it broad. Over-tight goals suppress real matches.
+
+**What a healthy monitor looks like.** A well-tuned web monitor mostly reports nothing — most checks return `new: 0` — and alerts only when something genuinely new and on-goal appears. Read the check summary and each result's `searchStatus` (see [Statuses and dedup](#statuses-and-dedup)) to tell whether it is tuned:
+
+- A steady trickle of `ignored` results means the queries pull in noise the goal then rejects — tighten the queries (or narrow `searchWindow`) so you stop paying to judge results that never alert.
+- Frequent `watching` means the goal is ambiguous — sharpen the match criteria so the judge can commit.
+- Long stretches of zero results on an active topic mean the queries are too narrow or `searchWindow` is too tight — broaden the terms or widen the window.
+- Alerts the user dismisses mean the goal is too broad — add an intent-specific `Ignore ...`.
+
+The target outcome is high precision with enough recall: every alert is worth acting on, and nothing real is missed.
+
 ### Judging
 
 How much work each check does per result is controlled by the monitor's `judgeEnabled` — the same flag described in [Goals and judging](#goals-and-judging). With judging on, Firecrawl scrapes each matching result and evaluates its content against the goal, billed at 1 credit per judged result on top of the search call. With `judgeEnabled: false`, a web monitor returns the deduped search results with no AI judging — just the new SERP hits, and pays only the search-call credits (2 credits per 10 results).
