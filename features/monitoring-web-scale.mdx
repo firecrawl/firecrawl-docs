@@ -1,0 +1,263 @@
+---
+title: "Entire web-scale monitoring"
+sidebarTitle: "Entire web-scale"
+description: "Run always-on web searches and alert when new matching results appear"
+og:title: "Entire web-scale monitoring | Firecrawl"
+og:description: "Run always-on web searches and alert when new matching results appear"
+icon: "globe"
+---
+
+Entire web-scale monitoring is an always-on search that watches the web and pings you or your agent the moment something comes online.
+
+Page and website monitors watch URLs you name. An **entire web-scale** monitor watches the whole web. Instead of diffing pages you already know about, you give it `queries` to run plus a `goal`, and Firecrawl runs the queries on every check and alerts on **new** results the judge finds relevant to the goal. It's discovery rather than diffing.
+
+Each check runs the same cycle: take the goal and its `queries`, apply a recency window, run the search, dedupe the results by canonical URL, let the optional AI judge decide which new results are meaningful to the goal, and alert through the same webhook and email channels as scrape and crawl monitors. Scheduling, goals, judging, and notifications all work exactly as described in the [Monitoring overview](/features/monitoring).
+
+<Note>
+  Page and crawl monitors diff content on URLs you name; web-scale monitors discover new results across the web. Same scheduling, judge, and notifications underneath.
+</Note>
+
+## Search target
+
+A search target uses `type: "search"` and replaces `urls` with the queries to run and how to score the results:
+
+```json Search target
+{
+  "type": "search",
+  "queries": ["open source AI coding assistant launch"],
+  "searchWindow": "24h",
+  "maxResults": 10,
+  "includeDomains": ["news.ycombinator.com"]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | `"search"` | Selects the search target. |
+| `queries` | `string[]` | Search queries to run on each check. 1–12 queries, each up to 256 characters. Required. |
+| `searchWindow` | `"5m" \| "15m" \| "1h" \| "6h" \| "24h" \| "7d"` | Recency filter — only consider results published within this window. Defaults to `24h`. |
+| `maxResults` | `number` | Total results to evaluate per check, `1`–`50`. Defaults to `10`. This is a combined cap across all `queries` (results are merged and deduped first), not a per-query limit — so an individual query may contribute fewer results, or none, if other queries fill the cap first. |
+| `includeDomains` | `string[]` | Optional. Restrict results to these domains (up to 50). Mutually exclusive with `excludeDomains`. |
+| `excludeDomains` | `string[]` | Optional. Drop results from these domains (up to 50). Mutually exclusive with `includeDomains`. |
+
+<Note>
+  A search target requires a non-empty monitor-level `goal` unless you set `judgeEnabled: false`. `queries` are required; the `goal` is what the judge scores each new result against — it does not generate the queries. See [Goals and judging](/features/monitoring#goals-and-judging).
+</Note>
+
+<Note>
+  **Credits scale with queries.** Each query fetches up to `maxResults` results, and the search-call credits are billed on the raw results across all queries *before* merge and dedupe — so adding queries increases the actual search cost, not just the upfront estimate. After merge/dedupe Firecrawl evaluates at most `maxResults` selected candidates, so the judge credits stay capped by the selected/judged results.
+</Note>
+
+## Create a web-scale monitor
+
+A web-scale monitor is created the same way as a page monitor — the only differences are the target (`type: "search"` with `queries`, `searchWindow`, `maxResults`, and optional domain filters) and that there are no URLs:
+
+<CodeGroup>
+```python Python
+from firecrawl import Firecrawl
+
+firecrawl = Firecrawl(
+  # Monitor endpoints require an API key:
+  api_key="fc-YOUR-API-KEY",
+)
+
+monitor = firecrawl.create_monitor(
+    name="AI coding assistant launches",
+    schedule={"text": "every 30 minutes", "timezone": "UTC"},
+    goal="Alert when a new open-source AI coding assistant is announced. Ignore funding rounds and unrelated AI news.",
+    targets=[
+        {
+            "type": "search",
+            "queries": ["open source AI coding assistant launch"],
+            "searchWindow": "24h",
+            "maxResults": 10,
+        }
+    ],
+    notification={
+        "email": {
+            "enabled": True,
+            "recipients": ["alerts@example.com"],
+            "includeDiffs": True,
+        }
+    },
+)
+
+print(monitor.id)
+```
+
+```js Node
+import Firecrawl from "@mendable/firecrawl-js";
+
+const firecrawl = new Firecrawl({
+  // Monitor endpoints require an API key:
+  apiKey: "fc-YOUR-API-KEY",
+});
+
+const monitor = await firecrawl.createMonitor({
+  name: "AI coding assistant launches",
+  schedule: { text: "every 30 minutes", timezone: "UTC" },
+  goal:
+    "Alert when a new open-source AI coding assistant is announced. Ignore funding rounds and unrelated AI news.",
+  notification: {
+    email: {
+      enabled: true,
+      recipients: ["alerts@example.com"],
+      includeDiffs: true,
+    },
+  },
+  targets: [
+    {
+      type: "search",
+      queries: ["open source AI coding assistant launch"],
+      searchWindow: "24h",
+      maxResults: 10,
+    },
+  ],
+});
+
+console.log(monitor.id);
+```
+
+```bash cURL
+curl -s -X POST "https://api.firecrawl.dev/v2/monitor" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "AI coding assistant launches",
+    "schedule": {
+      "text": "every 30 minutes",
+      "timezone": "UTC"
+    },
+    "goal": "Alert when a new open-source AI coding assistant is announced. Ignore funding rounds and unrelated AI news.",
+    "notification": {
+      "email": {
+        "enabled": true,
+        "recipients": ["alerts@example.com"],
+        "includeDiffs": true
+      }
+    },
+    "targets": [
+      {
+        "type": "search",
+        "queries": ["open source AI coding assistant launch"],
+        "searchWindow": "24h",
+        "maxResults": 10
+      }
+    ]
+  }'
+```
+
+```bash CLI
+firecrawl monitor create \
+  --name "AI coding assistant launches" \
+  --schedule "every 30 minutes" \
+  --queries "open source AI coding assistant launch" \
+  --goal "Alert when a new open-source AI coding assistant is announced. Ignore funding rounds and unrelated AI news."
+```
+
+```json MCP — firecrawl_monitor_create
+{
+  "queries": ["open source AI coding assistant launch"],
+  "goal": "Alert when a new open-source AI coding assistant is announced. Ignore funding rounds and unrelated AI news.",
+  "searchWindow": "24h",
+  "maxResults": 10,
+  "scheduleText": "every 30 minutes"
+}
+```
+</CodeGroup>
+
+When a new matching result is discovered, the `monitor.page` webhook reports it with status `new` and, when judging ran, a `judgment` describing why it matters:
+
+```json monitor.page
+{
+  "success": true,
+  "type": "monitor.page",
+  "id": "019df960-5f2a-75fb-a98b-bd2d32ca67d4",
+  "webhookId": "f1e2d3c4-0000-0000-0000-000000000000",
+  "data": [
+    {
+      "monitorId": "019df960-06e7-7383-9d89-82c0113dc31a",
+      "checkId": "019df960-5f2a-75fb-a98b-bd2d32ca67d4",
+      "url": "https://news.ycombinator.com/item?id=40000000",
+      "status": "new",
+      "error": null,
+      "isMeaningful": true,
+      "judgment": {
+        "meaningful": true,
+        "confidence": "high",
+        "reason": "A new open-source AI coding assistant was announced, which matches the monitor goal."
+      }
+    }
+  ],
+  "metadata": {
+    "environment": "production"
+  }
+}
+```
+
+## Writing good goals and queries
+
+A web-scale monitor's quality comes down to two levers that do different jobs:
+
+- **`queries` control recall** — what each search pulls in. Too narrow and real events never surface; too broad and the judge spends credits filtering noise.
+- **`goal` controls precision** — which retrieved results actually alert. The judge scores every new result against the goal, so the goal is what separates a real match from an on-topic-but-irrelevant one.
+
+Tune both. A perfect goal cannot alert on a result the queries never retrieved, and broad queries paired with a vague goal produce constant low-value alerts.
+
+**Good queries read like search terms, not sentences:**
+
+- Use keywords, not prose — `OpenAI new model release`, not `tell me when OpenAI releases a new model`.
+- Quote multi-word entities (`"Llama 4"`) and group synonyms with `OR` (`launch OR release OR announcement`).
+- Keep each query tight (about 2–6 terms). One broad query usually beats several narrow ones — extra queries split the `maxResults` budget without adding coverage.
+- Use one query per *distinct* subject. A single subject with several facets ("launches, benchmarks, docs") is still one query; only split when the goal names genuinely separate entities (for example, "OpenAI, Anthropic, and Google").
+- Keep `site:` / `-site:` operators out of queries — use `includeDomains` / `excludeDomains` instead.
+
+**Good goals state the match in plain language and add exclusions only when they are part of the intent:**
+
+- Name the subject and what counts as a match: *"Alert when OpenAI announces a brand-new model."*
+- Disambiguate overloaded terms: *"Firecrawl (the web scraping API)"* keeps the judge off fire-fighting equipment.
+- Add `Ignore ...` only for intent-specific non-matches: *"Ignore opinion pieces, tutorials, and unrelated AI news."* Do not restate generic noise — the judge already handles formatting, tracking params, and re-indexing churn.
+- If the intent is broad, keep it broad. Over-tight goals suppress real matches.
+
+**What a healthy monitor looks like.** A well-tuned web-scale monitor mostly reports nothing — most checks return `new: 0` — and alerts only when something genuinely new and on-goal appears. Read the check summary and each result's `searchStatus` (see [Statuses and dedup](#statuses-and-dedup)) to tell whether it is tuned:
+
+- A steady trickle of `ignored` results means the queries pull in noise the goal then rejects — tighten the queries (or narrow `searchWindow`) so you stop paying to judge results that never alert.
+- Frequent `watching` means the goal is ambiguous — sharpen the match criteria so the judge can commit.
+- Long stretches of zero results on an active topic mean the queries are too narrow or `searchWindow` is too tight — broaden the terms or widen the window.
+- Alerts the user dismisses mean the goal is too broad — add an intent-specific `Ignore ...`.
+
+The target outcome is high precision with enough recall: every alert is worth acting on, and nothing real is missed.
+
+## Judging
+
+How much work each check does per result is controlled by the monitor's `judgeEnabled` — the same flag described in [Goals and judging](/features/monitoring#goals-and-judging). With judging on, Firecrawl scrapes each matching result and evaluates its content against the goal, billed at 1 credit per judged result on top of the search call. With `judgeEnabled: false`, a web-scale monitor returns the deduped search results with no AI judging — just the new SERP hits, and pays only the search-call credits (2 credits per 10 results).
+
+## Statuses and dedup
+
+Search results use the **same page-level `status` enum** as scrape and crawl monitors, so existing webhook and check-result consumers work unchanged. A search result maps to:
+
+- `new` — a result that matched the goal for the first time. This is what alerts.
+- `same` — a result already seen on a previous check (no new alert).
+- `error` — a result that could not be evaluated (for example, the scrape for judging was skipped).
+
+The finer-grained search disposition is exposed on each page's `metadata.searchStatus`, one of:
+
+| `searchStatus` | Page `status` | Meaning |
+|----------------|---------------|---------|
+| `alert` | `new` | New result the judge considers meaningful — fires a notification. |
+| `already_seen` | `same` | Fingerprint matched a result from an earlier check. |
+| `watching` | `same` | New result the judge isn't confident about yet; tracked but not alerted. |
+| `ignored` | `same` | New result the judge scored as not meaningful to the goal. |
+| `skipped` | `error` | Result could not be judged this check (for example, scrape failure or degraded judging). |
+
+A result alerts once when it first appears as `new`. Dedup is keyed on the canonical URL alone (title and snippet are deliberately not part of the fingerprint, so a title/snippet change does not re-fire). Because the key is the URL, one real-world event reported across many article URLs alerts once per URL, not once per event.
+
+Editing the monitor's `goal` or `queries` bumps its `goalVersion`, which invalidates prior judge verdicts. Re-evaluation is lazy rather than a bulk re-judge: existing results are not all re-judged at once. Instead, each result is re-judged the next time it resurfaces in a check, picking up the new `goalVersion` then. Results that don't resurface keep their old verdict and `goalVersion` until they reappear.
+
+## Shared configuration
+
+- [Schedules](/features/monitoring#schedules) — cron or natural-language cadence, minimum 5 minutes.
+- [Goals and judging](/features/monitoring#goals-and-judging) — required for search targets unless `judgeEnabled: false`.
+- [Notifications](/features/monitoring#notifications) — webhook and email delivery.
+- [Check results](/features/monitoring#check-results) — inspect each check and its results.
+- [Pricing](/features/monitoring#pricing) — 2 credits per 10 results per check, plus 1 credit per judged result.
