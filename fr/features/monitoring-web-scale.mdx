@@ -1,0 +1,275 @@
+---
+title: "Surveillance à l'échelle de l'ensemble du web"
+sidebarTitle: "À l'échelle de tout le web"
+description: "Exécutez des recherches web en continu et recevez une alerte lorsque de nouveaux résultats correspondants apparaissent"
+og:title: "Surveillance à l'échelle de l'ensemble du web | Firecrawl"
+og:description: "Exécutez des recherches web en continu et recevez une alerte lorsque de nouveaux résultats correspondants apparaissent"
+icon: "globe"
+---
+
+La surveillance à l&#39;échelle de l&#39;ensemble du web est une recherche continue qui scrute le web et vous avertit, vous ou votre agent, dès que quelque chose apparaît en ligne.
+
+Les monitors de page et de site web surveillent les URL que vous indiquez. Un monitor **à l&#39;échelle de l&#39;ensemble du web** surveille l&#39;ensemble du web. Au lieu de comparer des diff de pages que vous connaissez déjà, vous lui fournissez des `queries` à exécuter ainsi qu&#39;un `goal`, et Firecrawl lance les requêtes à chaque check puis envoie des alertes sur les **nouveaux** résultats que le juge juge pertinents par rapport au goal. Il s&#39;agit de découverte plutôt que de diff.
+
+Chaque check suit le même cycle : prendre le goal et ses `queries`, appliquer une fenêtre de récence, exécuter la recherche, dédupliquer les résultats par URL canonique, laisser le juge IA facultatif décider quels nouveaux résultats sont significatifs pour le goal, puis envoyer des alertes via les mêmes canaux webhook et e-mail que les monitors de scrape et de crawl. La planification, les goals, l&#39;évaluation et les notifications fonctionnent exactement comme décrit dans la [vue d&#39;ensemble de la surveillance](/fr/features/monitoring).
+
+<Note>
+  Les monitors de page et de crawl comparent les différences de contenu sur les URL que vous indiquez ; les monitors à l&#39;échelle du web découvrent de nouveaux résultats sur l&#39;ensemble du web. La planification, le juge et les notifications reposent sur le même fonctionnement sous-jacent.
+</Note>
+
+<div id="search-target">
+  ## Cible de recherche
+</div>
+
+Une cible de recherche utilise `type: "search"` et remplace `urls` par les requêtes à exécuter ainsi que la façon d’évaluer les résultats :
+
+```json Search target
+{
+  "type": "search",
+  "queries": ["open source AI coding assistant launch"],
+  "searchWindow": "24h",
+  "maxResults": 10,
+  "includeDomains": ["news.ycombinator.com"]
+}
+```
+
+| Champ            | Type                                             | Description                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `type`           | `"search"`                                       | Sélectionne la cible de recherche.                                                                                                                                                                                                                                                                                                                                                   |
+| `queries`        | `string[]`                                       | Requêtes de recherche à exécuter à chaque vérification. 1 à 12 requêtes, jusqu&#39;à 256 caractères chacune. Obligatoire.                                                                                                                                                                                                                                                            |
+| `searchWindow`   | `"5m" \| "15m" \| "1h" \| "6h" \| "24h" \| "7d"` | Filtre de récence — ne prendre en compte que les résultats publiés dans cet intervalle. Par défaut, `24h`.                                                                                                                                                                                                                                                                           |
+| `maxResults`     | `number`                                         | Nombre total de résultats à évaluer par vérification, `1`–`50`. Par défaut, `10`. Il s&#39;agit d&#39;un plafond global pour toutes les `queries` (les résultats sont d&#39;abord fusionnés et dédupliqués), et non d&#39;une limite par requête — une requête donnée peut donc fournir moins de résultats, voire aucun, si d&#39;autres requêtes atteignent d&#39;abord ce plafond. |
+| `includeDomains` | `string[]`                                       | Optionnel. Limite les résultats à ces domaines (jusqu&#39;à 50). Ne peut pas être utilisé avec `excludeDomains`.                                                                                                                                                                                                                                                                     |
+| `excludeDomains` | `string[]`                                       | Optionnel. Exclut les résultats de ces domaines (jusqu&#39;à 50). Ne peut pas être utilisé avec `includeDomains`.                                                                                                                                                                                                                                                                    |
+
+<Note>
+  Une cible de recherche nécessite un `goal` non vide au niveau du monitor, sauf si vous définissez `judgeEnabled: false`. Les `queries` sont obligatoires ; le `goal` sert de référence au juge pour évaluer chaque nouveau résultat — il ne génère pas les requêtes. Voir [Objectifs et évaluation](/fr/features/monitoring#goals-and-judging).
+</Note>
+
+<Note>
+  **Les crédits augmentent avec le nombre de requêtes.** Chaque requête récupère jusqu&#39;à `maxResults` résultats, et les crédits des appels de recherche sont facturés sur les résultats bruts de l&#39;ensemble des requêtes *avant* fusion et déduplication — ajouter des requêtes augmente donc le coût réel de la recherche, pas seulement l&#39;estimation initiale. Après fusion/déduplication, Firecrawl évalue au plus `maxResults` candidats sélectionnés, de sorte que les crédits du juge restent plafonnés par le nombre de résultats sélectionnés/évalués.
+</Note>
+
+<div id="create-a-web-scale-monitor">
+  ## Créer un monitor à l’échelle du Web
+</div>
+
+Un monitor à l’échelle du Web se crée de la même manière qu’un monitor de page — les seules différences concernent la cible (`type: "search"` avec `queries`, `searchWindow`, `maxResults` et, éventuellement, des filtres de domaine) et l’absence d’URL :
+
+<CodeGroup>
+  ```python Python
+  from firecrawl import Firecrawl
+
+  firecrawl = Firecrawl(
+    # Les points de terminaison de monitor nécessitent une API key :
+    api_key="fc-YOUR-API-KEY",
+  )
+
+  monitor = firecrawl.create_monitor(
+      name="AI coding assistant launches",
+      schedule={"text": "every 30 minutes", "timezone": "UTC"},
+      goal="Alert when a new open-source AI coding assistant is announced. Ignore funding rounds and unrelated AI news.",
+      targets=[
+          {
+              "type": "search",
+              "queries": ["open source AI coding assistant launch"],
+              "searchWindow": "24h",
+              "maxResults": 10,
+          }
+      ],
+      notification={
+          "email": {
+              "enabled": True,
+              "recipients": ["alerts@example.com"],
+              "includeDiffs": True,
+          }
+      },
+  )
+
+  print(monitor.id)
+  ```
+
+  ```js Node
+  import Firecrawl from "@mendable/firecrawl-js";
+
+  const firecrawl = new Firecrawl({
+    // Les points de terminaison de monitor nécessitent une API key :
+    apiKey: "fc-YOUR-API-KEY",
+  });
+
+  const monitor = await firecrawl.createMonitor({
+    name: "AI coding assistant launches",
+    schedule: { text: "every 30 minutes", timezone: "UTC" },
+    goal:
+      "Alert when a new open-source AI coding assistant is announced. Ignore funding rounds and unrelated AI news.",
+    notification: {
+      email: {
+        enabled: true,
+        recipients: ["alerts@example.com"],
+        includeDiffs: true,
+      },
+    },
+    targets: [
+      {
+        type: "search",
+        queries: ["open source AI coding assistant launch"],
+        searchWindow: "24h",
+        maxResults: 10,
+      },
+    ],
+  });
+
+  console.log(monitor.id);
+  ```
+
+  ```bash cURL
+  curl -s -X POST "https://api.firecrawl.dev/v2/monitor" \
+    -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "name": "AI coding assistant launches",
+      "schedule": {
+        "text": "every 30 minutes",
+        "timezone": "UTC"
+      },
+      "goal": "Alert when a new open-source AI coding assistant is announced. Ignore funding rounds and unrelated AI news.",
+      "notification": {
+        "email": {
+          "enabled": true,
+          "recipients": ["alerts@example.com"],
+          "includeDiffs": true
+        }
+      },
+      "targets": [
+        {
+          "type": "search",
+          "queries": ["open source AI coding assistant launch"],
+          "searchWindow": "24h",
+          "maxResults": 10
+        }
+      ]
+    }'
+  ```
+
+  ```bash CLI
+  firecrawl monitor create \
+    --name "AI coding assistant launches" \
+    --schedule "every 30 minutes" \
+    --queries "open source AI coding assistant launch" \
+    --goal "Alert when a new open-source AI coding assistant is announced. Ignore funding rounds and unrelated AI news."
+  ```
+
+  ```json MCP — firecrawl_monitor_create
+  {
+    "queries": ["open source AI coding assistant launch"],
+    "goal": "Alert when a new open-source AI coding assistant is announced. Ignore funding rounds and unrelated AI news.",
+    "searchWindow": "24h",
+    "maxResults": 10,
+    "scheduleText": "every 30 minutes"
+  }
+  ```
+</CodeGroup>
+
+Lorsqu’un nouveau résultat correspondant est détecté, le webhook `monitor.page` le signale avec l’état `new` et, lorsqu’une évaluation a été effectuée, un `judgment` expliquant pourquoi c’est important :
+
+```json monitor.page
+{
+  "success": true,
+  "type": "monitor.page",
+  "id": "019df960-5f2a-75fb-a98b-bd2d32ca67d4",
+  "webhookId": "f1e2d3c4-0000-0000-0000-000000000000",
+  "data": [
+    {
+      "monitorId": "019df960-06e7-7383-9d89-82c0113dc31a",
+      "checkId": "019df960-5f2a-75fb-a98b-bd2d32ca67d4",
+      "url": "https://news.ycombinator.com/item?id=40000000",
+      "status": "new",
+      "error": null,
+      "isMeaningful": true,
+      "judgment": {
+        "meaningful": true,
+        "confidence": "high",
+        "reason": "A new open-source AI coding assistant was announced, which matches the monitor goal."
+      }
+    }
+  ],
+  "metadata": {
+    "environment": "production"
+  }
+}
+```
+
+<div id="writing-good-goals-and-queries">
+  ## Rédiger de bons objectifs et de bonnes requêtes
+</div>
+
+La qualité d&#39;un monitor à l&#39;échelle du web repose sur deux leviers qui ont des rôles différents :
+
+* **`queries` contrôlent le rappel** — ce que chaque recherche fait remonter. Trop restrictives, et les événements réels ne remontent jamais ; trop larges, et le juge dépense des crédits à filtrer le bruit.
+* **`goal` contrôle la précision** — quels résultats récupérés déclenchent réellement une alerte. Le juge évalue chaque nouveau résultat par rapport à l&#39;objectif : c&#39;est donc l&#39;objectif qui fait la différence entre une vraie correspondance et un résultat lié au sujet mais non pertinent.
+
+Réglez les deux. Un objectif parfait ne peut pas déclencher d&#39;alerte sur un résultat que les requêtes n&#39;ont jamais récupéré, et des requêtes larges associées à un objectif vague produisent en permanence des alertes de faible valeur.
+
+**Les bonnes requêtes ressemblent à des termes de recherche, pas à des phrases :**
+
+* Utilisez des mots-clés, pas des phrases — `OpenAI new model release`, pas `tell me when OpenAI releases a new model`.
+* Mettez entre guillemets les entités composées de plusieurs mots (`"Llama 4"`) et regroupez les synonymes avec `OR` (`launch OR release OR announcement`).
+* Gardez chaque requête concise (environ 2 à 6 termes). Une requête large vaut généralement mieux que plusieurs requêtes étroites — des requêtes supplémentaires se partagent le budget `maxResults` sans améliorer la couverture.
+* Utilisez une requête par sujet *distinct*. Un même sujet avec plusieurs facettes (&quot;launches, benchmarks, docs&quot;) reste une seule requête ; ne scindez que lorsque l&#39;objectif cite de vraies entités distinctes (par exemple, &quot;OpenAI, Anthropic, and Google&quot;).
+* N&#39;utilisez pas les opérateurs `site:` / `-site:` dans les requêtes — utilisez plutôt `includeDomains` / `excludeDomains`.
+
+**Les bons objectifs expriment clairement ce qui constitue une correspondance et n&#39;ajoutent des exclusions que lorsqu&#39;elles font partie de l&#39;intention :**
+
+* Nommez le sujet et ce qui compte comme une correspondance : *&quot;Alertez-moi quand OpenAI annonce un tout nouveau modèle.&quot;*
+* Désambiguïsez les termes ambigus : *&quot;Firecrawl (l&#39;API de web scraping)&quot;* évite au juge de partir sur du matériel de lutte contre l&#39;incendie.
+* Ajoutez `Ignore ...` uniquement pour les non-correspondances propres à l&#39;intention : *&quot;Ignorez les tribunes d&#39;opinion, les tutoriels et les actualités IA sans rapport.&quot;* Ne reformulez pas le bruit générique — le juge gère déjà la mise en forme, les paramètres de suivi et le bruit lié aux réindexations.
+* Si l&#39;intention est large, gardez-la large. Des objectifs trop restrictifs risquent d&#39;écarter de vraies correspondances.
+
+**À quoi ressemble un monitor sain.** Un monitor à l&#39;échelle du web bien réglé ne signale généralement rien — la plupart des vérifications renvoient `new: 0` — et n&#39;alerte que lorsqu&#39;un élément réellement nouveau et conforme à l&#39;objectif apparaît. Lisez le résumé de la vérification et le `searchStatus` de chaque résultat (voir [Statuts et déduplication](#statuses-and-dedup)) pour savoir s&#39;il est bien réglé :
+
+* Un flux régulier de résultats `ignored` signifie que les requêtes font remonter du bruit que l&#39;objectif rejette ensuite — resserrez les requêtes (ou réduisez `searchWindow`) pour arrêter de payer l&#39;évaluation de résultats qui ne déclencheront jamais d&#39;alerte.
+* Des `watching` fréquents signifient que l&#39;objectif est ambigu — rendez les critères de correspondance plus précis pour que le juge puisse trancher.
+* De longues périodes sans résultat sur un sujet actif signifient que les requêtes sont trop restrictives ou que `searchWindow` est trop étroit — élargissez les termes ou la fenêtre.
+* Les alertes que l&#39;utilisateur écarte signifient que l&#39;objectif est trop large — ajoutez un `Ignore ...` propre à l&#39;intention.
+
+Le résultat recherché est une précision élevée avec un rappel suffisant : chaque alerte mérite qu&#39;on agisse, et rien d&#39;important ne passe à côté.
+
+<div id="judging">
+  ## Évaluation
+</div>
+
+La charge de travail de chaque vérification pour chaque résultat est contrôlée par le paramètre `judgeEnabled` du monitor — le même indicateur décrit dans [Objectifs et évaluation](/fr/features/monitoring#goals-and-judging). Lorsque l’évaluation est activée, Firecrawl scrape chaque résultat correspondant et évalue son content par rapport à l’objectif, avec une facturation de 1 credit par résultat évalué en plus de l’appel de recherche. Avec `judgeEnabled: false`, un monitor à l’échelle du web retourne les résultats de recherche dédupliqués sans aucune évaluation par IA — uniquement les nouveaux résultats du SERP, et ne consomme que les credits de l’appel de recherche (2 credits par 10 résultats).
+
+<div id="statuses-and-dedup">
+  ## États et déduplication
+</div>
+
+Les résultats de recherche utilisent la **même énumération `status` au niveau de la page** que les monitors de scrape et de crawl, afin que les consommateurs existants de webhooks et de résultats de vérification continuent de fonctionner sans modification. Un résultat de recherche correspond à :
+
+* `new` — un résultat qui a correspondu à l&#39;objectif pour la première fois. C&#39;est ce qui déclenche une alerte.
+* `same` — un résultat déjà vu lors d&#39;une vérification précédente (aucune nouvelle alerte).
+* `error` — un résultat qui n&#39;a pas pu être évalué (par exemple, si le scrape nécessaire à l&#39;évaluation a été ignoré).
+
+L&#39;état de recherche plus fin est exposé dans le champ `metadata.searchStatus` de chaque page, avec l&#39;une des valeurs suivantes :
+
+| `searchStatus` | Page `status` | Signification                                                                                                                                      |
+| -------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `alert`        | `new`         | Nouveau résultat que le juge considère comme pertinent — déclenche une notification.                                                               |
+| `already_seen` | `same`        | L&#39;empreinte correspond à un résultat d&#39;une vérification antérieure.                                                                        |
+| `watching`     | `same`        | Nouveau résultat sur lequel le juge n&#39;est pas encore suffisamment sûr ; il est suivi, mais ne déclenche pas d&#39;alerte.                      |
+| `ignored`      | `same`        | Nouveau résultat que le juge a estimé non pertinent par rapport à l&#39;objectif.                                                                  |
+| `skipped`      | `error`       | Le résultat n&#39;a pas pu être jugé lors de cette vérification (par exemple, en cas d&#39;échec du scrape ou de dégradation de l&#39;évaluation). |
+
+Un résultat ne déclenche une alerte qu&#39;une seule fois, lorsqu&#39;il apparaît pour la première fois comme `new`. La déduplication repose uniquement sur l&#39;URL canonique (le titre et l&#39;extrait ne font délibérément pas partie de l&#39;empreinte, donc un changement de titre ou d&#39;extrait ne redéclenche pas d&#39;alerte). Comme la clé est l&#39;URL, un événement réel relayé par de nombreuses URL d&#39;articles déclenche une alerte une fois par URL, et non une fois par événement.
+
+Modifier le `goal` ou les `queries` du monitor incrémente son `goalVersion`, ce qui invalide les verdicts précédents du juge. La réévaluation se fait de manière paresseuse plutôt que via un nouveau jugement global : les résultats existants ne sont pas tous rejugés d&#39;un coup. À la place, chaque résultat est rejugé la prochaine fois qu&#39;il réapparaît dans une vérification, et récupère alors le nouveau `goalVersion`. Les résultats qui ne réapparaissent pas conservent leur ancien verdict et leur `goalVersion` jusqu&#39;à leur prochaine apparition.
+
+<div id="shared-configuration">
+  ## Configuration partagée
+</div>
+
+* [Planifications](/fr/features/monitoring#schedules) — cadence cron ou en langage naturel, minimum de 5 minutes.
+* [Objectifs et évaluation](/fr/features/monitoring#goals-and-judging) — requis pour les cibles de recherche, sauf si `judgeEnabled: false`.
+* [Notifications](/fr/features/monitoring#notifications) — envoi par webhook et e-mail.
+* [Résultats des vérifications](/fr/features/monitoring#check-results) — inspectez chaque vérification et ses résultats.
+* [Tarification](/fr/features/monitoring#pricing) — 2 crédits par tranche de 10 résultats et par vérification, plus 1 crédit par résultat évalué.

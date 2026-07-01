@@ -1,0 +1,275 @@
+---
+title: "Web 全体規模のモニタリング"
+sidebarTitle: "Web 全体規模"
+description: "常時稼働の Web 検索を実行し、一致する新しい結果が現れたらアラートを送信します"
+og:title: "Web 全体規模のモニタリング | Firecrawl"
+og:description: "常時稼働の Web 検索を実行し、一致する新しい結果が現れたらアラートを送信します"
+icon: "globe"
+---
+
+Web 全体規模のモニタリングは、Web 全体を見張り、何かが公開された瞬間にあなたやあなたの agent に知らせる常時稼働の検索です。
+
+ページモニターや Web サイトのモニターは、指定した URL を監視します。**Web 全体規模**のモニターは、Web 全体を監視します。既知のページの差分を取るのではなく、実行する `queries` と `goal` を指定します。すると Firecrawl が各チェックでそのクエリを実行し、judge がゴールに関連すると判断した**新しい**結果についてアラートを送信します。つまり、差分検出ではなくディスカバリーです。
+
+各チェックでは毎回同じサイクルが実行されます。ゴールとその `queries` を受け取り、鮮度の対象期間を適用し、検索を実行し、結果を正規 URL で重複排除し、任意の AI judge がどの新しい結果にゴールにとって意味があるかを判定し、スクレイピングモニターやクロールモニターと同じ webhook と email のチャネルを通じてアラートを送信します。スケジュール設定、ゴール、judging、通知はすべて、[モニタリングの概要](/ja/features/monitoring) で説明されているとおりに機能します。
+
+<Note>
+  ページモニターとクロールモニターは、指定した URL 上の content の差分を取ります。一方、Web 全体規模のモニターは、Web 全体から新しい結果を見つけます。基盤となるスケジュール設定、judge、通知は同じです。
+</Note>
+
+<div id="search-target">
+  ## 検索ターゲット
+</div>
+
+検索ターゲットでは `type: "search"` を使用し、`urls` の代わりに、実行するクエリと結果のスコア付け方法を指定します。
+
+```json Search target
+{
+  "type": "search",
+  "queries": ["open source AI coding assistant launch"],
+  "searchWindow": "24h",
+  "maxResults": 10,
+  "includeDomains": ["news.ycombinator.com"]
+}
+```
+
+| Field            | Type                                             | Description                                                                                                                                                              |
+| ---------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `type`           | `"search"`                                       | 検索対象を選択します。                                                                                                                                                              |
+| `queries`        | `string[]`                                       | 各チェックで実行する検索クエリです。`1`～`12` 個指定でき、各クエリは最大 256 文字です。必須です。                                                                                                                  |
+| `searchWindow`   | `"5m" \| "15m" \| "1h" \| "6h" \| "24h" \| "7d"` | 新しさの絞り込みです。この期間内に公開された結果のみを対象にします。デフォルトは `24h` です。                                                                                                                       |
+| `maxResults`     | `number`                                         | 各チェックで評価する結果の合計数です。`1`～`50` を指定できます。デフォルトは `10` です。これは各 `queries` 全体での合計上限であり (結果は先にマージ・重複排除されます) 、クエリごとの上限ではありません。そのため、他のクエリで先に上限に達すると、個々のクエリの結果数は少なくなるか、0 件になることがあります。 |
+| `includeDomains` | `string[]`                                       | 任意です。結果をこれらのドメインに制限します (最大 50 件) 。`excludeDomains` とは同時に使用できません。                                                                                                         |
+| `excludeDomains` | `string[]`                                       | 任意です。これらのドメインの結果を除外します (最大 50 件) 。`includeDomains` とは同時に使用できません。                                                                                                         |
+
+<Note>
+  検索対象では、`judgeEnabled: false` を設定しない限り、空でないモニターレベルの `goal` が必要です。`queries` は必須で、`goal` は judge が各新規結果をどのように判定するかの基準になります。クエリ自体を生成するものではありません。[ゴールと判定](/ja/features/monitoring#goals-and-judging)を参照してください。
+</Note>
+
+<Note>
+  **クレジットはクエリ数に応じて増加します。** 各クエリは最大 `maxResults` 件の結果を取得し、検索呼び出しのクレジットは、マージ・重複排除*前*の全クエリの生の結果数に基づいて課金されます。つまり、クエリを追加すると、事前見積もりだけでなく実際の検索コストも増加します。マージ・重複排除後に Firecrawl が評価する候補は最大 `maxResults` 件までのため、judge のクレジットは選択・判定された結果数の範囲内に収まります。
+</Note>
+
+<div id="create-a-web-scale-monitor">
+  ## Webスケールのモニターを作成する
+</div>
+
+Webスケールのモニターは、ページモニターと同じ方法で作成します。違うのは、ターゲット (`type: "search"` を使用し、`queries`、`searchWindow`、`maxResults`、および任意のドメインフィルターを指定) と、URLがない点だけです。
+
+<CodeGroup>
+  ```python Python
+  from firecrawl import Firecrawl
+
+  firecrawl = Firecrawl(
+    # モニター エンドポイントには API key が必要です:
+    api_key="fc-YOUR-API-KEY",
+  )
+
+  monitor = firecrawl.create_monitor(
+      name="AI coding assistant launches",
+      schedule={"text": "every 30 minutes", "timezone": "UTC"},
+      goal="Alert when a new open-source AI coding assistant is announced. Ignore funding rounds and unrelated AI news.",
+      targets=[
+          {
+              "type": "search",
+              "queries": ["open source AI coding assistant launch"],
+              "searchWindow": "24h",
+              "maxResults": 10,
+          }
+      ],
+      notification={
+          "email": {
+              "enabled": True,
+              "recipients": ["alerts@example.com"],
+              "includeDiffs": True,
+          }
+      },
+  )
+
+  print(monitor.id)
+  ```
+
+  ```js Node
+  import Firecrawl from "@mendable/firecrawl-js";
+
+  const firecrawl = new Firecrawl({
+    // モニター エンドポイントには API key が必要です:
+    apiKey: "fc-YOUR-API-KEY",
+  });
+
+  const monitor = await firecrawl.createMonitor({
+    name: "AI coding assistant launches",
+    schedule: { text: "every 30 minutes", timezone: "UTC" },
+    goal:
+      "Alert when a new open-source AI coding assistant is announced. Ignore funding rounds and unrelated AI news.",
+    notification: {
+      email: {
+        enabled: true,
+        recipients: ["alerts@example.com"],
+        includeDiffs: true,
+      },
+    },
+    targets: [
+      {
+        type: "search",
+        queries: ["open source AI coding assistant launch"],
+        searchWindow: "24h",
+        maxResults: 10,
+      },
+    ],
+  });
+
+  console.log(monitor.id);
+  ```
+
+  ```bash cURL
+  curl -s -X POST "https://api.firecrawl.dev/v2/monitor" \
+    -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "name": "AI coding assistant launches",
+      "schedule": {
+        "text": "every 30 minutes",
+        "timezone": "UTC"
+      },
+      "goal": "Alert when a new open-source AI coding assistant is announced. Ignore funding rounds and unrelated AI news.",
+      "notification": {
+        "email": {
+          "enabled": true,
+          "recipients": ["alerts@example.com"],
+          "includeDiffs": true
+        }
+      },
+      "targets": [
+        {
+          "type": "search",
+          "queries": ["open source AI coding assistant launch"],
+          "searchWindow": "24h",
+          "maxResults": 10
+        }
+      ]
+    }'
+  ```
+
+  ```bash CLI
+  firecrawl monitor create \
+    --name "AI coding assistant launches" \
+    --schedule "every 30 minutes" \
+    --queries "open source AI coding assistant launch" \
+    --goal "Alert when a new open-source AI coding assistant is announced. Ignore funding rounds and unrelated AI news."
+  ```
+
+  ```json MCP — firecrawl_monitor_create
+  {
+    "queries": ["open source AI coding assistant launch"],
+    "goal": "Alert when a new open-source AI coding assistant is announced. Ignore funding rounds and unrelated AI news.",
+    "searchWindow": "24h",
+    "maxResults": 10,
+    "scheduleText": "every 30 minutes"
+  }
+  ```
+</CodeGroup>
+
+一致する新しい結果が見つかると、`monitor.page` webhook はそれを status `new` で報告し、judging が実行された場合は、なぜ重要なのかを示す `judgment` も返します:
+
+```json monitor.page
+{
+  "success": true,
+  "type": "monitor.page",
+  "id": "019df960-5f2a-75fb-a98b-bd2d32ca67d4",
+  "webhookId": "f1e2d3c4-0000-0000-0000-000000000000",
+  "data": [
+    {
+      "monitorId": "019df960-06e7-7383-9d89-82c0113dc31a",
+      "checkId": "019df960-5f2a-75fb-a98b-bd2d32ca67d4",
+      "url": "https://news.ycombinator.com/item?id=40000000",
+      "status": "new",
+      "error": null,
+      "isMeaningful": true,
+      "judgment": {
+        "meaningful": true,
+        "confidence": "high",
+        "reason": "A new open-source AI coding assistant was announced, which matches the monitor goal."
+      }
+    }
+  ],
+  "metadata": {
+    "environment": "production"
+  }
+}
+```
+
+<div id="writing-good-goals-and-queries">
+  ## 良いゴールとクエリを書く
+</div>
+
+Webスケールのモニター の品質は、役割の異なる2つの要素で決まります。
+
+* **`queries` は再現率を左右します** — 各検索で何を拾うかです。狭すぎると本当に重要な出来事が上がってこなくなり、広すぎると judge がノイズの絞り込みに credits を使うことになります。
+* **`goal` は適合率を左右します** — 取得した結果のうち、実際にどれを alert にするかです。judge は新しい結果を1件ずつゴールに照らして評価するため、本当に一致しているものと、話題には沿っているが無関係なものを分けるのはゴールです。
+
+両方を調整してください。どれだけ完璧なゴールでも、クエリが取得できなかった結果に対して alert を出すことはできません。逆に、広いクエリに曖昧なゴールを組み合わせると、価値の低い alert が絶えず発生します。
+
+**良いクエリは、文章ではなく検索語のように読めるものです。**
+
+* 文章ではなくキーワードを使います — `OpenAI new model release` とし、`tell me when OpenAI releases a new model` にはしません。
+* 複数語の固有表現は引用符で囲み (`"Llama 4"`) 、同義語は `OR` でまとめます (`launch OR release OR announcement`) 。
+* 各クエリは簡潔に保ちます (およそ2〜6語) 。通常は、狭いクエリをいくつも作るより、少し広めのクエリを1つ使うほうが効果的です — クエリを増やしてもカバレッジは増えず、`maxResults` の枠が分散されるだけです。
+* *明確に異なる*主題ごとに1つのクエリを使います。1つの主題に複数の側面 (「launches、benchmarks、docs」) があっても、それは1つのクエリです。ゴールが本当に別々の対象を挙げている場合にだけ分けてください (たとえば「OpenAI、Anthropic、Google」) 。
+* `site:` / `-site:` 演算子はクエリに入れず、代わりに `includeDomains` / `excludeDomains` を使ってください。
+
+**良いゴールは、一致条件を平易な言葉で述べ、除外条件は意図に含まれる場合にだけ追加します。**
+
+* 対象と、一致と見なす条件を明示します: *「OpenAI がまったく新しいモデルを発表したら alert する。」*
+* 多義的な用語は明確にします: *「Firecrawl (web scraping API) 」* としておくと、judge が消防機器の話題に引っ張られません。
+* `Ignore ...` は、意図に特有の非一致だけに追加します: *「意見記事、チュートリアル、無関係な AI ニュースは無視する。」* 一般的なノイズまで書き直して繰り返す必要はありません — judge は書式、追跡パラメータ、再インデックスによる揺れをすでに処理します。
+* 意図が広いなら、そのまま広く保ちます。狭めすぎたゴールは、本来一致すべきものまで抑えてしまいます。
+
+**健全な モニター はどのような状態か。** 適切に調整されたWebスケールのモニター は、ほとんどの場合何も報告しません — ほとんどの check は `new: 0` を返します — そして、本当に新しく、かつゴールに合うものが現れたときだけ alert します。調整がうまくできているかどうかは、check の summary と各結果の `searchStatus` ([ステータスと重複排除](#statuses-and-dedup) を参照) を見れば判断できます。
+
+* `ignored` の結果が安定して出続ける場合、クエリがノイズを拾い、それをゴールが後から弾いていることを意味します — alert されることのない結果を judge するために credits を払い続けないよう、クエリを絞るか `searchWindow` を狭めてください。
+* `watching` が頻繁に出る場合、ゴールが曖昧です — 一致条件をより明確にして、judge が判断を確定できるようにしてください。
+* 話題が活発なのに結果ゼロの状態が長く続く場合、クエリが狭すぎるか `searchWindow` が短すぎます — 語を広げるか、ウィンドウを広げてください。
+* ユーザーが dismiss する alert が出る場合、ゴールが広すぎます — 意図に特化した `Ignore ...` を追加してください。
+
+目指すべき状態は、十分な再現率を保ちながら高い適合率を実現することです。すべての alert が対応する価値を持ち、本当に重要なものを見逃さない状態です。
+
+<div id="judging">
+  ## 判定
+</div>
+
+各チェックが結果ごとにどこまで処理を行うかは、モニター の `judgeEnabled` で制御されます。これは、[ゴールと判定](/ja/features/monitoring#goals-and-judging) で説明されているものと同じフラグです。判定を有効にすると、Firecrawl は一致した各結果をスクレイピングし、その内容をゴールに照らして評価します。この場合、search 呼び出しに加えて、判定対象の結果 1 件ごとに 1 credit が課金されます。`judgeEnabled: false` の場合、Webスケールのモニター は AI による判定を行わず、重複を除いた 検索結果 を返します。つまり、新しい SERP ヒットのみを返し、課金されるのは search-call credits のみです (10 件ごとに 2 credits) 。
+
+<div id="statuses-and-dedup">
+  ## ステータスと重複排除
+</div>
+
+検索結果では、スクレイピングモニターやクロールモニターと**同じページレベルの`status`列挙値**を使用するため、既存のwebhookやcheck-resultのコンシューマーは変更なしでそのまま動作します。検索結果は次のいずれかに対応します。
+
+* `new` — 初めてゴールに一致した結果です。これがアラート対象になります。
+* `same` — 以前のcheckですでに確認された結果です (新しいアラートはありません) 。
+* `error` — 評価できなかった結果です (たとえば、judging用のスクレイピングがスキップされた場合) 。
+
+より細かな検索結果の判定は、各ページの`metadata.searchStatus`で公開され、次のいずれかになります。
+
+| `searchStatus` | Page `status` | Meaning                                                   |
+| -------------- | ------------- | --------------------------------------------------------- |
+| `alert`        | `new`         | judgeが意味のあると判断した新しい結果 — 通知を送信します。                         |
+| `already_seen` | `same`        | フィンガープリントが以前のcheckの結果と一致しました。                             |
+| `watching`     | `same`        | judgeがまだ十分な確信を持てていない新しい結果です。追跡はされますが、アラートは送られません。         |
+| `ignored`      | `same`        | judgeがゴールにとって意味がないと判断した新しい結果です。                           |
+| `skipped`      | `error`       | このcheckではjudgeできなかった結果です (たとえば、スクレイピングの失敗やjudging機能の低下) 。 |
+
+結果は、初めて`new`として現れたときに一度だけアラートされます。重複排除のキーは正規URLのみです (titleとsnippetは意図的にフィンガープリントに含まれていないため、title/snippetが変わっても再通知はされません) 。キーがURLであるため、現実世界の1つの出来事が複数の記事URLで報じられた場合、アラートは出来事ごとに1回ではなく、URLごとに1回発生します。
+
+モニターの`goal`または`queries`を編集すると、`goalVersion`が更新され、以前のjudgeの判定は無効になります。再評価は一括で再judgeするのではなく、遅延的に行われます。既存の結果が一度にまとめて再judgeされることはありません。代わりに、各結果は次回のcheckで再び現れたときに再judgeされ、その時点で新しい`goalVersion`が適用されます。再浮上しない結果は、再び現れるまで古い判定と`goalVersion`を保持します。
+
+<div id="shared-configuration">
+  ## 共通の構成
+</div>
+
+* [スケジュール](/ja/features/monitoring#schedules) — cron または自然言語で指定する間隔。最短 5 分です。
+* [ゴールと判定](/ja/features/monitoring#goals-and-judging) — `judgeEnabled: false` でない限り、検索ターゲットでは必須です。
+* [通知](/ja/features/monitoring#notifications) — webhook とメールで配信します。
+* [チェック結果](/ja/features/monitoring#check-results) — 各チェックとその結果を確認します。
+* [料金](/ja/features/monitoring#pricing) — チェックごとに結果 10 件あたり 2 クレジット、加えて判定済みの結果 1 件あたり 1 クレジット。

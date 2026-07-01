@@ -1,0 +1,275 @@
+---
+title: "全网级监控"
+sidebarTitle: "全网级"
+description: "持续运行网页搜索，并在出现新的匹配结果时发出告警"
+og:title: "全网级监控 | Firecrawl"
+og:description: "持续运行网页搜索，并在出现新的匹配结果时发出告警"
+icon: "globe"
+---
+
+全网级监控是一种持续运行的搜索，它会持续监测整个网页，并在有新内容上线时立即通知你或你的代理。
+
+页面和网站监控会监测你指定的 URL。**全网级**监控则会监测整个网页。它不是对你已经知道的页面做 `diff`，而是由你提供要运行的 `queries` 和一个 `goal`，然后 Firecrawl 会在每次 check 时运行这些查询，并对 judge 判断为与该 goal 相关的**新**结果发出告警。它的核心是发现新内容，而不是做 `diff`。
+
+每次 check 都会执行同样的流程：获取 goal 及其 `queries`，应用一个时间新近窗口，运行 search，按 canonical URL 对结果去重，再由可选的 AI judge 判断哪些新结果对 goal 有意义，并通过与 scrape 和 crawl 监控相同的 webhook 和 email 渠道发送告警。调度、goals、judging 和通知的工作方式，均与[监控概览](/zh/features/monitoring)中所述完全一致。
+
+<Note>
+  页面和 crawl 监控会对你指定的 URL 内容做 `diff`；全网级监控则会在整个网页中发现新结果。底层使用的是同一套调度、judge 和通知机制。
+</Note>
+
+<div id="search-target">
+  ## 搜索目标
+</div>
+
+搜索目标使用 `type: "search"`，并将 `urls` 替换为要运行的查询以及结果评分方式：
+
+```json Search target
+{
+  "type": "search",
+  "queries": ["open source AI coding assistant launch"],
+  "searchWindow": "24h",
+  "maxResults": 10,
+  "includeDomains": ["news.ycombinator.com"]
+}
+```
+
+| 字段               | 类型                                               | 描述                                                                                                                       |
+| ---------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `type`           | `"search"`                                       | 选择搜索目标。                                                                                                                  |
+| `queries`        | `string[]`                                       | 每次检查要运行的搜索查询。1–12 个查询，每个最多 256 个字符。必填。                                                                                   |
+| `searchWindow`   | `"5m" \| "15m" \| "1h" \| "6h" \| "24h" \| "7d"` | 时效性筛选器——仅考虑在此时间窗口内发布的结果。默认值为 `24h`。                                                                                      |
+| `maxResults`     | `number`                                         | 每次检查要评估的结果总数，范围为 `1`–`50`。默认值为 `10`。这是所有 `queries` 共享的总上限 (结果会先合并再去重) ，而不是每个查询单独的上限——因此，如果其他查询先占满上限，某个查询贡献的结果可能会更少，甚至没有。 |
+| `includeDomains` | `string[]`                                       | 可选。将结果限制在这些域名内 (最多 50 个) 。与 `excludeDomains` 互斥。                                                                         |
+| `excludeDomains` | `string[]`                                       | 可选。排除来自这些域名的结果 (最多 50 个) 。与 `includeDomains` 互斥。                                                                         |
+
+<Note>
+  搜索目标需要设置非空的监控级 `goal`，除非你将 `judgeEnabled: false`。`queries` 为必填；`goal` 是 judge 用来评估每个新结果的依据——它不会生成查询。请参见[目标与判定](/zh/features/monitoring#goals-and-judging)。
+</Note>
+
+<Note>
+  **额度会随查询数量增加。** 每个查询最多可获取 `maxResults` 条结果，搜索调用的额度按所有查询在合并和去重*之前*的原始结果计费——因此，增加查询会提高实际搜索成本，而不只是前期预估。合并/去重后，Firecrawl 最多评估 `maxResults` 个选中的候选结果，因此 judge 消耗的额度仍受所选/已评估结果数量上限的限制。
+</Note>
+
+<div id="create-a-web-scale-monitor">
+  ## 创建全网级监控
+</div>
+
+全网级监控的创建方式与页面监控相同——唯一的区别在于 target (`type: "search"`，包含 `queries`、`searchWindow`、`maxResults` 以及可选的域名过滤器) ，并且不需要 URL：
+
+<CodeGroup>
+  ```python Python
+  from firecrawl import Firecrawl
+
+  firecrawl = Firecrawl(
+    # 监控端点需要 API 密钥：
+    api_key="fc-YOUR-API-KEY",
+  )
+
+  monitor = firecrawl.create_monitor(
+      name="AI coding assistant launches",
+      schedule={"text": "every 30 minutes", "timezone": "UTC"},
+      goal="Alert when a new open-source AI coding assistant is announced. Ignore funding rounds and unrelated AI news.",
+      targets=[
+          {
+              "type": "search",
+              "queries": ["open source AI coding assistant launch"],
+              "searchWindow": "24h",
+              "maxResults": 10,
+          }
+      ],
+      notification={
+          "email": {
+              "enabled": True,
+              "recipients": ["alerts@example.com"],
+              "includeDiffs": True,
+          }
+      },
+  )
+
+  print(monitor.id)
+  ```
+
+  ```js Node
+  import Firecrawl from "@mendable/firecrawl-js";
+
+  const firecrawl = new Firecrawl({
+    // 监控端点需要 API 密钥：
+    apiKey: "fc-YOUR-API-KEY",
+  });
+
+  const monitor = await firecrawl.createMonitor({
+    name: "AI coding assistant launches",
+    schedule: { text: "every 30 minutes", timezone: "UTC" },
+    goal:
+      "Alert when a new open-source AI coding assistant is announced. Ignore funding rounds and unrelated AI news.",
+    notification: {
+      email: {
+        enabled: true,
+        recipients: ["alerts@example.com"],
+        includeDiffs: true,
+      },
+    },
+    targets: [
+      {
+        type: "search",
+        queries: ["open source AI coding assistant launch"],
+        searchWindow: "24h",
+        maxResults: 10,
+      },
+    ],
+  });
+
+  console.log(monitor.id);
+  ```
+
+  ```bash cURL
+  curl -s -X POST "https://api.firecrawl.dev/v2/monitor" \
+    -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "name": "AI coding assistant launches",
+      "schedule": {
+        "text": "every 30 minutes",
+        "timezone": "UTC"
+      },
+      "goal": "Alert when a new open-source AI coding assistant is announced. Ignore funding rounds and unrelated AI news.",
+      "notification": {
+        "email": {
+          "enabled": true,
+          "recipients": ["alerts@example.com"],
+          "includeDiffs": true
+        }
+      },
+      "targets": [
+        {
+          "type": "search",
+          "queries": ["open source AI coding assistant launch"],
+          "searchWindow": "24h",
+          "maxResults": 10
+        }
+      ]
+    }'
+  ```
+
+  ```bash CLI
+  firecrawl monitor create \
+    --name "AI coding assistant launches" \
+    --schedule "every 30 minutes" \
+    --queries "open source AI coding assistant launch" \
+    --goal "Alert when a new open-source AI coding assistant is announced. Ignore funding rounds and unrelated AI news."
+  ```
+
+  ```json MCP — firecrawl_monitor_create
+  {
+    "queries": ["open source AI coding assistant launch"],
+    "goal": "Alert when a new open-source AI coding assistant is announced. Ignore funding rounds and unrelated AI news.",
+    "searchWindow": "24h",
+    "maxResults": 10,
+    "scheduleText": "every 30 minutes"
+  }
+  ```
+</CodeGroup>
+
+当发现新的匹配结果时，`monitor.page` Webhook 会以 `new` 状态上报该结果；如果运行了 judging，还会附带一个 `judgment`，说明它为什么重要：
+
+```json monitor.page
+{
+  "success": true,
+  "type": "monitor.page",
+  "id": "019df960-5f2a-75fb-a98b-bd2d32ca67d4",
+  "webhookId": "f1e2d3c4-0000-0000-0000-000000000000",
+  "data": [
+    {
+      "monitorId": "019df960-06e7-7383-9d89-82c0113dc31a",
+      "checkId": "019df960-5f2a-75fb-a98b-bd2d32ca67d4",
+      "url": "https://news.ycombinator.com/item?id=40000000",
+      "status": "new",
+      "error": null,
+      "isMeaningful": true,
+      "judgment": {
+        "meaningful": true,
+        "confidence": "high",
+        "reason": "A new open-source AI coding assistant was announced, which matches the monitor goal."
+      }
+    }
+  ],
+  "metadata": {
+    "environment": "production"
+  }
+}
+```
+
+<div id="writing-good-goals-and-queries">
+  ## 编写好的 goals 和 queries
+</div>
+
+一个网页级监控的质量，主要取决于两个作用不同的调节杆：
+
+* **`queries` 控制召回率** —— 决定每次搜索能找回什么内容。太窄，真实事件可能永远不会出现；太宽，judge 就得花额度去过滤噪声。
+* **`goal` 控制精确率** —— 决定哪些检索结果会真正触发告警。judge 会根据 goal 为每个新结果打分，因此 goal 才是区分“真正匹配”和“主题相关但并不相关”的关键。
+
+这两者都要调好。再完美的 goal，也无法对 queries 从未检索到的结果发出告警；而宽泛的 queries 搭配模糊的 goal，则会持续产生低价值告警。
+
+**好的 queries 应该看起来像搜索词，而不是完整句子：**
+
+* 用关键词，不要用自然语言句子 —— 用 `OpenAI new model release`，不要用 `tell me when OpenAI releases a new model`。
+* 给多词实体加引号 (`"Llama 4"`) ，并用 `OR` 组合近义词 (`launch OR release OR announcement`) 。
+* 让每个 query 保持简洁 (约 2–6 个词) 。一个宽泛的 query 通常比几个狭窄的 query 更有效 —— 额外的 queries 会分掉 `maxResults` 预算，却不会增加覆盖范围。
+* 每个*不同*主题用一个 query。一个主题即使有多个侧面 (“发布、基准测试、文档”) 也仍算一个 query；只有当 goal 明确点出彼此独立的实体时才需要拆分 (例如，“OpenAI、Anthropic 和 Google”) 。
+* 不要在 queries 中使用 `site:` / `-site:` 操作符 —— 请改用 `includeDomains` / `excludeDomains`。
+
+**好的 goals 会用直白的语言说明什么算匹配，并且只在确实属于意图的一部分时才添加排除条件：**
+
+* 说明主题，以及什么情况算匹配：*&quot;当 OpenAI 宣布推出全新模型时发出告警。&quot;*
+* 消除有歧义的术语：*&quot;Firecrawl (网页抓取 API) &quot;* 可以避免 judge 跑去关注消防设备。
+* 只有在与意图直接相关的不匹配情况下才添加 `Ignore ...`：*&quot;忽略评论文章、教程和无关的 AI 新闻。&quot;* 不要重复描述通用噪声 —— judge 已经会处理格式差异、跟踪参数和重新索引带来的波动。
+* 如果意图本身很宽泛，就保持宽泛。过度收紧的 goals 会压掉真实匹配。
+
+**健康的监控应该是什么样。** 一个调优良好的全网级监控大多数时候都不会报告任何内容 —— 大多数检查都会返回 `new: 0` —— 只有当真正新出现且符合 goal 的内容出现时才会告警。你可以通过查看检查摘要以及每个结果的 `searchStatus` (请参见 [Statuses and dedup](#statuses-and-dedup)) 来判断它是否调优得当：
+
+* 持续出现少量 `ignored` 结果，说明 queries 拉回了噪声，随后又被 goal 拒绝 —— 这时应收紧 queries (或缩小 `searchWindow`) ，避免继续为那些永远不会告警的结果支付判定额度。
+* 经常出现 `watching`，说明 goal 存在歧义 —— 应进一步明确匹配标准，让 judge 能做出明确判断。
+* 在活跃主题上长时间没有结果，说明 queries 太窄，或者 `searchWindow` 过紧 —— 应扩大检索词范围，或放宽时间窗口。
+* 用户经常手动忽略告警，说明 goal 过宽 —— 添加一个与意图相关的 `Ignore ...`。
+
+理想结果是：在保证足够召回率的同时实现高精确率——每一条告警都值得采取行动，同时不会漏掉任何真实事件。
+
+<div id="judging">
+  ## 判定
+</div>
+
+每次检查会对每条结果处理到什么程度，由监控的 `judgeEnabled` 控制——也就是 [目标与判定](/zh/features/monitoring#goals-and-judging) 中介绍的同一个标志。开启判定后，Firecrawl 会抓取每个匹配结果，并根据目标评估其内容；除了搜索调用本身外，每个经过判定的结果还会额外计费 1 个额度。设置 `judgeEnabled: false` 时，全网级监控会返回去重后的搜索结果，不进行任何 AI 判定——仅返回新的 SERP 命中项，并且只消耗搜索调用的额度 (每 10 个结果 2 个额度) 。
+
+<div id="statuses-and-dedup">
+  ## 状态与去重
+</div>
+
+搜索结果使用与 scrape 和 crawl 监控**相同的页面级 `status` 枚举**，因此现有的 Webhook 和检查结果消费方无需改动即可继续使用。搜索结果会映射为：
+
+* `new` — 首次匹配目标的结果。这类结果会触发告警。
+* `same` — 在之前的检查中已见过的结果 (不会产生新的告警) 。
+* `error` — 无法评估的结果 (例如，用于判定的 scrape 被跳过) 。
+
+更细粒度的搜索状态体现在每个页面的 `metadata.searchStatus` 中，取值之一为：
+
+| `searchStatus` | Page `status` | Meaning                            |
+| -------------- | ------------- | ---------------------------------- |
+| `alert`        | `new`         | 判定器认为有意义的新结果——会触发通知。               |
+| `already_seen` | `same`        | 指纹与先前检查中的某个结果匹配。                   |
+| `watching`     | `same`        | 判定器暂时还无法确定的新结果；会被跟踪，但不会告警。         |
+| `ignored`      | `same`        | 判定器判为对目标无意义的新结果。                   |
+| `skipped`      | `error`       | 本次检查中该结果无法判定 (例如 scrape 失败或判定降级) 。 |
+
+结果首次以 `new` 出现时只会告警一次。去重仅以 canonical URL 作为键 (title 和 snippet 被刻意排除在指纹之外，因此 title/snippet 的变化不会再次触发告警) 。由于键是 URL，同一个现实事件如果出现在多个文章 URL 中，会按 URL 各告警一次，而不是按事件只告警一次。
+
+编辑监控的 `goal` 或 `queries` 会提升其 `goalVersion`，从而使之前的判定结论失效。重新评估采用惰性方式，而不是批量重新判定：现有结果不会一次性全部重新判定。相反，每个结果会在下次再次出现在检查中时重新判定，并在那时采用新的 `goalVersion`。未再次出现的结果会继续保留旧的判定结论和 `goalVersion`，直到它们再次出现。
+
+<div id="shared-configuration">
+  ## 通用配置
+</div>
+
+* [调度](/zh/features/monitoring#schedules) — cron 或自然语言周期，最小间隔为 5 分钟。
+* [目标与判定](/zh/features/monitoring#goals-and-judging) — 搜索目标必填，除非 `judgeEnabled: false`。
+* [通知](/zh/features/monitoring#notifications) — 通过 webhook 和 email 发送。
+* [检查结果](/zh/features/monitoring#check-results) — 查看每次检查及其结果。
+* [定价](/zh/features/monitoring#pricing) — 每次检查每 10 条结果消耗 2 个额度，另每条经过评判的结果消耗 1 个额度。
