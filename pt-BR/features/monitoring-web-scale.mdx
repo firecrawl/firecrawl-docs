@@ -1,0 +1,275 @@
+---
+title: "Monitoramento em escala de toda a web"
+sidebarTitle: "Escala de toda a web"
+description: "Execute buscas na web contínuas e receba alertas quando novos resultados correspondentes aparecerem"
+og:title: "Monitoramento em escala de toda a web | Firecrawl"
+og:description: "Execute buscas na web contínuas e receba alertas quando novos resultados correspondentes aparecerem"
+icon: "globe"
+---
+
+O monitoramento em escala de toda a web é uma busca contínua que acompanha a web e avisa você ou seu agente no momento em que algo entra no ar.
+
+Monitores de página e de site acompanham as URLs que você define. Um monitor **em escala da web** acompanha a web inteira. Em vez de fazer diff de páginas que você já conhece, você fornece `queries` e uma `goal`, e o Firecrawl executa as `queries` em cada verificação e alerta sobre resultados **novos** que o judge considera relevantes para esse objetivo. É descoberta, não diffing.
+
+Cada verificação segue o mesmo ciclo: pega a meta e suas `queries`, aplica uma janela de recência, executa a busca, remove duplicatas dos resultados pela URL canônica, deixa o judge de IA opcional decidir quais novos resultados são significativos para a meta e envia alertas pelos mesmos canais de webhook e email usados pelos monitores de scraping e de rastreamento. Agendamento, metas, julgamento e notificações funcionam exatamente como descrito na [visão geral de monitoramento](/pt-BR/features/monitoring).
+
+<Note>
+  Monitores de página e de rastreamento fazem diff do conteúdo nas URLs que você define; monitores em escala da web descobrem novos resultados em toda a web. O agendamento, o judge e as notificações são os mesmos por trás.
+</Note>
+
+<div id="search-target">
+  ## Alvo de busca
+</div>
+
+Um alvo de busca usa `type: "search"` e substitui `urls` pelas consultas a serem executadas e por como pontuar os resultados:
+
+```json Search target
+{
+  "type": "search",
+  "queries": ["open source AI coding assistant launch"],
+  "searchWindow": "24h",
+  "maxResults": 10,
+  "includeDomains": ["news.ycombinator.com"]
+}
+```
+
+| Campo            | Tipo                                             | Descrição                                                                                                                                                                                                                                                                                                                                                 |
+| ---------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `type`           | `"search"`                                       | Seleciona o alvo de busca.                                                                                                                                                                                                                                                                                                                                |
+| `queries`        | `string[]`                                       | Consultas de busca executadas em cada verificação. De 1 a 12 consultas, cada uma com até 256 caracteres. Obrigatório.                                                                                                                                                                                                                                     |
+| `searchWindow`   | `"5m" \| "15m" \| "1h" \| "6h" \| "24h" \| "7d"` | Filtro de recência — considera apenas resultados publicados dentro desta janela. O padrão é `24h`.                                                                                                                                                                                                                                                        |
+| `maxResults`     | `number`                                         | Total de resultados a avaliar por verificação, de `1` a `50`. O padrão é `10`. Esse é um limite combinado para todas as `queries` (os resultados são primeiro mesclados e deduplicados), não um limite por consulta — portanto, uma consulta individual pode contribuir com menos resultados, ou nenhum, se outras consultas atingirem o limite primeiro. |
+| `includeDomains` | `string[]`                                       | Opcional. Restringe os resultados a estes domínios (até 50). É mutuamente exclusivo com `excludeDomains`.                                                                                                                                                                                                                                                 |
+| `excludeDomains` | `string[]`                                       | Opcional. Exclui resultados destes domínios (até 50). É mutuamente exclusivo com `includeDomains`.                                                                                                                                                                                                                                                        |
+
+<Note>
+  Um alvo de busca exige um `goal` não vazio no nível do monitor, a menos que você defina `judgeEnabled: false`. `queries` são obrigatórias; é em relação ao `goal` que o judge avalia cada novo resultado — ele não gera as consultas. Veja [Objetivos e julgamento](/pt-BR/features/monitoring#goals-and-judging).
+</Note>
+
+<Note>
+  **Os créditos escalam com as consultas.** Cada consulta busca até `maxResults` resultados, e os créditos das chamadas de busca são cobrados com base nos resultados brutos de todas as consultas *antes* da mesclagem e deduplicação — portanto, adicionar consultas aumenta o custo real da busca, não apenas a estimativa inicial. Após a mesclagem/deduplicação, o Firecrawl avalia no máximo `maxResults` candidatos selecionados, então os créditos do judge continuam limitados pelos resultados selecionados/avaliados.
+</Note>
+
+<div id="create-a-web-scale-monitor">
+  ## Crie um monitor em escala da web
+</div>
+
+Um monitor em escala da web é criado da mesma forma que um monitor de página — as únicas diferenças são o target (`type: "search"` com `queries`, `searchWindow`, `maxResults` e filtros de domínio opcionais) e o fato de não haver URLs:
+
+<CodeGroup>
+  ```python Python
+  from firecrawl import Firecrawl
+
+  firecrawl = Firecrawl(
+    # Monitor endpoints require an API key:
+    api_key="fc-YOUR-API-KEY",
+  )
+
+  monitor = firecrawl.create_monitor(
+      name="AI coding assistant launches",
+      schedule={"text": "every 30 minutes", "timezone": "UTC"},
+      goal="Alert when a new open-source AI coding assistant is announced. Ignore funding rounds and unrelated AI news.",
+      targets=[
+          {
+              "type": "search",
+              "queries": ["open source AI coding assistant launch"],
+              "searchWindow": "24h",
+              "maxResults": 10,
+          }
+      ],
+      notification={
+          "email": {
+              "enabled": True,
+              "recipients": ["alerts@example.com"],
+              "includeDiffs": True,
+          }
+      },
+  )
+
+  print(monitor.id)
+  ```
+
+  ```js Node
+  import Firecrawl from "@mendable/firecrawl-js";
+
+  const firecrawl = new Firecrawl({
+    // Monitor endpoints require an API key:
+    apiKey: "fc-YOUR-API-KEY",
+  });
+
+  const monitor = await firecrawl.createMonitor({
+    name: "AI coding assistant launches",
+    schedule: { text: "every 30 minutes", timezone: "UTC" },
+    goal:
+      "Alert when a new open-source AI coding assistant is announced. Ignore funding rounds and unrelated AI news.",
+    notification: {
+      email: {
+        enabled: true,
+        recipients: ["alerts@example.com"],
+        includeDiffs: true,
+      },
+    },
+    targets: [
+      {
+        type: "search",
+        queries: ["open source AI coding assistant launch"],
+        searchWindow: "24h",
+        maxResults: 10,
+      },
+    ],
+  });
+
+  console.log(monitor.id);
+  ```
+
+  ```bash cURL
+  curl -s -X POST "https://api.firecrawl.dev/v2/monitor" \
+    -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "name": "AI coding assistant launches",
+      "schedule": {
+        "text": "every 30 minutes",
+        "timezone": "UTC"
+      },
+      "goal": "Alert when a new open-source AI coding assistant is announced. Ignore funding rounds and unrelated AI news.",
+      "notification": {
+        "email": {
+          "enabled": true,
+          "recipients": ["alerts@example.com"],
+          "includeDiffs": true
+        }
+      },
+      "targets": [
+        {
+          "type": "search",
+          "queries": ["open source AI coding assistant launch"],
+          "searchWindow": "24h",
+          "maxResults": 10
+        }
+      ]
+    }'
+  ```
+
+  ```bash CLI
+  firecrawl monitor create \
+    --name "AI coding assistant launches" \
+    --schedule "every 30 minutes" \
+    --queries "open source AI coding assistant launch" \
+    --goal "Alert when a new open-source AI coding assistant is announced. Ignore funding rounds and unrelated AI news."
+  ```
+
+  ```json MCP — firecrawl_monitor_create
+  {
+    "queries": ["open source AI coding assistant launch"],
+    "goal": "Alert when a new open-source AI coding assistant is announced. Ignore funding rounds and unrelated AI news.",
+    "searchWindow": "24h",
+    "maxResults": 10,
+    "scheduleText": "every 30 minutes"
+  }
+  ```
+</CodeGroup>
+
+Quando um novo resultado correspondente é encontrado, o webhook `monitor.page` o reporta com status `new` e, quando o julgamento é executado, com um `judgment` descrevendo por que ele é importante:
+
+```json monitor.page
+{
+  "success": true,
+  "type": "monitor.page",
+  "id": "019df960-5f2a-75fb-a98b-bd2d32ca67d4",
+  "webhookId": "f1e2d3c4-0000-0000-0000-000000000000",
+  "data": [
+    {
+      "monitorId": "019df960-06e7-7383-9d89-82c0113dc31a",
+      "checkId": "019df960-5f2a-75fb-a98b-bd2d32ca67d4",
+      "url": "https://news.ycombinator.com/item?id=40000000",
+      "status": "new",
+      "error": null,
+      "isMeaningful": true,
+      "judgment": {
+        "meaningful": true,
+        "confidence": "high",
+        "reason": "A new open-source AI coding assistant was announced, which matches the monitor goal."
+      }
+    }
+  ],
+  "metadata": {
+    "environment": "production"
+  }
+}
+```
+
+<div id="writing-good-goals-and-queries">
+  ## Escrevendo bons goals e queries
+</div>
+
+A qualidade de um monitor em escala da web depende de duas alavancas com funções diferentes:
+
+* **`queries` controlam o recall** — o que cada busca traz. Se forem estreitas demais, eventos reais nunca aparecem; se forem amplas demais, o judge gasta credits filtrando ruído.
+* **`goal` controla a precisão** — quais resultados recuperados realmente geram alert. O judge avalia cada novo resultado em relação ao goal, então é o goal que separa uma correspondência real de um resultado relacionado ao tema, mas irrelevante.
+
+Ajuste os dois. Um goal perfeito não pode gerar alert para um resultado que as queries nunca recuperaram, e queries amplas combinadas com um goal vago produzem alerts constantes de baixo valor.
+
+**Boas queries se parecem com termos de busca, não com frases:**
+
+* Use palavras-chave, não prosa — `OpenAI new model release`, não `tell me when OpenAI releases a new model`.
+* Coloque entidades com várias palavras entre aspas (`"Llama 4"`) e agrupe sinônimos com `OR` (`launch OR release OR announcement`).
+* Mantenha cada query enxuta (cerca de 2 a 6 termos). Uma query ampla geralmente é melhor do que várias estreitas — queries extras dividem o orçamento de `maxResults` sem aumentar a cobertura.
+* Use uma query por assunto *distinto*. Um único assunto com várias facetas (&quot;launches, benchmarks, docs&quot;) ainda é uma query; só divida quando o goal realmente nomear entidades separadas (por exemplo, &quot;OpenAI, Anthropic, and Google&quot;).
+* Não use operadores `site:` / `-site:` nas queries — use `includeDomains` / `excludeDomains` no lugar.
+
+**Bons goals descrevem a correspondência em linguagem simples e só adicionam exclusões quando elas fazem parte da intenção:**
+
+* Nomeie o assunto e o que conta como correspondência: *&quot;Alert when OpenAI announces a brand-new model.&quot;*
+* Desambigue termos com mais de um sentido: *&quot;Firecrawl (the web scraping API)&quot;* evita que o judge confunda com equipamentos de combate a incêndio.
+* Adicione `Ignore ...` apenas para não correspondências específicas da intenção: *&quot;Ignore opinion pieces, tutorials, and unrelated AI news.&quot;* Não repita ruído genérico — o judge já lida com formatação, parâmetros de rastreamento e reindexações.
+* Se a intenção for ampla, mantenha-a ampla. Goals restritivos demais suprimem correspondências reais.
+
+**Como é um monitor saudável.** Um monitor em escala da web bem ajustado, na maior parte do tempo, não reporta nada — a maioria dos checks retorna `new: 0` — e só gera alert quando aparece algo genuinamente novo e alinhado ao goal. Leia o summary do check e o `searchStatus` de cada resultado (veja [Statuses and dedup](#statuses-and-dedup)) para saber se ele está bem ajustado:
+
+* Um fluxo constante de resultados `ignored` significa que as queries trazem ruído que o goal depois rejeita — refine as queries (ou reduza `searchWindow`) para parar de pagar para o judge avaliar resultados que nunca geram alert.
+* `watching` frequente significa que o goal está ambíguo — deixe os critérios de correspondência mais claros para que o judge possa decidir.
+* Longos períodos sem resultados em um tópico ativo significam que as queries estão estreitas demais ou que `searchWindow` está curta demais — amplie os termos ou aumente a janela.
+* Alerts que o usuário descarta significam que o goal está amplo demais — adicione um `Ignore ...` específico da intenção.
+
+O resultado ideal é alta precisão com recall suficiente: cada alert vale a pena, e nada importante deixa de ser capturado.
+
+<div id="judging">
+  ## Julgamento
+</div>
+
+A quantidade de trabalho que cada verificação faz por resultado é controlada pelo `judgeEnabled` do monitor — a mesma flag descrita em [Metas e julgamento](/pt-BR/features/monitoring#goals-and-judging). Com o julgamento ativado, o Firecrawl faz scraping de cada resultado correspondente e avalia seu conteúdo em relação à meta, cobrando 1 crédito por resultado avaliado além da chamada de busca. Com `judgeEnabled: false`, um monitor em escala da web retorna os resultados de busca deduplicados sem julgamento por IA — apenas os novos resultados na SERP — e consome apenas os créditos das chamadas de busca (2 créditos por 10 resultados).
+
+<div id="statuses-and-dedup">
+  ## Status e deduplicação
+</div>
+
+Os resultados de busca usam o **mesmo enum `status` por página** que os monitores de scraping e rastreamento, então os consumidores existentes de webhooks e resultados de verificação continuam funcionando sem alterações. Um resultado de busca é mapeado para:
+
+* `new` — um resultado que correspondeu ao objetivo pela primeira vez. É isso que gera alertas.
+* `same` — um resultado já visto em uma verificação anterior (sem novo alerta).
+* `error` — um resultado que não pôde ser avaliado (por exemplo, o scraping para julgamento foi pulado).
+
+O status de busca mais detalhado é exposto em `metadata.searchStatus` de cada página, com um destes valores:
+
+| `searchStatus` | `status` da página | Significado                                                                                                        |
+| -------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `alert`        | `new`              | Novo resultado que o judge considera relevante — dispara uma notificação.                                          |
+| `already_seen` | `same`             | O fingerprint correspondeu a um resultado de uma verificação anterior.                                             |
+| `watching`     | `same`             | Novo resultado sobre o qual o judge ainda não tem confiança; é acompanhado, mas não gera alerta.                   |
+| `ignored`      | `same`             | Novo resultado que o judge classificou como não relevante para o objetivo.                                         |
+| `skipped`      | `error`            | O resultado não pôde ser avaliado nesta verificação (por exemplo, falha no scraping ou julgamento em modo degradado). |
+
+Um resultado gera alerta uma vez, quando aparece pela primeira vez como `new`. A deduplicação é baseada apenas na URL canônica (título e snippet deliberadamente não fazem parte do fingerprint, então uma mudança de título/snippet não dispara de novo). Como a chave é a URL, um evento do mundo real reportado em várias URLs de artigos gera um alerta por URL, não um por evento.
+
+Editar o `goal` ou as `queries` do monitor incrementa seu `goalVersion`, o que invalida vereditos anteriores do judge. A reavaliação é feita sob demanda, e não em massa: os resultados existentes não são todos reavaliados de uma vez. Em vez disso, cada resultado é reavaliado na próxima vez em que reaparece em uma verificação, adotando então o novo `goalVersion`. Resultados que não reaparecem mantêm seu veredito antigo e o `goalVersion` anterior até reaparecerem.
+
+<div id="shared-configuration">
+  ## Configuração compartilhada
+</div>
+
+* [Agendamentos](/pt-BR/features/monitoring#schedules) — cron ou frequência em linguagem natural, no mínimo 5 minutos.
+* [Objetivos e julgamento](/pt-BR/features/monitoring#goals-and-judging) — obrigatório para alvos de busca, a menos que `judgeEnabled: false`.
+* [Notificações](/pt-BR/features/monitoring#notifications) — envio via webhook e email.
+* [Resultados das verificações](/pt-BR/features/monitoring#check-results) — inspecione cada verificação e seus resultados.
+* [Preços](/pt-BR/features/monitoring#pricing) — 2 créditos a cada 10 resultados por verificação, mais 1 crédito por resultado avaliado.
