@@ -1,0 +1,110 @@
+---
+title: "Restrições de chave"
+description: "Restrinja uma chave de API individual a endpoints e formatos de resultado específicos. Aplicado no servidor, sem possibilidade de uma requisição sobrescrever isso."
+og:title: "Restrições de chave | Firecrawl"
+og:description: "Restrinja uma chave de API individual a endpoints e formatos de resultado específicos. Aplicado no servidor, sem possibilidade de uma requisição sobrescrever isso."
+---
+
+As Restrições de chave permitem limitar uma única chave de API a um conjunto definido de endpoints e formatos de resultado. Esses limites são aplicados no servidor durante a autenticação, portanto uma requisição feita com uma chave restrita não pode contorná-los com flags diferentes — não há sobrescrita no nível da requisição.
+
+Isso foi projetado para ambientes em que uma chave é entregue a um agente automatizado ou a um chamador não confiável, e você quer uma garantia rígida sobre o que ela pode fazer — por exemplo, permitindo apenas saída em Markdown para que a chave nunca possa ser usada para obter HTML bruto ou scripts.
+
+<Note>
+  As Restrições de chave são um recurso enterprise e são habilitadas por organização. Entre em contato com a equipe da sua conta Firecrawl para habilitá-las na sua conta.
+</Note>
+
+<div id="what-you-can-restrict">
+  ## O que você pode restringir
+</div>
+
+Cada chave tem duas listas de permissão independentes:
+
+* **Formatos permitidos** — os [formatos de resultado](/pt-BR/features/scrape#scrape-formats) que a chave pode solicitar (por exemplo, `markdown`). Quando definidos, a chave só pode solicitar formatos que estejam na lista.
+* **Endpoints permitidos** — os grupos de endpoints que a chave pode chamar (por exemplo, `scrape`, `crawl`). Quando definidos, a chave só pode chamar endpoints desses grupos.
+
+Cada lista só é aplicada quando **não está vazia**. Uma lista vazia significa &quot;sem restrição&quot; nessa dimensão, então uma chave com ambas as listas vazias se comporta exatamente como uma chave normal. Isso também significa que uma chave nunca pode ficar bloqueada por uma configuração vazia.
+
+<div id="configuring-a-key">
+  ## Configurando uma chave
+</div>
+
+Administradores da equipe configuram restrições na [página API Keys](https://www.firecrawl.dev/app/api-keys) do painel:
+
+1. Abra o menu **⋯** na chave que você quer restringir e escolha **Restrictions**.
+2. Selecione os formatos e/ou endpoints permitidos. Não selecionar nada em uma seção deixa essa dimensão sem restrições.
+3. **Save**. Um selo **Restricted** aparece na chave, e as mudanças entram em vigor em cerca de um minuto.
+
+Somente administradores da equipe podem visualizar ou alterar restrições.
+
+<div id="format-restrictions">
+  ## Restrições de formato
+</div>
+
+Quando uma chave tem uma lista de formatos permitidos, ela é aplicada por todos os endpoints que produzem scraping: `/v2/scrape`, `/v2/batch/scrape`, `/v2/crawl` (via `scrapeOptions`) e `/v2/search` (via `scrapeOptions`), além dos equivalentes em v1.
+
+Uma request que solicita qualquer formato fora da lista é rejeitada:
+
+```json
+{
+  "success": false,
+  "error": "Request blocked: this API key is restricted to the following formats: markdown. Requested formats not allowed: rawHtml. Team admins can manage key restrictions at https://www.firecrawl.dev/app/settings?tab=advanced"
+}
+```
+
+<div id="actions-that-return-content">
+  ### Ações que retornam conteúdo
+</div>
+
+Algumas [ações](/pt-BR/features/interact) retornam o conteúdo da página diretamente, em vez de vir pelo campo `formats` — `screenshot`, `scrape`, `executeJavascript` e `pdf`. Em uma chave com restrição de formatos, elas são tratadas como seu formato equivalente:
+
+* A ação `screenshot` só é permitida se `screenshot` estiver na lista de formatos permitidos.
+* As ações `scrape`, `executeJavascript` e `pdf` não têm formato equivalente e são sempre rejeitadas em uma chave com restrição de formatos.
+
+As ações somente de interação (`wait`, `click`, `write`, `press`, `scroll`) não são afetadas.
+
+<div id="endpoint-restrictions">
+  ## Restrições de endpoint
+</div>
+
+Quando uma chave tem uma lista de endpoints permitidos, ela só pode acessar os endpoints desses grupos. As requisições para qualquer outro endpoint são rejeitadas na autenticação com um `403`:
+
+```json
+{
+  "success": false,
+  "error": "Request blocked: this API key is restricted to the following endpoints: scrape. Team admins can manage key restrictions at https://www.firecrawl.dev/app/settings?tab=advanced"
+}
+```
+
+Grupos de endpoints disponíveis: `scrape`, `batch-scrape`, `crawl`, `map`, `search`, `extract`, `agent`, `parse`, `browser`, `monitor`, `research`, `llmstxt`, `deep-research`, `fireclaw`.
+
+Algumas regras tornam a lista de permissões prática:
+
+* **O status e o cancelamento de um job compartilham o grupo do tipo de job.** Por exemplo, se `crawl` estiver permitido, `GET /v2/crawl/{id}` (status), o endpoint de erros de crawl e o cancelamento também estarão permitidos — você não precisa listá-los separadamente.
+* **Os endpoints de conta e metadados estão sempre acessíveis** (por exemplo, `/v2/team/*`, `/v2/concurrency-check`), então o gerenciamento interno do SDK continua funcionando independentemente da lista de permissões.
+* **Endpoints que fazem scraping internamente são controlados pelo próprio grupo.** `extract` e `agent` acessam páginas como parte do seu funcionamento, então exigem `extract` / `agent` na lista de permissões — permitir apenas `scrape` não concede acesso a eles.
+
+<div id="legacy-v0-api">
+  ## API v0 legada
+</div>
+
+A API `v0` legada é anterior a esses controles, portanto, uma chave com **qualquer** restrição configurada não pode usá-la e receberá `403`. Use a API `v2` em vez dela.
+
+<div id="error-reference">
+  ## Referência de erros
+</div>
+
+| Status | Quando                                                                                                                                                                      |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `403`  | Um formato solicitado não está na lista de formatos permitidos da chave.                                                                                                    |
+| `403`  | Uma ação que retorna conteúdo é usada com uma chave restrita a formatos.                                                                                                  |
+| `403`  | Um endpoint não está na lista de endpoints permitidos da chave.                                                                                                             |
+| `403`  | Uma chave restrita chama a API legada `v0`.                                                                                                                                 |
+| `500`  | Não foi possível verificar a configuração de restrição. As requisições falham em modo fechado (são rejeitadas) em vez de ignorar a restrição. Tente novamente em instantes. |
+
+<div id="notes">
+  ## Observações
+</div>
+
+* As restrições são por chave, então você pode fornecer uma chave bloqueada a um agente, mantendo uma chave sem restrições para uso interativo.
+* As mudanças são aplicadas à API em cerca de um minuto. Não há como desativar essa aplicação de dentro de uma requisição.
+* As Restrições de Chave são independentes das restrições baseadas em IP; uma chave pode ter ambas.
