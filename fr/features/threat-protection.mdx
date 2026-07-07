@@ -1,0 +1,121 @@
+---
+title: "Protection contre les menaces"
+description: "Bloquez les requêtes vers des domaines à risque sur tous les points de terminaison, à l’aide d’une politique contrôlée par votre organisation. Appliquée côté serveur."
+og:title: "Protection contre les menaces | Firecrawl"
+og:description: "Bloquez les requêtes vers des domaines à risque sur tous les points de terminaison, à l’aide d’une politique contrôlée par votre organisation. Appliquée côté serveur."
+---
+
+La protection contre les menaces permet à votre organisation d’empêcher Firecrawl d’accéder à des domaines à risque. Lorsqu’elle est activée, chaque URL qu’une requête tenterait de récupérer — une cible de scrape, un résultat de recherche, un lien découvert lors d’un crawl, une page vers laquelle un agent navigue — est vérifiée par rapport à la politique de votre organisation avant toute récupération de contenu. Les domaines qui ne respectent pas cette politique sont refusés.
+
+La politique est définie une seule fois au niveau de l’organisation et s’applique automatiquement à chaque point de terminaison. Vous pouvez également autoriser des ajustements par requête, ou verrouiller la politique afin qu’aucune requête ne puisse l’assouplir.
+
+<Note>
+  La protection contre les menaces est une fonctionnalité Enterprise et est activée au niveau de l’organisation. Contactez l’équipe de compte Firecrawl pour l’activer sur votre compte.
+</Note>
+
+<div id="modes">
+  ## Modes
+</div>
+
+La protection contre les menaces comporte deux modes, définis au niveau de l’organisation :
+
+* **Désactivé** (par défaut) — aucune vérification de domaine n’est effectuée.
+* **Normal** — les domaines sont vérifiés à l’aide de [Google Web Risk](https://cloud.google.com/web-risk), qui signale les domaines associés à des logiciels malveillants, à l’ingénierie sociale (phishing) et à des logiciels indésirables. **+2 crédits par domaine analysé.**
+
+Les vérifications de réputation de domaine sont conçues pour protéger vos données : dans l’immense majorité des requêtes, la vérification s’effectue localement à partir d’une liste de menaces synchronisée régulièrement. Les URL que vous scrapez ne sont donc jamais envoyées au classificateur, et Firecrawl ne stocke jamais de verdict concernant votre trafic.
+
+<div id="policy-controls">
+  ## Paramètres de la politique
+</div>
+
+Au-delà du classificateur, une politique peut inclure :
+
+* **Liste noire personnalisée** — des domaines exacts ou des motifs glob (par ex. `*.example.com`) qui sont toujours bloqués, sans appel au classificateur.
+* **Liste blanche personnalisée** — des domaines exacts ou des motifs glob qui sont toujours autorisés. La liste blanche prévaut sur toutes les autres règles : ainsi, un domaine de confiance n’est jamais bloqué.
+* **TLD bloqués** — des domaines de premier niveau à bloquer d’emblée (par ex. `zip`), avec correspondance sur les frontières de libellé.
+* **Seuil de score de risque** — le score normalisé (0–100) à partir duquel un verdict du classificateur est traité comme un blocage. Plus il est bas, plus la politique est stricte. La valeur par défaut est `75`.
+* **Politique en cas d’échec** — que faire lorsque le classificateur est inaccessible : **block** (`closed`, valeur par défaut et option recommandée pour un contrôle de sécurité) ou **allow** (`open`).
+
+Les domaines personnalisés que vous ajoutez à la liste noire ou à la liste blanche sont mis en correspondance à l’aide de la même canonicalisation d’hôte que le classificateur, afin que des encodages alternatifs d’une adresse (par exemple, une IP sous forme entière) ne puissent pas servir à contourner une entrée de liste.
+
+<div id="configuring-the-policy">
+  ## Configuration de la politique
+</div>
+
+Les administrateurs de l’équipe configurent Protection contre les menaces depuis les [paramètres de l’organisation](https://www.firecrawl.dev/app/settings?tab=threat-protection) dans le dashboard :
+
+1. Ouvrez **Settings → Threat Protection**.
+2. Choisissez un mode, définissez votre seuil de risque et ajoutez des entrées de liste noire, de liste blanche ou de TLD bloqués.
+3. Choisissez d’autoriser ou non les dérogations par requête, puis définissez la politique en cas d’échec.
+4. Save. Les modifications prennent effet immédiatement — la requête suivante est évaluée selon la nouvelle politique.
+
+Seuls les administrateurs de l’équipe peuvent consulter ou modifier la politique. Tous les autres disposent d’une vue en lecture seule.
+
+<div id="per-request-overrides">
+  ## Dérogations par requête
+</div>
+
+Chaque point de terminaison qui accepte des URL accepte également un objet `threatProtection` facultatif, afin qu’une requête donnée puisse renforcer (ou, si votre organisation l’autorise, ajuster) la politique appliquée à cet appel :
+
+```json
+{
+  "url": "https://example.com",
+  "threatProtection": {
+    "mode": "normal",
+    "riskScoreThreshold": 50,
+    "blacklist": ["*.risky.example"]
+  }
+}
+```
+
+Les dérogations sont fusionnées avec la politique de l’organisation, champ par champ. Si votre organisation a **désactivé les dérogations par requête**, toute requête qui inclut un objet `threatProtection` est rejetée avec un `403` — cela permet à un administrateur de garantir que la politique de l’organisation constitue le niveau minimal pour chaque requête.
+
+<div id="when-a-domain-is-blocked">
+  ## Lorsqu’un domaine est bloqué
+</div>
+
+Une requête bloquée renvoie un `403` et un code d’erreur stable :
+
+```json
+{
+  "success": false,
+  "code": "unsafe_domain_blocked",
+  "error": "This domain (risky.example) is blocked by your organization's threat protection policy (rule: blacklist). If you believe this is a mistake, contact your organization administrator to adjust the policy (e.g. whitelist the domain)."
+}
+```
+
+Le comportement diffère légèrement selon le point de terminaison, selon ce qui est le plus utile :
+
+* **Scrape, extraction par lot, extraction, agent** — une cible bloquée renvoie l’erreur `unsafe_domain_blocked` pour cette URL.
+* **Crawl** — une URL de départ bloquée fait échouer la requête ; les liens bloqués découverts en cours de crawl sont ignorés et le crawl se poursuit.
+* **Recherche, cartographie** — les domaines bloqués sont retirés des résultats renvoyés au lieu d’apparaître puis d’être refusés.
+
+Si une requête est redirigée vers un autre domaine, la destination est vérifiée à nouveau avant de récupérer son contenu ; une redirection ne peut donc pas être utilisée pour atteindre un domaine bloqué.
+
+<div id="billing">
+  ## Facturation
+</div>
+
+Un scan de domaine coûte **+2 crédits par domaine analysé** en mode Normal, en plus du coût de base de la requête. Quelques précisions :
+
+* Les décisions prises uniquement sur la base de votre propre politique (liste noire, liste blanche ou correspondances avec des TLD bloqués) ne font pas appel au classificateur et **n&#39;entraînent pas** de frais de scan.
+* Une requête bloquée est tout de même facturée pour le scan qui a produit le verdict.
+* Les crawls, les recherches et les cartographies analysent chaque domaine unique qu&#39;ils rencontrent. Les frais de scan dépendent donc du nombre de domaines distincts, et non du nombre de pages.
+
+<div id="error-reference">
+  ## Référence des erreurs
+</div>
+
+| État  | Quand                                                                                                                |
+| ----- | -------------------------------------------------------------------------------------------------------------------- |
+| `403` | Une requête cible un domaine bloqué par la politique (`code: unsafe_domain_blocked`).                                |
+| `403` | Une requête inclut une dérogation `threatProtection` alors que les dérogations sont désactivées pour l’organisation. |
+| `403` | Les options de Protection contre les menaces sont utilisées au sein d’une équipe où la fonctionnalité n’est pas activée.         |
+
+<div id="notes">
+  ## Remarques
+</div>
+
+* La politique s’applique à toute l’organisation : elle concerne automatiquement chaque clé API et chaque point de terminaison.
+* La liste blanche a toujours priorité : un domaine explicitement approuvé n’est donc jamais bloqué par le classificateur ni par une règle de TLD.
+* Lorsque la politique de défaillance est définie sur `closed` (par défaut), une panne du classificateur entraîne le blocage des requêtes concernées au lieu de les autoriser silencieusement.
