@@ -1,0 +1,105 @@
+---
+title: "Threat Protection"
+description: "Block requests to risky domains across every endpoint, using a policy your organization controls. Enforced server-side."
+og:title: "Threat Protection | Firecrawl"
+og:description: "Block requests to risky domains across every endpoint, using a policy your organization controls. Enforced server-side."
+---
+
+Threat Protection lets your organization block Firecrawl from accessing risky domains. When it is enabled, every URL a request would fetch — a scrape target, a search result, a link discovered during a crawl, a page an agent navigates to — is checked against your organization's policy before any content is retrieved. Domains that fail the policy are refused.
+
+The policy is defined once at the organization level and applies to every endpoint automatically. You can also allow per-request adjustments, or lock the policy so no request can weaken it.
+
+<Note>
+Threat Protection is an enterprise feature and is gated per organization. Contact your Firecrawl account team to have it enabled for your account.
+</Note>
+
+## Modes
+
+Threat Protection has two modes, set at the organization level:
+
+- **Off** (default) — no domain checks are performed.
+- **Normal** — domains are checked against [Google Web Risk](https://cloud.google.com/web-risk), which flags domains associated with malware, social engineering (phishing), and unwanted software. **+2 credits per domain scanned.**
+
+Domain reputation checks are designed to protect your data: for the overwhelming majority of requests the check resolves locally against a regularly synced threat list, so the URLs you scrape are never sent to the classifier, and no verdict about your traffic is ever stored by Firecrawl.
+
+## Policy controls
+
+Beyond the classifier, a policy can include:
+
+- **Custom blacklist** — exact domains or globs (e.g. `*.example.com`) that are always blocked, without a classifier call.
+- **Custom whitelist** — exact domains or globs that are always allowed. The whitelist wins over every other rule, so a domain you trust is never blocked.
+- **Blocked TLDs** — top-level domains to block outright (e.g. `zip`), matched on label boundaries.
+- **Risk score threshold** — the normalized score (0–100) at or above which a classifier verdict is treated as a block. Lower is stricter. The default is `75`.
+- **Failure policy** — what to do when the classifier can't be reached: **block** (`closed`, the default and recommended for a security control) or **allow** (`open`).
+
+Custom domains you blacklist or whitelist are matched using the same host canonicalization as the classifier, so alternate encodings of an address (for example, an integer-form IP) can't be used to slip past a list entry.
+
+## Configuring the policy
+
+Team admins configure Threat Protection from the [organization settings](https://www.firecrawl.dev/app/settings?tab=threat-protection) in the dashboard:
+
+1. Open **Settings → Threat Protection**.
+2. Choose a mode, set your risk score threshold, and add any blacklist, whitelist, or blocked-TLD entries.
+3. Choose whether to allow per-request overrides, and set the failure policy.
+4. Save. Changes take effect immediately — the next request is evaluated against the new policy.
+
+Only team admins can view or change the policy. Everyone else sees a read-only view.
+
+## Per-request overrides
+
+Every endpoint that accepts URLs also accepts an optional `threatProtection` object, so an individual request can tighten (or, if your organization allows it, adjust) the policy for that call:
+
+```json
+{
+  "url": "https://example.com",
+  "threatProtection": {
+    "mode": "normal",
+    "riskScoreThreshold": 50,
+    "blacklist": ["*.risky.example"]
+  }
+}
+```
+
+Overrides are merged onto the organization policy field by field. If your organization has **disabled request overrides**, any request that includes a `threatProtection` object is rejected with a `403` — this lets an administrator guarantee that the organization policy is the floor for every request.
+
+## When a domain is blocked
+
+A blocked request fails with a `403` and a stable error code:
+
+```json
+{
+  "success": false,
+  "code": "unsafe_domain_blocked",
+  "error": "This domain (risky.example) is blocked by your organization's threat protection policy (rule: blacklist). If you believe this is a mistake, contact your organization administrator to adjust the policy (e.g. whitelist the domain)."
+}
+```
+
+Behavior differs slightly by endpoint, matching what is most useful:
+
+- **Scrape, batch scrape, extract, agent** — a blocked target returns the `unsafe_domain_blocked` error for that URL.
+- **Crawl** — a blocked seed URL fails the request; blocked links discovered mid-crawl are skipped and the crawl continues.
+- **Search, map** — blocked domains are removed from the returned results rather than surfaced and refused.
+
+If a request is redirected to a different domain, the destination is re-checked before its content is fetched, so a redirect can't be used to reach a blocked domain.
+
+## Billing
+
+A domain scan costs **+2 credits per domain scanned** in Normal mode, on top of the base cost of the request. A few details:
+
+- Decisions made entirely from your own policy (blacklist, whitelist, or blocked-TLD matches) do not call the classifier and are **not** charged a scan fee.
+- A request that is blocked is still charged for the scan that produced the verdict.
+- Crawls, searches, and maps scan each unique domain they encounter, so the scan fees scale with the number of distinct domains, not the number of pages.
+
+## Error reference
+
+| Status | When |
+| --- | --- |
+| `403` | A request targets a domain blocked by the policy (`code: unsafe_domain_blocked`). |
+| `403` | A request includes a `threatProtection` override while overrides are disabled for the organization. |
+| `403` | Threat Protection options are used on a team without the feature enabled. |
+
+## Notes
+
+- The policy is organization-wide: it applies to every API key and every endpoint automatically.
+- The whitelist always wins, so an explicitly trusted domain is never blocked by the classifier or a TLD rule.
+- With the failure policy set to `closed` (the default), a classifier outage causes affected requests to be blocked rather than silently allowed.
