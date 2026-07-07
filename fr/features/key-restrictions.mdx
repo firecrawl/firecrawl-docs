@@ -1,0 +1,110 @@
+---
+title: "Restrictions de clé"
+description: "Verrouillez une clé API individuelle sur des formats de sortie et des points de terminaison spécifiques. Appliqué côté serveur, sans possibilité pour une requête de passer outre."
+og:title: "Restrictions de clé | Firecrawl"
+og:description: "Verrouillez une clé API individuelle sur des formats de sortie et des points de terminaison spécifiques. Appliqué côté serveur, sans possibilité pour une requête de passer outre."
+---
+
+Les restrictions de clé vous permettent de limiter une clé API donnée à un ensemble défini de formats de sortie et de points de terminaison. Ces limites sont appliquées côté serveur lors de l’authentification. Une requête effectuée avec une clé restreinte ne peut donc pas les contourner en passant d’autres options — il n’existe aucune dérogation au niveau de la requête.
+
+Cette fonctionnalité est conçue pour les environnements où une clé est confiée à un agent automatisé ou à un appelant non fiable, et où vous voulez une garantie stricte sur ce qu’elle peut faire — par exemple, n’autoriser que la sortie Markdown afin qu’une clé ne puisse jamais être utilisée pour récupérer du HTML brut ou des scripts.
+
+<Note>
+  Les restrictions de clé sont une fonctionnalité Enterprise et sont activées par organisation. Contactez l’équipe Firecrawl en charge de votre compte pour les faire activer sur votre compte.
+</Note>
+
+<div id="what-you-can-restrict">
+  ## Ce que vous pouvez restreindre
+</div>
+
+Chaque clé possède deux listes d’autorisation indépendantes :
+
+* **Formats autorisés** — les [formats de sortie](/fr/features/scrape#scrape-formats) que la clé peut demander (par ex. `markdown`). Lorsqu’elle est définie, la clé ne peut demander que les formats figurant dans cette liste.
+* **Points de terminaison autorisés** — les groupes de points de terminaison que la clé peut appeler (par ex. `scrape`, `crawl`). Lorsqu’elle est définie, la clé ne peut appeler que les points de terminaison appartenant à ces groupes.
+
+Chaque liste n’est appliquée que lorsqu’elle est **non vide**. Une liste vide signifie « aucune restriction » pour cette dimension ; ainsi, une clé dont les deux listes sont vides se comporte exactement comme une clé normale. Cela signifie aussi qu’une clé ne peut jamais être bloquée par une configuration vide.
+
+<div id="configuring-a-key">
+  ## Configurer une clé
+</div>
+
+Les administrateurs de l’équipe configurent les restrictions depuis la [page API Keys](https://www.firecrawl.dev/app/api-keys) dans le tableau de bord :
+
+1. Ouvrez le menu **⋯** de la clé que vous souhaitez restreindre et choisissez **Restrictions**.
+2. Sélectionnez les formats et/ou les points de terminaison autorisés. Si vous ne sélectionnez rien dans une section, ce paramètre reste sans restriction.
+3. Save. Un badge **Restricted** apparaît sur la clé, et les modifications prennent effet au bout d’environ une minute.
+
+Seuls les administrateurs de l’équipe peuvent consulter ou modifier les restrictions.
+
+<div id="format-restrictions">
+  ## Restrictions de format
+</div>
+
+Lorsqu&#39;une clé comporte une liste de formats autorisés, tous les points de terminaison qui produisent du contenu via scrape l&#39;appliquent : `/v2/scrape`, `/v2/batch/scrape`, `/v2/crawl` (via `scrapeOptions`) et `/v2/search` (via `scrapeOptions`), ainsi que leurs équivalents v1.
+
+Toute requête qui demande un format ne figurant pas dans cette liste est rejetée :
+
+```json
+{
+  "success": false,
+  "error": "Request blocked: this API key is restricted to the following formats: markdown. Requested formats not allowed: rawHtml. Team admins can manage key restrictions at https://www.firecrawl.dev/app/settings?tab=advanced"
+}
+```
+
+<div id="actions-that-return-content">
+  ### Actions qui renvoient du contenu
+</div>
+
+Certaines [actions](/fr/features/interact) renvoient directement le contenu de la page au lieu de passer par le champ `formats` — `screenshot`, `scrape`, `executeJavascript` et `pdf`. Avec une clé soumise à une restriction de formats, elles sont traitées comme leur format équivalent :
+
+* L’action `screenshot` n’est autorisée que si `screenshot` figure dans la liste des formats autorisés.
+* Les actions `scrape`, `executeJavascript` et `pdf` n’ont pas de format équivalent et sont donc toujours rejetées avec une clé soumise à une restriction de formats.
+
+Les actions limitées à l’interaction (`wait`, `click`, `write`, `press`, `scroll`) ne sont pas concernées.
+
+<div id="endpoint-restrictions">
+  ## Restrictions des points de terminaison
+</div>
+
+Lorsqu&#39;une clé comporte une liste de points de terminaison autorisés, elle ne peut appeler que les points de terminaison appartenant à ces groupes. Les requêtes vers tout autre point de terminaison sont rejetées lors de l&#39;authentification avec un `403` :
+
+```json
+{
+  "success": false,
+  "error": "Request blocked: this API key is restricted to the following endpoints: scrape. Team admins can manage key restrictions at https://www.firecrawl.dev/app/settings?tab=advanced"
+}
+```
+
+Groupes de points de terminaison disponibles : `scrape`, `batch-scrape`, `crawl`, `map`, `search`, `extract`, `agent`, `parse`, `browser`, `monitor`, `research`, `llmstxt`, `deep-research`, `fireclaw`.
+
+Quelques règles rendent la liste d’autorisation facile à utiliser :
+
+* **L’état d’un job et son annulation relèvent du même groupe que leur type de job.** Par exemple, si `crawl` est autorisé, `GET /v2/crawl/{id}` (état), le point de terminaison des erreurs de crawl et l’annulation sont eux aussi autorisés — vous n’avez pas à les lister séparément.
+* **Les points de terminaison liés au compte et aux métadonnées sont toujours accessibles** (par ex. `/v2/team/*`, `/v2/concurrency-check`), afin que la gestion interne du SDK continue de fonctionner quelle que soit la liste d’autorisation.
+* **Les points de terminaison qui effectuent du scraping en interne sont régis par leur propre groupe.** `extract` et `agent` récupèrent des pages dans le cadre de leur exécution ; ils nécessitent donc `extract` / `agent` dans la liste d’autorisation — autoriser uniquement `scrape` ne les autorise pas.
+
+<div id="legacy-v0-api">
+  ## API `v0` héritée
+</div>
+
+L’API `v0` héritée est antérieure à ces contrôles. Par conséquent, une clé pour laquelle **une** restriction est configurée ne peut pas l’utiliser et renverra un code `403`. Utilisez plutôt l’API `v2`.
+
+<div id="error-reference">
+  ## Référence des erreurs
+</div>
+
+| État  | Quand                                                                                                                                                                                         |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `403` | Un format demandé ne figure pas dans la liste des formats autorisés pour la clé.                                                                                                              |
+| `403` | Une action qui renvoie du contenu est utilisée avec une clé restreinte à certains formats.                                                                                                    |
+| `403` | Un point de terminaison ne figure pas dans la liste des points de terminaison autorisés pour la clé.                                                                                          |
+| `403` | Une clé restreinte appelle l’API `v0` héritée.                                                                                                                                                |
+| `500` | La configuration des restrictions n’a pas pu être vérifiée. Les requests échouent en mode fermé (elles sont rejetées) au lieu de contourner la restriction. Réessayez dans quelques instants. |
+
+<div id="notes">
+  ## Remarques
+</div>
+
+* Les restrictions s&#39;appliquent par clé. Vous pouvez donc attribuer à un agent une clé verrouillée, tout en conservant une clé sans restriction pour une utilisation interactive.
+* Les modifications sont prises en compte par l&#39;API en environ une minute. Il n&#39;existe aucun moyen de désactiver l&#39;application des restrictions depuis une requête.
+* Les restrictions de clé sont indépendantes des restrictions basées sur l&#39;IP ; une clé peut cumuler les deux.

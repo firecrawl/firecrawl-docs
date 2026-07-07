@@ -1,0 +1,110 @@
+---
+title: "密钥限制"
+description: "将单个 API 密钥限制为只能使用特定的输出格式和端点。限制在服务器端强制执行，请求无法覆盖。"
+og:title: "密钥限制 | Firecrawl"
+og:description: "将单个 API 密钥限制为只能使用特定的输出格式和端点。限制在服务器端强制执行，请求无法覆盖。"
+---
+
+密钥限制可让你将单个 API 密钥严格限制在一组预先定义的输出格式和端点内。这些限制会在身份验证时于服务器端强制执行，因此，使用受限密钥发出的请求无法通过传入不同参数来绕过这些限制——不存在请求级别的覆盖方式。
+
+此功能适用于将密钥交给自动化代理或不受信任调用方的场景，并且你希望对其可执行的操作有明确且强有力的保障——例如，只允许 Markdown 输出，这样该密钥就绝不会被用来获取 raw HTML 或脚本。
+
+<Note>
+  密钥限制是企业版功能，按组织控制启用。请联系你的 Firecrawl 账户团队，为你的账户启用此功能。
+</Note>
+
+<div id="what-you-can-restrict">
+  ## 你可以限制的内容
+</div>
+
+每个密钥都有两个彼此独立的允许列表：
+
+* **允许的格式** — 该密钥可请求的[输出格式](/zh/features/scrape#scrape-formats) (例如 `markdown`) 。设置后，密钥只能请求列表中的格式。
+* **允许的端点** — 该密钥可调用的端点分组 (例如 `scrape`、`crawl`) 。设置后，密钥只能调用这些分组中的端点。
+
+只有当列表**非空**时，这些限制才会生效。空列表表示该维度“没有限制”，因此当两个列表都为空时，密钥的行为与普通密钥完全相同。这也意味着，密钥不会因为配置为空而被锁死。
+
+<div id="configuring-a-key">
+  ## 配置密钥
+</div>
+
+团队管理员可在 Dashboard 的 [API Keys 页面](https://www.firecrawl.dev/app/api-keys) 中配置限制：
+
+1. 打开要限制的密钥上的 **⋯** 菜单，然后选择 **Restrictions**。
+2. 选择允许的 formats 和/或 端点。如果某个部分不选择任何内容，则该项不受限制。
+3. 点击 Save。密钥上会显示 **Restricted** 标记，变更大约会在一分钟内生效。
+
+只有团队管理员可以查看或修改这些限制。
+
+<div id="format-restrictions">
+  ## 格式限制
+</div>
+
+当某个 密钥 带有 allowed-formats 列表时，所有会产生抓取结果的 endpoint 都会执行该限制：`/v2/scrape`、`/v2/batch/scrape`、`/v2/crawl` (通过 `scrapeOptions`) 以及 `/v2/search` (通过 `scrapeOptions`) ，另外也包括它们对应的 v1 版本。
+
+如果请求中包含列表之外的任何格式，就会被拒绝：
+
+```json
+{
+  "success": false,
+  "error": "Request blocked: this API key is restricted to the following formats: markdown. Requested formats not allowed: rawHtml. Team admins can manage key restrictions at https://www.firecrawl.dev/app/settings?tab=advanced"
+}
+```
+
+<div id="actions-that-return-content">
+  ### 返回内容的 actions
+</div>
+
+某些 [actions](/zh/features/interact) 会直接返回页面内容，而不是通过 `formats` 字段返回——包括 `screenshot`、`scrape`、`executeJavascript` 和 `pdf`。对于受格式限制的密钥，这些 actions 会按其对应的等效格式处理：
+
+* 只有当允许的 formats 列表中包含 `screenshot` 时，才允许使用 `screenshot` action。
+* `scrape`、`executeJavascript` 和 `pdf` actions 没有对应的等效格式，因此在受格式限制的密钥上始终会被拒绝。
+
+仅用于交互的 actions (`wait`、`click`、`write`、`press`、`scroll`) 不受影响。
+
+<div id="endpoint-restrictions">
+  ## 端点限制
+</div>
+
+当某个密钥配置了 allowed-endpoints 列表时，它只能调用这些组中的端点。对任何其他端点发起的请求都会在身份验证阶段被拒绝，并返回 `403`：
+
+```json
+{
+  "success": false,
+  "error": "Request blocked: this API key is restricted to the following endpoints: scrape. Team admins can manage key restrictions at https://www.firecrawl.dev/app/settings?tab=advanced"
+}
+```
+
+可用的端点分组：`scrape`、`batch-scrape`、`crawl`、`map`、`search`、`extract`、`agent`、`parse`、`browser`、`monitor`、`research`、`llmstxt`、`deep-research`、`fireclaw`。
+
+以下几条规则让允许列表更便于实际使用：
+
+* **任务状态和取消操作归属于对应任务类型的分组。** 例如，如果允许了 `crawl`，那么 `GET /v2/crawl/{id}` (状态) 、crawl 的错误端点以及取消操作也都会自动允许——无需单独列出。
+* **账户和元数据端点始终可访问** (例如 `/v2/team/*`、`/v2/concurrency-check`) ，因此无论允许列表如何设置，SDK 的内部管理逻辑都能正常工作。
+* **内部执行抓取的端点受其自身分组控制。** `extract` 和 `agent` 会在执行过程中抓取页面，因此它们需要在允许列表中包含 `extract` / `agent`——仅允许 `scrape` 并不会同时授予这些权限。
+
+<div id="legacy-v0-api">
+  ## 旧版 v0 API
+</div>
+
+旧版 `v0` API 早于这些控制机制，因此，只要密钥配置了**任何**限制，就无法使用该 API，并会收到 `403`。请改用 `v2` API。
+
+<div id="error-reference">
+  ## 错误说明
+</div>
+
+| 状态    | 发生情况                                          |
+| ----- | --------------------------------------------- |
+| `403` | 请求的格式不在该密钥的 allowed-formats 列表中。              |
+| `403` | 在受格式限制的密钥上使用了会返回内容的 action。                   |
+| `403` | 该 endpoint 不在该密钥的 allowed-endpoints 列表中。      |
+| `403` | 受限密钥调用了旧版 `v0` API。                           |
+| `500` | 无法验证限制配置。请求会以故障关闭的方式失败 (即被拒绝) ，而不是绕过限制。请稍后重试。 |
+
+<div id="notes">
+  ## 注意事项
+</div>
+
+* 这些限制是按密钥分别生效的，因此你可以给代理分发一个权限受限的密钥，同时保留一个不受限制的密钥用于交互式使用。
+* 更改大约会在一分钟内同步到 API。无法在请求中禁用强制执行。
+* 密钥限制与基于 IP 的限制相互独立；一个密钥可以同时设置这两种限制。
