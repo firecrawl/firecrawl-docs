@@ -1,0 +1,121 @@
+---
+title: "Protección contra amenazas"
+description: "Bloquea solicitudes a dominios riesgosos en todos los endpoints mediante una política controlada por tu organización. Se aplica en el servidor."
+og:title: "Protección contra amenazas | Firecrawl"
+og:description: "Bloquea solicitudes a dominios riesgosos en todos los endpoints mediante una política controlada por tu organización. Se aplica en el servidor."
+---
+
+La Protección contra amenazas permite a tu organización impedir que Firecrawl acceda a dominios riesgosos. Cuando está habilitada, cada URL que una solicitud intentaría obtener —un objetivo de scraping, un resultado de búsqueda, un enlace descubierto durante un crawl o una página a la que navega un agente— se comprueba con la política de tu organización antes de recuperar cualquier contenido. Los dominios que no cumplan la política se bloquean.
+
+La política se define una sola vez a nivel de la organización y se aplica automáticamente a todos los endpoints. También puedes permitir ajustes por solicitud o bloquear la política para que ninguna solicitud pueda debilitarla.
+
+<Note>
+  La Protección contra amenazas es una función empresarial y se habilita por organización. Ponte en contacto con el equipo de cuenta de Firecrawl para activarla en tu cuenta.
+</Note>
+
+<div id="modes">
+  ## Modos
+</div>
+
+Threat Protection tiene dos modos, configurados a nivel de la organización:
+
+* **Desactivado** (predeterminado) — no se realizan verificaciones de dominios.
+* **Normal** — los dominios se verifican con [Google Web Risk](https://cloud.google.com/web-risk), que marca los dominios asociados con malware, ingeniería social (phishing) y software no deseado. **+2 créditos por dominio analizado.**
+
+Las verificaciones de reputación de dominios están diseñadas para proteger tus datos: en la inmensa mayoría de las solicitudes, la verificación se resuelve localmente con una lista de amenazas sincronizada periódicamente, por lo que las URL que extraes nunca se envían al clasificador y Firecrawl nunca almacena ningún veredicto sobre tu tráfico.
+
+<div id="policy-controls">
+  ## Controles de la política
+</div>
+
+Además del clasificador, una política puede incluir:
+
+* **Lista negra personalizada** — dominios exactos o patrones globales (p. ej., `*.example.com`) que siempre se bloquean, sin llamar al clasificador.
+* **Lista blanca personalizada** — dominios exactos o patrones globales que siempre se permiten. La lista blanca prevalece sobre cualquier otra regla, por lo que un dominio de confianza nunca se bloquea.
+* **TLD bloqueados** — dominios de nivel superior que se bloquean directamente (p. ej., `zip`), con coincidencia en los límites de las etiquetas.
+* **Umbral de puntuación de riesgo** — la puntuación normalizada (0–100) a partir de la cual un veredicto del clasificador se considera un bloqueo. Cuanto más bajo, más estricto. El valor predeterminado es `75`.
+* **Política ante fallos** — qué hacer cuando no se puede acceder al clasificador: **bloquear** (`closed`, la opción predeterminada y recomendada para un control de seguridad) o **permitir** (`open`).
+
+Los dominios personalizados que incluyas en la lista negra o blanca se comparan usando la misma canonicalización de host que el clasificador, de modo que no se puedan usar codificaciones alternativas de una dirección (por ejemplo, una IP en formato entero) para eludir una entrada de la lista.
+
+<div id="configuring-the-policy">
+  ## Configuración de la política
+</div>
+
+Los administradores del equipo configuran la Protección contra amenazas desde la [configuración de la organización](https://www.firecrawl.dev/app/settings?tab=threat-protection) en el panel:
+
+1. Abre **Configuración → Protección contra amenazas**.
+2. Selecciona un modo, define el umbral de puntuación de riesgo y añade cualquier entrada a la lista negra, lista blanca o TLD bloqueados.
+3. Selecciona si se permiten anulaciones por solicitud y define la política en caso de error.
+4. Guarda. Los cambios se aplican de inmediato: la siguiente solicitud se evalúa según la nueva política.
+
+Solo los administradores del equipo pueden ver o cambiar la política. El resto solo puede verla en modo de solo lectura.
+
+<div id="per-request-overrides">
+  ## Anulaciones por solicitud
+</div>
+
+Cada endpoint que acepta URL también acepta un objeto `threatProtection` opcional, de modo que una solicitud concreta puede reforzar (o, si su organización lo permite, ajustar) la política para esa llamada:
+
+```json
+{
+  "url": "https://example.com",
+  "threatProtection": {
+    "mode": "normal",
+    "riskScoreThreshold": 50,
+    "blacklist": ["*.risky.example"]
+  }
+}
+```
+
+Las anulaciones se aplican a la política de la organización campo por campo. Si su organización ha **deshabilitado las anulaciones de solicitud**, cualquier solicitud que incluya un objeto `threatProtection` se rechaza con un `403`; esto permite a un administrador garantizar que la política de la organización sea el nivel mínimo para cada solicitud.
+
+<div id="when-a-domain-is-blocked">
+  ## Cuando un dominio está bloqueado
+</div>
+
+Una solicitud bloqueada devuelve un `403` y un código de error estable:
+
+```json
+{
+  "success": false,
+  "code": "unsafe_domain_blocked",
+  "error": "This domain (risky.example) is blocked by your organization's threat protection policy (rule: blacklist). If you believe this is a mistake, contact your organization administrator to adjust the policy (e.g. whitelist the domain)."
+}
+```
+
+El comportamiento varía ligeramente según el endpoint, en función de lo que sea más útil:
+
+* **Scrape, batch scrape, extract, agent** — un objetivo bloqueado devuelve el error `unsafe_domain_blocked` para esa URL.
+* **Crawl** — una URL semilla bloqueada hace que falle la solicitud; los enlaces bloqueados que se descubren durante el crawl se omiten y el crawl continúa.
+* **Search, map** — los dominios bloqueados se eliminan de los resultados devueltos en lugar de mostrarse y ser rechazados.
+
+Si una solicitud se redirige a un dominio distinto, el destino se vuelve a comprobar antes de obtener su contenido, por lo que no se puede usar una redirección para llegar a un dominio bloqueado.
+
+<div id="billing">
+  ## Facturación
+</div>
+
+Un escaneo de dominio cuesta **+2 créditos por dominio escaneado** en modo Normal, además del costo base de la solicitud. Algunos detalles:
+
+* Las decisiones tomadas exclusivamente según tu propia política (coincidencias con listas negras, listas blancas o TLD bloqueados) no pasan por el clasificador y **no** generan ningún cargo por escaneo.
+* Una solicitud bloqueada igualmente genera el cargo por el escaneo que produjo el veredicto.
+* Los rastreos, las búsquedas y los mapeos escanean cada dominio único que encuentran, por lo que los cargos por escaneo aumentan en función de la cantidad de dominios distintos, no de la cantidad de páginas.
+
+<div id="error-reference">
+  ## Referencia de errores
+</div>
+
+| Estado | Cuándo                                                                                                                      |
+| ------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `403`  | Una solicitud se dirige a un dominio bloqueado por la política (`code: unsafe_domain_blocked`).                             |
+| `403`  | Una solicitud incluye una anulación de `threatProtection` cuando las anulaciones están deshabilitadas para la organización. |
+| `403`  | Las opciones de Protección contra amenazas se usan en un equipo que no tiene la función habilitada.                                  |
+
+<div id="notes">
+  ## Notas
+</div>
+
+* La política abarca toda la organización: se aplica automáticamente a cada API key y a cada endpoint.
+* La lista blanca siempre prevalece, por lo que un dominio marcado explícitamente como de confianza nunca es bloqueado por el clasificador ni por una regla de TLD.
+* Con la política de fallos establecida en `closed` (la predeterminada), una interrupción del clasificador hace que las solicitudes afectadas se bloqueen en lugar de permitirse silenciosamente.

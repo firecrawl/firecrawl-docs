@@ -1,0 +1,121 @@
+---
+title: "Proteção contra ameaças"
+description: "Bloqueie requests para domínios arriscados em todos os endpoints usando uma política controlada pela sua organização. Aplicado no servidor."
+og:title: "Proteção contra ameaças | Firecrawl"
+og:description: "Bloqueie requests para domínios arriscados em todos os endpoints usando uma política controlada pela sua organização. Aplicado no servidor."
+---
+
+A Proteção contra ameaças permite que sua organização impeça o Firecrawl de acessar domínios arriscados. Quando ela está habilitada, toda URL que uma request tentaria buscar — um alvo `scrape`, um resultado de busca, um link descoberto durante um rastreamento, uma página para a qual um agente navega — é verificada de acordo com a política da sua organização antes que qualquer conteúdo seja recuperado. Domínios que não estiverem em conformidade com a política são bloqueados.
+
+A política é definida uma única vez no nível da organização e se aplica automaticamente a todos os endpoints. Você também pode permitir ajustes por request ou bloquear a política para que nenhuma request possa enfraquecê-la.
+
+<Note>
+  A Proteção contra ameaças é um recurso enterprise e é disponibilizada por organização. Entre em contato com a equipe da sua conta Firecrawl para habilitá-la na sua conta.
+</Note>
+
+<div id="modes">
+  ## Modos
+</div>
+
+A Proteção contra ameaças tem dois modos, definidos no nível da organização:
+
+* **Desativado** (padrão) — nenhuma verificação de domínio é realizada.
+* **Normal** — os domínios são verificados com base no [Google Web Risk](https://cloud.google.com/web-risk), que sinaliza domínios associados a malware, engenharia social (phishing) e software indesejado. **+2 créditos por domínio verificado.**
+
+As verificações de reputação de domínio foram projetadas para proteger seus dados: na grande maioria das requisições, a verificação é resolvida localmente com base em uma lista de ameaças sincronizada regularmente, então as URLs coletadas por scraping nunca são enviadas ao classificador, e nenhum veredito sobre o seu tráfego é armazenado pelo Firecrawl.
+
+<div id="policy-controls">
+  ## Controles da política
+</div>
+
+Além do classificador, uma política pode incluir:
+
+* **Lista de bloqueio personalizada** — domínios exatos ou globs (por exemplo, `*.example.com`) que são sempre bloqueados, sem chamar o classificador.
+* **Lista de permissões personalizada** — domínios exatos ou globs que são sempre permitidos. A lista de permissões prevalece sobre todas as outras regras, então um domínio em que você confia nunca é bloqueado.
+* **TLDs bloqueados** — domínios de nível superior bloqueados diretamente (por exemplo, `zip`), com correspondência nos limites dos rótulos.
+* **Limite de pontuação de risco** — a pontuação normalizada (0–100) a partir da qual um veredito do classificador é tratado como bloqueio. Quanto menor, mais rigoroso. O padrão é `75`.
+* **Política de falha** — o que fazer quando o classificador não puder ser acessado: **bloquear** (`closed`, o padrão e recomendado para um controle de segurança) ou **permitir** (`open`).
+
+Os domínios personalizados que você adiciona à lista de bloqueio ou à lista de permissões são comparados usando a mesma normalização canônica de host do classificador, portanto codificações alternativas de um endereço (por exemplo, um IP em formato inteiro) não podem ser usadas para contornar uma entrada da lista.
+
+<div id="configuring-the-policy">
+  ## Configurando a política
+</div>
+
+Os administradores da equipe configuram a Proteção contra Ameaças nas [configurações da organização](https://www.firecrawl.dev/app/settings?tab=threat-protection) no painel:
+
+1. Abra **Configurações → Proteção contra Ameaças**.
+2. Escolha um modo, defina o limite de pontuação de risco e adicione entradas à lista de bloqueio, à lista de permissões ou TLDs bloqueados.
+3. Escolha se deseja permitir substituições por requisição e defina a política em caso de falha.
+4. Salve. As mudanças entram em vigor imediatamente — a próxima requisição será avaliada de acordo com a nova política.
+
+Somente os administradores da equipe podem ver ou alterar a política. Todos os demais veem uma visualização somente leitura.
+
+<div id="per-request-overrides">
+  ## Sobrescritas por requisição
+</div>
+
+Todo endpoint que aceita URLs também aceita um objeto `threatProtection` opcional, para que uma requisição específica possa reforçar (ou, se sua organização permitir, ajustar) a política dessa chamada:
+
+```json
+{
+  "url": "https://example.com",
+  "threatProtection": {
+    "mode": "normal",
+    "riskScoreThreshold": 50,
+    "blacklist": ["*.risky.example"]
+  }
+}
+```
+
+As substituições são mescladas à política da organização, campo por campo. Se a sua organização tiver **desativado as substituições por requisição**, qualquer requisição que inclua um objeto `threatProtection` será rejeitada com `403` — isso permite que um administrador garanta que a política da organização seja o nível mínimo para todas as requisições.
+
+<div id="when-a-domain-is-blocked">
+  ## Quando um domínio é bloqueado
+</div>
+
+Uma requisição bloqueada retorna `403` e um código de erro estável:
+
+```json
+{
+  "success": false,
+  "code": "unsafe_domain_blocked",
+  "error": "This domain (risky.example) is blocked by your organization's threat protection policy (rule: blacklist). If you believe this is a mistake, contact your organization administrator to adjust the policy (e.g. whitelist the domain)."
+}
+```
+
+O comportamento varia ligeiramente conforme o endpoint, de acordo com o que for mais útil:
+
+* **Scraping, extração em lote, extração, agente** — um alvo bloqueado retorna o erro `unsafe_domain_blocked` para essa URL.
+* **Rastreamento** — uma URL inicial bloqueada faz a solicitação falhar; links bloqueados descobertos durante o rastreamento são ignorados, e o rastreamento continua.
+* **Busca, mapeamento** — domínios bloqueados são removidos dos resultados retornados, em vez de serem exibidos e recusados.
+
+Se uma solicitação for redirecionada para outro domínio, o destino será verificado novamente antes que seu conteúdo seja buscado, portanto um redirecionamento não pode ser usado para acessar um domínio bloqueado.
+
+<div id="billing">
+  ## Cobrança
+</div>
+
+Uma varredura de domínio custa **+2 créditos por domínio verificado** no modo Normal, além do custo base da requisição. Alguns detalhes:
+
+* Decisões tomadas inteiramente com base na sua própria política (correspondências com lista de bloqueio, lista de permissões ou TLDs bloqueados) não acionam o classificador e **não** geram cobrança de taxa de varredura.
+* Uma requisição bloqueada ainda é cobrada pela varredura que gerou o veredito.
+* Rastreamentos, buscas e mapeamentos verificam cada domínio único que encontram, então as taxas de varredura aumentam conforme o número de domínios distintos, e não o número de páginas.
+
+<div id="error-reference">
+  ## Referência de erros
+</div>
+
+| Status | Quando                                                                                                                        |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `403`  | Uma solicitação visa um domínio bloqueado pela política (`code: unsafe_domain_blocked`).                                      |
+| `403`  | Uma solicitação inclui uma sobrescrita de `threatProtection` enquanto as sobrescritas estão desabilitadas para a organização. |
+| `403`  | As opções de Proteção contra ameaças são usadas em uma equipe sem o recurso habilitado.                                             |
+
+<div id="notes">
+  ## Observações
+</div>
+
+* A política vale para toda a organização: ela se aplica automaticamente a cada chave de API e a cada endpoint.
+* A lista de permissões sempre prevalece, então um domínio explicitamente confiável nunca é bloqueado pelo classificador nem por uma regra de TLD.
+* Com a política de falha definida como `closed` (o padrão), uma indisponibilidade do classificador faz com que as solicitações afetadas sejam bloqueadas, em vez de serem permitidas silenciosamente.
