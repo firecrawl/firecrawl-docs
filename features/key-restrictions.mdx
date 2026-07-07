@@ -1,0 +1,94 @@
+---
+title: "Key Restrictions"
+description: "Lock an individual API key to specific output formats and endpoints. Enforced server-side, with no way for a request to override it."
+og:title: "Key Restrictions | Firecrawl"
+og:description: "Lock an individual API key to specific output formats and endpoints. Enforced server-side, with no way for a request to override it."
+---
+
+Key Restrictions let you lock a single API key down to a defined set of output formats and endpoints. The limits are enforced server-side during authentication, so a request made with a restricted key cannot escape them by passing different flags — there is no request-level override.
+
+This is designed for environments where a key is handed to an automated agent or an untrusted caller and you want a hard guarantee about what it can do — for example, allowing only Markdown output so a key can never be used to pull raw HTML or scripts.
+
+<Note>
+Key Restrictions are an enterprise feature and are gated per organization. Contact your Firecrawl account team to have them enabled for your account.
+</Note>
+
+## What you can restrict
+
+Each key has two independent allowlists:
+
+- **Allowed formats** — the [output formats](/features/scrape#scrape-formats) the key may request (e.g. `markdown`). When set, the key can only request formats on the list.
+- **Allowed endpoints** — the endpoint groups the key may call (e.g. `scrape`, `crawl`). When set, the key can only call endpoints in those groups.
+
+Each list is enforced only when it is **non-empty**. An empty list means "no restriction" for that dimension, so a key with both lists empty behaves exactly like a normal key. This also means a key can never be locked out by an empty configuration.
+
+## Configuring a key
+
+Team admins configure restrictions from the [API Keys page](https://www.firecrawl.dev/app/api-keys) in the dashboard:
+
+1. Open the **⋯** menu on the key you want to restrict and choose **Restrictions**.
+2. Select the allowed formats and/or endpoints. Selecting nothing in a section leaves that dimension unrestricted.
+3. Save. A **Restricted** badge appears on the key, and changes take effect within about a minute.
+
+Only team admins can view or change restrictions.
+
+## Format restrictions
+
+When a key has an allowed-formats list, every scrape-producing endpoint enforces it: `/v2/scrape`, `/v2/batch/scrape`, `/v2/crawl` (via `scrapeOptions`), and `/v2/search` (via `scrapeOptions`), plus their v1 equivalents.
+
+A request that asks for any format not on the list is rejected:
+
+```json
+{
+  "success": false,
+  "error": "Request blocked: this API key is restricted to the following formats: markdown. Requested formats not allowed: rawHtml. Team admins can manage key restrictions at https://www.firecrawl.dev/app/settings?tab=advanced"
+}
+```
+
+### Actions that return content
+
+Some [actions](/features/interact) return page content directly rather than through the `formats` field — `screenshot`, `scrape`, `executeJavascript`, and `pdf`. On a format-restricted key these are treated as their equivalent format:
+
+- The `screenshot` action is allowed only if `screenshot` is on the allowed-formats list.
+- `scrape`, `executeJavascript`, and `pdf` actions have no format equivalent and are always rejected on a format-restricted key.
+
+Interaction-only actions (`wait`, `click`, `write`, `press`, `scroll`) are unaffected.
+
+## Endpoint restrictions
+
+When a key has an allowed-endpoints list, it may only call endpoints in those groups. Requests to any other endpoint are rejected at authentication with a `403`:
+
+```json
+{
+  "success": false,
+  "error": "Request blocked: this API key is restricted to the following endpoints: scrape. Team admins can manage key restrictions at https://www.firecrawl.dev/app/settings?tab=advanced"
+}
+```
+
+Available endpoint groups: `scrape`, `batch-scrape`, `crawl`, `map`, `search`, `extract`, `agent`, `parse`, `browser`, `monitor`, `research`, `llmstxt`, `deep-research`, `fireclaw`.
+
+A few rules make the allowlist practical:
+
+- **Job status and cancellation share their job type's group.** For example, if `crawl` is allowed, `GET /v2/crawl/{id}` (status), the crawl errors endpoint, and cancellation are all allowed too — you don't list them separately.
+- **Account and metadata endpoints are always reachable** (e.g. `/v2/team/*`, `/v2/concurrency-check`), so SDK bookkeeping keeps working regardless of the allowlist.
+- **Endpoints that scrape internally are gated by their own group.** `extract` and `agent` fetch pages as part of their work, so they require `extract` / `agent` on the allowlist — allowing `scrape` alone does not grant them.
+
+## Legacy v0 API
+
+The legacy `v0` API predates these controls, so a key with **any** restriction configured cannot use it and receives a `403`. Use the `v2` API instead.
+
+## Error reference
+
+| Status | When |
+| --- | --- |
+| `403` | A requested format is not on the key's allowed-formats list. |
+| `403` | A content-returning action is used on a format-restricted key. |
+| `403` | An endpoint is not on the key's allowed-endpoints list. |
+| `403` | A restricted key calls the legacy `v0` API. |
+| `500` | The restriction configuration could not be verified. Requests fail closed (are rejected) rather than bypassing the restriction. Retry shortly. |
+
+## Notes
+
+- Restrictions are per key, so you can hand out a locked-down key to an agent while keeping an unrestricted key for interactive use.
+- Changes propagate to the API within about a minute. There is no way to disable enforcement from within a request.
+- Key Restrictions are independent of IP-based restrictions; a key can have both.
