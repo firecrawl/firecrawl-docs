@@ -1,11 +1,11 @@
 ---
 title: "Threat Protection"
-description: "Block requests to risky domains across every endpoint, using a policy your organization controls. Enforced server-side."
+description: "Block requests to risky URLs across every endpoint, using a policy your organization controls. Enforced server-side."
 og:title: "Threat Protection | Firecrawl"
-og:description: "Block requests to risky domains across every endpoint, using a policy your organization controls. Enforced server-side."
+og:description: "Block requests to risky URLs across every endpoint, using a policy your organization controls. Enforced server-side."
 ---
 
-Threat Protection lets your organization block Firecrawl from accessing risky domains. When it is enabled, every URL a request would fetch — a scrape target, a search result, a link discovered during a crawl, a page an agent navigates to — is checked against your organization's policy before any content is retrieved. Domains that fail the policy are refused.
+Threat Protection lets your organization block Firecrawl from accessing risky URLs. When it is enabled, every URL a request would fetch through the API — a scrape target, a search result, a link discovered during a crawl, an agent's starting URL — is checked against your organization's policy, and URLs that fail the policy are refused. Checks are URL-level: a single malicious page can be blocked while the rest of its site stays reachable, and a flagged site is blocked on every page.
 
 The policy is defined once at the organization level and applies to every endpoint automatically. You can also allow per-request adjustments, or lock the policy so no request can weaken it.
 
@@ -17,10 +17,10 @@ Threat Protection is an enterprise feature and is gated per organization. Contac
 
 Threat Protection has two modes, set at the organization level:
 
-- **Off** (default) — no domain checks are performed.
-- **Normal** — domains are checked against [Google Web Risk](https://cloud.google.com/web-risk), which flags domains associated with malware, social engineering (phishing), and unwanted software. **+2 credits per domain scanned.**
+- **Off** (default) — no checks are performed.
+- **Normal** — URLs are checked against [Google Web Risk](https://cloud.google.com/web-risk), which flags pages and sites associated with malware, social engineering (phishing), and unwanted software. **+2 credits per URL scanned.**
 
-Domain reputation checks are designed to protect your data: for the overwhelming majority of requests the check resolves locally against a regularly synced threat list, so the URLs you scrape are never sent to the classifier, and no verdict about your traffic is ever stored by Firecrawl.
+The checks are designed to protect your data: for the overwhelming majority of requests the check resolves locally against a regularly synced threat list, so the URLs you scrape are never sent to the classifier, and no verdict about your traffic is ever stored by Firecrawl.
 
 ## Policy controls
 
@@ -32,7 +32,7 @@ Beyond the classifier, a policy can include:
 - **Risk score threshold** — the normalized score (0–100) at or above which a classifier verdict is treated as a block. Lower is stricter. The default is `75`.
 - **Failure policy** — what to do when the classifier can't be reached: **block** (`closed`, the default and recommended for a security control) or **allow** (`open`).
 
-Custom domains you blacklist or whitelist are matched using the same host canonicalization as the classifier, so alternate encodings of an address (for example, an integer-form IP) can't be used to slip past a list entry.
+The custom blacklist, whitelist, and blocked-TLD rules are domain-level — they match on the host of the URL being checked; only the classifier operates on full URLs. Custom domains you blacklist or whitelist are matched using the same host canonicalization as the classifier, so alternate encodings of an address (for example, an integer-form IP) can't be used to slip past a list entry.
 
 ## Configuring the policy
 
@@ -64,7 +64,7 @@ Overrides are merged onto the organization policy field by field. If your organi
 
 If Threat Protection is **enforced** for your team, an override may still tighten the policy but may not include `"mode": "off"` — a request that tries is rejected with a `403`.
 
-## When a domain is blocked
+## When a URL is blocked
 
 A blocked request fails with a `403` and a stable error code:
 
@@ -72,7 +72,7 @@ A blocked request fails with a `403` and a stable error code:
 {
   "success": false,
   "code": "unsafe_domain_blocked",
-  "error": "This domain (risky.example) is blocked by your organization's threat protection policy (rule: blacklist). If you believe this is a mistake, contact your organization administrator to adjust the policy (e.g. whitelist the domain)."
+  "error": "This URL (https://risky.example/landing) is blocked by your organization's threat protection policy (rule: blacklist). If you believe this is a mistake, contact your organization administrator to adjust the policy (e.g. whitelist the domain)."
 }
 ```
 
@@ -80,31 +80,34 @@ Behavior differs slightly by endpoint, matching what is most useful:
 
 - **Scrape, batch scrape, extract, agent** — a blocked target returns the `unsafe_domain_blocked` error for that URL.
 - **Crawl** — a blocked seed URL fails the request; blocked links discovered mid-crawl are skipped and the crawl continues.
-- **Search, map** — blocked domains are removed from the returned results rather than surfaced and refused.
+- **Search, map** — blocked URLs are removed from the returned results rather than surfaced and refused.
 
-If a request is redirected to a different domain, the destination is re-checked before its content is fetched, so a redirect can't be used to reach a blocked domain.
+If a request is redirected to a different URL — including a same-site redirect onto a different page — the destination is re-checked, and content from a blocked destination is never returned. For **agent**, the policy covers the starting URLs and everything the agent fetches through the Firecrawl API; navigations the remote browser performs inside a page are not intercepted.
 
 ## Billing
 
-A domain scan costs **+2 credits per domain scanned** in Normal mode, on top of the base cost of the request. A few details:
+A scan costs **+2 credits per URL scanned** in Normal mode, on top of the base cost of the request. A few details:
 
 - Decisions made entirely from your own policy (blacklist, whitelist, or blocked-TLD matches) do not call the classifier and are **not** charged a scan fee.
 - A request that is blocked is still charged for the scan that produced the verdict.
-- Scans are deduplicated within a single scrape: a same-domain redirect re-check shares the original scan, while a redirect that lands on a different domain is a second scan.
-- **Crawls and batch scrapes check every page independently.** Verdicts are never reused across pages — nothing about your traffic is stored (see above) — so in Normal mode expect **+2 credits per scraped page**, even when the pages share a domain.
-- **Search and map** scan each unique domain in the result set once per request, so their scan fees scale with the number of distinct domains returned.
+- Scans are deduplicated within a single scrape: a redirect re-check that resolves to the same URL shares the original scan, while a redirect that lands on a different URL is a second scan.
+- **Crawls and batch scrapes check every page independently.** Verdicts are never reused across pages — nothing about your traffic is stored (see above) — so in Normal mode expect **+2 credits per scraped page**. A link that is discovered mid-crawl and blocked bills its scan once per crawl, no matter how many pages link to it.
+- **Search and map** scan each unique URL in the result set once per request, so their scan fees scale with the number of results scanned — which can slightly exceed the number returned when results are trimmed to your `limit`.
 
 ## Error reference
 
 | Status | When |
 | --- | --- |
-| `403` | A request targets a domain blocked by the policy (`code: unsafe_domain_blocked`). |
+| `403` | A request targets a URL blocked by the policy (`code: unsafe_domain_blocked`). |
 | `403` | A request includes a `threatProtection` override while overrides are disabled for the organization. |
 | `403` | A `threatProtection` override sets `mode: "off"` while Threat Protection is enforced for the team. |
+| `403` | The organization policy is updated with `mode: "off"` while Threat Protection is enforced for the team. |
 | `403` | Threat Protection options are used on a team without the feature enabled. |
+| `403` | A deprecated v0 endpoint is called while Threat Protection is enforced for the team (v0 does not support Threat Protection). |
 
 ## Notes
 
 - The policy is organization-wide: it applies to every API key and every endpoint automatically.
-- The whitelist always wins, so an explicitly trusted domain is never blocked by the classifier or a TLD rule.
+- The whitelist always wins, so a URL on an explicitly trusted domain is never blocked by the classifier or a TLD rule.
+- The error code `unsafe_domain_blocked` is kept stable for compatibility even though checks are URL-level.
 - With the failure policy set to `closed` (the default), a classifier outage causes affected requests to be blocked rather than silently allowed.
