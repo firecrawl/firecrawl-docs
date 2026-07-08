@@ -45,10 +45,13 @@ import ProfilePython from "/snippets/v2/interact/profile/python.mdx";
 import ProfileJS from "/snippets/v2/interact/profile/js.mdx";
 import ProfileCURL from "/snippets/v2/interact/profile/curl.mdx";
 import ProfileCLI from "/snippets/v2/interact/profile/cli.mdx";
+import ReplayPython from "/snippets/v2/interact/replay/python.mdx";
+import ReplayJS from "/snippets/v2/interact/replay/js.mdx";
+import ReplayCURL from "/snippets/v2/interact/replay/curl.mdx";
 
 Scrape a page to get clean data, then call `/interact` to start taking actions in that page - click buttons, fill forms, extract dynamic content, or navigate deeper. Just describe what you want, or write code if you need full control.
 
-<CardGroup cols={3}>
+<CardGroup cols={2}>
   <Card title="AI prompts" icon="wand-magic-sparkles">
     Describe what action you want to take in the page
   </Card>
@@ -57,6 +60,9 @@ Scrape a page to get clean data, then call `/interact` to start taking actions i
   </Card>
   <Card title="Live view" icon="eye">
     Watch or interact with the browser in real time via embeddable stream
+  </Card>
+  <Card title="Session replay" icon="clapperboard">
+    Every session is recorded — replay it in the dashboard or via API as HLS video
   </Card>
 </CardGroup>
 
@@ -172,6 +178,7 @@ Every interact response returns a `liveViewUrl` that you can embed to watch the 
 ```json Response
 {
   "success": true,
+  "sessionId": "0198c0e3-1f34-7abc-9def-0123456789ab",
   "cdpUrl": "wss://browser.firecrawl.dev/...",
   "liveViewUrl": "https://liveview.firecrawl.dev/...",
   "interactiveLiveViewUrl": "https://liveview.firecrawl.dev/...",
@@ -204,6 +211,63 @@ const browser = await chromium.connectOverCDP(cdpUrl);
 const context = browser.contexts()[0];
 const page = context.pages()[0];
 ```
+
+## Session Replay
+
+Every interact session is recorded automatically. Firecrawl captures what the browser actually renders — pixels, not DOM reconstructions — so the replay shows exactly what happened, including canvas, iframes, and video content. Recordings are delivered as standard HLS video and remain available for 30 days after the session ends.
+
+Watch replays in the dashboard under [Activity Logs](https://firecrawl.dev/app/logs), or fetch them programmatically. Every interact response includes a `sessionId`; use it with the replay endpoints:
+
+<CodeGroup>
+
+<ReplayPython />
+<ReplayJS />
+<ReplayCURL />
+
+</CodeGroup>
+
+The metadata response lists each recorded tab (up to 10 per session) with timestamps in **milliseconds from session start** on a shared timeline:
+
+```json Response
+{
+  "success": true,
+  "pages": [
+    {
+      "pageId": "0",
+      "url": "/v2/interact/SESSION_ID/replay/0",
+      "pageUrl": "https://example.com",
+      "startTimeMs": 0,
+      "endTimeMs": 121382
+    }
+  ],
+  "pageCount": 1
+}
+```
+
+### Embedding playback
+
+The playlist works with any HLS-capable player — [hls.js](https://github.com/video-dev/hls.js), Video.js, Shaka Player, or Safari's native playback:
+
+```html
+<video id="replay" controls muted autoplay playsinline></video>
+
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+<script>
+  const video = document.getElementById("replay");
+  const hls = new Hls();
+  // Route on your backend that proxies the replay endpoint with your API key.
+  hls.loadSource("/replays/<sessionId>/<pageId>");
+  hls.attachMedia(video);
+</script>
+```
+
+<Warning>
+Fetch playlists from your backend, never directly from the browser — the replay endpoints require your API key. Segment URLs inside the playlist are pre-signed and expire after ~6 hours; they're safe to hand to the client, and the player fetches video segments directly from storage.
+</Warning>
+
+### Disabling recording
+
+Recording is on by default. For standalone sessions (`POST /v2/interact`), pass `recordSession: false` to skip recording entirely — the replay endpoints will return `404` for that session. Replay playback is included at no extra credit cost.
 
 ## Session Lifecycle
 
@@ -403,6 +467,8 @@ Profiles created through the API may not appear in Dashboard > Interact > Profil
 
 - [Execute Interact](/api-reference/endpoint/scrape-execute) — `POST /v2/scrape/{scrapeId}/interact`
 - [Stop Interact](/api-reference/endpoint/scrape-browser-delete) — `DELETE /v2/scrape/{scrapeId}/interact`
+- [Get Session Replay](/api-reference/endpoint/browser-replay) — `GET /v2/interact/{sessionId}/replay`
+- [Get Session Replay Playlist](/api-reference/endpoint/browser-replay-page) — `GET /v2/interact/{sessionId}/replay/{pageId}`
 
 ### Request Body (POST)
 
@@ -419,6 +485,7 @@ Profiles created through the API may not appear in Dashboard > Interact > Profil
 | Field | Description |
 |-------|-------------|
 | `success` | `true` if the execution completed without errors |
+| `sessionId` | Browser session ID. Use it with the [session replay endpoints](/api-reference/endpoint/browser-replay) to fetch the recording |
 | `cdpUrl` | Raw Chrome DevTools Protocol (CDP) WebSocket URL for the browser session. Connect directly with Playwright, Puppeteer, or any CDP client |
 | `liveViewUrl` | Read-only live view URL for the browser session |
 | `interactiveLiveViewUrl` | Interactive live view URL (viewers can control the browser) |
