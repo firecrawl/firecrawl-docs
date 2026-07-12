@@ -33,7 +33,7 @@ const requireJsonEqual = (actual, expected, path, reason) => {
 const recoveryExamplePattern =
   /```json\n(\{\n\s+"code": "KEYLESS_TOOL_NOT_AVAILABLE"[\s\S]*?\n\})\n```/;
 const invalidCredentialContract =
-  'On `/v2/mcp`, a `401` with `error="invalid_token"` is reserved for callers that actually present an invalid, expired, or revoked Firecrawl API key or OAuth token.';
+  'On `/v2/mcp`, an invalid API key or unrecognized Bearer credential receives a correction-only session';
 const anonymousFailureContract =
   "Anonymous/keyless capability and quota failures remain non-auth-shaped";
 
@@ -51,7 +51,8 @@ const recoveryScalarFailures = (content) => {
 
   const exactScalars = {
     code: "KEYLESS_TOOL_NOT_AVAILABLE",
-    message: "This Firecrawl tool requires an account or API key.",
+    message:
+      "This tool is not available in keyless mode. If a person is present, connect a free Firecrawl account in the browser; no credit card is required and free accounts include monthly credits. For CI, servers, or unattended agents, configure an API key in the Authorization header. Then retry the same tool call.",
     auth_mode: "keyless",
     docs_url: "https://docs.firecrawl.dev/mcp-server",
     retryable: false,
@@ -76,7 +77,7 @@ const credentialSemanticsFailures = (content) => {
   const errors = [];
   if (!content.includes(invalidCredentialContract)) {
     errors.push(
-      "401 invalid_token must be limited to presented bad credentials",
+      "presented bad credentials must receive a correction-only session",
     );
   }
   if (!content.includes(anonymousFailureContract)) {
@@ -149,6 +150,11 @@ requireText(
   "configure_api_key",
   "missing headless recovery action",
 );
+requireText(
+  "mcp-server.mdx",
+  "Audience compatibility is intentionally one-way",
+  "missing one-way legacy OAuth audience policy",
+);
 const mcpServer = read("mcp-server.mdx");
 for (const error of recoveryScalarFailures(mcpServer)) {
   failures.push(`mcp-server.mdx: ${error}`);
@@ -173,6 +179,7 @@ if (!recoveryMatch) {
       "retryable",
       "available_tools",
       "unavailable_without_account",
+      "additional_unavailable_tool_count",
       "next_actions",
     ],
     "mcp-server.mdx",
@@ -198,32 +205,21 @@ if (!recoveryMatch) {
   requireJsonEqual(
     recovery.unavailable_without_account,
     [
-      "firecrawl_agent",
-      "firecrawl_agent_status",
-      "firecrawl_check_crawl_status",
       "firecrawl_crawl",
-      "firecrawl_extract",
-      "firecrawl_feedback",
-      "firecrawl_interact",
-      "firecrawl_interact_stop",
       "firecrawl_map",
-      "firecrawl_monitor_check",
-      "firecrawl_monitor_checks",
+      "firecrawl_extract",
+      "firecrawl_agent",
+      "firecrawl_interact",
       "firecrawl_monitor_create",
-      "firecrawl_monitor_delete",
-      "firecrawl_monitor_get",
-      "firecrawl_monitor_list",
-      "firecrawl_monitor_run",
-      "firecrawl_monitor_update",
-      "firecrawl_research_inspect_paper",
-      "firecrawl_research_read_paper",
-      "firecrawl_research_related_papers",
-      "firecrawl_research_search_github",
-      "firecrawl_research_search_papers",
-      "firecrawl_search_feedback",
     ],
     "mcp-server.mdx",
     "recovery example must use the registered account-tool complement",
+  );
+  requireJsonEqual(
+    recovery.additional_unavailable_tool_count,
+    17,
+    "mcp-server.mdx",
+    "recovery example must account for the remaining gated tools",
   );
   requireJsonEqual(
     recovery.next_actions,
@@ -238,7 +234,7 @@ if (!recoveryMatch) {
         kind: "configure_api_key",
         requires_interactive_browser: false,
         header: "Authorization: Bearer <FIRECRAWL_API_KEY>",
-        docs_url: "https://docs.firecrawl.dev/mcp/headless",
+        docs_url: "https://docs.firecrawl.dev/mcp-server",
       },
     ],
     "mcp-server.mdx",
@@ -251,7 +247,7 @@ const mutationCases = [
     name: "canonical recovery message",
     mutate: (content) =>
       content.replace(
-        "This Firecrawl tool requires an account or API key.",
+        "This tool is not available in keyless mode. If a person is present, connect a free Firecrawl account in the browser; no credit card is required and free accounts include monthly credits. For CI, servers, or unattended agents, configure an API key in the Authorization header. Then retry the same tool call.",
         "Authentication is required.",
       ),
     validate: recoveryScalarFailures,
