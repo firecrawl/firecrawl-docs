@@ -18,23 +18,53 @@ A Model Context Protocol (MCP) server implementation that integrates [Firecrawl]
 - Cloud and self-hosted support
 - Streamable HTTP support
 
-## Installation
+## Choose how you want to start
 
-You can either use our remote hosted URL or run the server locally. Get your API key from [https://firecrawl.dev/app/api-keys](https://www.firecrawl.dev/app/api-keys)
+<Warning>
+The dedicated account endpoint, deterministic keyless recovery contract, and account-connection management described below are arriving with the hosted MCP account-endpoint rollout. Today, use `/v2/mcp` keyless or with an API key header. The docs update must deploy after the account endpoint and recovery behavior are live.
+</Warning>
 
-<Note>
-**No API key?** Connect to `https://mcp.firecrawl.dev/v2/mcp` to use the remote keyless free tier. It is free and rate-limited per IP; see [Rate Limits](/rate-limits#keyless-no-api-key) for the current keyless tool list. Set `FIRECRAWL_API_KEY` to unlock every MCP tool plus higher limits.
-</Note>
+<CardGroup cols={3}>
+  <Card title="Try it now" icon="bolt">
+    Connect to the hosted keyless endpoint. No account or API key is required. Keyless mode exposes exactly **Search, Scrape, and Parse** and is rate-limited per IP.
+  </Card>
+  <Card title="Connect your account" icon="user">
+    With the account-endpoint rollout, interactive connectors use a dedicated URL. Your client opens a browser so you can sign in, choose a team, approve access, and revoke the connection later.
+  </Card>
+  <Card title="Run unattended" icon="server">
+    Use an API key for CI, servers, and other workloads that run without you. Send the key in the `Authorization` header, never in the URL.
+  </Card>
+</CardGroup>
 
-### Remote hosted URL
+### Try it now
 
-Connect without an API key to get started on the remote keyless free tier (rate-limited per IP; see [Rate Limits](/rate-limits#keyless-no-api-key) for the current tool list):
+Local coding agents such as Claude Code, Codex, Cursor, and OpenCode should start here:
 
 ```bash
 https://mcp.firecrawl.dev/v2/mcp
 ```
 
-With an API key, send it as an `Authorization` header to unlock every tool plus higher limits:
+The rollout contract makes anonymous initialization succeed deterministically. Keyless tool denials are returned as structured tool results rather than transport authentication challenges. Quota exhaustion returns a structured tool result or `429` with retry guidance.
+
+On `/v2/mcp`, a `401` with `error="invalid_token"` is reserved for callers that actually present an invalid, expired, or revoked Firecrawl API key or OAuth token. Anonymous/keyless capability and quota failures remain non-auth-shaped: they use structured tool results, or `429` for hard rate limiting.
+
+### Connect your account
+
+After the account-endpoint rollout is live, ChatGPT, Claude web/desktop connectors, and other account-attached integrations should use:
+
+```bash
+https://mcp.firecrawl.dev/v2/mcp-oauth
+```
+
+This endpoint will have its own OAuth resource identity and will always ask an anonymous client to sign in. It also accepts Firecrawl API keys in an `Authorization` header.
+
+<Warning>
+The account endpoint and `https://firecrawl.dev/connect/mcp` currently return `404` in production. Until the coordinated rollout completes, use the keyless endpoint or configure an API key header; do not place a credential in the URL.
+</Warning>
+
+### Run unattended
+
+Send a Firecrawl API key to either hosted endpoint as a Bearer header. The keyless URL is the simplest default for headless workloads:
 
 ```json
 {
@@ -48,6 +78,75 @@ With an API key, send it as an `Authorization` header to unlock every tool plus 
   }
 }
 ```
+
+Existing OAuth tokens issued for `https://mcp.firecrawl.dev/v2/mcp` remain accepted there. After rollout, new interactive connections should use the account endpoint above.
+
+### Upgrade from keyless mode
+
+With the recovery rollout, when a keyless caller requests a tool that needs an account, the tool result includes two machine-readable recovery actions:
+
+```json
+{
+  "code": "KEYLESS_TOOL_NOT_AVAILABLE",
+  "message": "This Firecrawl tool requires an account or API key.",
+  "auth_mode": "keyless",
+  "request_id": "123e4567-e89b-12d3-a456-426614174000",
+  "docs_url": "https://docs.firecrawl.dev/mcp-server",
+  "account": {
+    "auth_mode": "keyless",
+    "connected": false,
+    "api_key_configured": false,
+    "safe_to_display": true
+  },
+  "retryable": false,
+  "available_tools": ["firecrawl_scrape", "firecrawl_search", "firecrawl_parse"],
+  "unavailable_without_account": [
+    "firecrawl_agent",
+    "firecrawl_agent_status",
+    "firecrawl_check_crawl_status",
+    "firecrawl_crawl",
+    "firecrawl_extract",
+    "firecrawl_feedback",
+    "firecrawl_interact",
+    "firecrawl_interact_stop",
+    "firecrawl_map",
+    "firecrawl_monitor_check",
+    "firecrawl_monitor_checks",
+    "firecrawl_monitor_create",
+    "firecrawl_monitor_delete",
+    "firecrawl_monitor_get",
+    "firecrawl_monitor_list",
+    "firecrawl_monitor_run",
+    "firecrawl_monitor_update",
+    "firecrawl_research_inspect_paper",
+    "firecrawl_research_read_paper",
+    "firecrawl_research_related_papers",
+    "firecrawl_research_search_github",
+    "firecrawl_research_search_papers",
+    "firecrawl_search_feedback"
+  ],
+  "next_actions": [
+    {
+      "kind": "connect_account",
+      "requires_interactive_browser": true,
+      "connect_url": "https://firecrawl.dev/connect/mcp",
+      "docs_url": "https://docs.firecrawl.dev/mcp-server"
+    },
+    {
+      "kind": "configure_api_key",
+      "requires_interactive_browser": false,
+      "header": "Authorization: Bearer <FIRECRAWL_API_KEY>",
+      "docs_url": "https://docs.firecrawl.dev/mcp/headless"
+    }
+  ]
+}
+```
+
+The connect link is a human-facing setup page. During the initial rollout it does not authenticate the existing keyless session: follow its instructions to configure or re-add Firecrawl with `https://mcp.firecrawl.dev/v2/mcp-oauth`, then repeat the request through that account connection. If you instead add an API key as a Bearer header on the existing `/v2/mcp` connection, retry the original tool call there.
+
+## Installation
+
+You can use the hosted endpoints above or run the server locally. Create an API key at [firecrawl.dev/app/api-keys](https://www.firecrawl.dev/app/api-keys) when you need the full tool set or higher limits.
 
 ### Running with npx
 
@@ -321,7 +420,7 @@ To connect the Firecrawl MCP server in n8n:
 
 6. Set **Server Transport** to **HTTP Streamable**
 7. Set **Authentication** to **Bearer** and paste your Firecrawl API key, or leave it as **None** to use the keyless free tier
-8. For **Tools to include**, you can select **All**, **Selected**, or **All Except** - this will expose the Firecrawl tools (scrape, crawl, map, search, extract, etc.)
+8. For **Tools to include**, select from the tools returned by the server. Keyless mode returns only Search, Scrape, and Parse; authenticated mode returns the full tool set.
 
 For self-hosted deployments, run the MCP server with npx and enable HTTP transport mode:
 
@@ -384,7 +483,7 @@ Add this to your `claude_desktop_config.json`:
 
 The hosted MCP server is optimized for safe remote use. Some options that are available when running the MCP server locally are narrowed or unavailable remotely:
 
-- Hosted keyless mode exposes only the keyless-supported tools and is rate-limited per IP.
+- Hosted keyless mode exposes exactly Search, Scrape, and Parse at both tool discovery and tool-call time, and is rate-limited per IP.
 - Local-only file reads are available only when you run the MCP server locally.
 - Webhooks and local file paths should be configured from a local or self-hosted MCP server when the agent needs access to local resources.
 
@@ -778,6 +877,7 @@ Example log messages:
 
 The server provides robust error handling:
 
+- Structured keyless recovery actions for account-gated tools
 - Automatic retries for transient errors
 - Rate limit handling with backoff
 - Detailed error messages
@@ -797,6 +897,8 @@ Example error response:
   "isError": true
 }
 ```
+
+For hosted keyless mode, inspect the structured result's `code` and `next_actions`. Use `connect_account` only when a person can complete a browser flow. Use `configure_api_key` for CI, servers, and unattended agents. Anonymous callers are never routed into an authentication challenge from this endpoint.
 
 ## Development
 
