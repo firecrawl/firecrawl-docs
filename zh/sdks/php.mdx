@@ -401,6 +401,144 @@ $credits = $client->getCreditUsage();
 echo 'Remaining credits: ' . $credits->getRemainingCredits();
 ```
 
+<div id="laravel-ai-sdk-tools">
+  ## Laravel AI SDK 工具
+</div>
+
+该 SDK 内置了适用于 [Laravel AI SDK](https://laravel.com/docs/ai-sdk) (`laravel/ai`) 的原生工具类，因此代理无需 MCP 服务器 或手动发起 HTTP 调用，即可抓取、搜索、映射和爬取网页。
+
+```bash
+composer require laravel/ai
+```
+
+<Note>需要 `firecrawl/firecrawl-sdk` 1.9.0 或更高版本，以及 `laravel/ai` 0.9 或更高版本 (PHP 8.3+、Laravel 12+) 。这些工具类仅在安装了 `laravel/ai` 后才会加载。</Note>
+
+这些工具会从容器中解析出 `FirecrawlClient`，因此你现有的 `config/firecrawl.php` 和 `FIRECRAWL_API_KEY` 配置可直接原样复用：
+
+```php
+use Firecrawl\Laravel\Tools\FirecrawlScrape;
+use Firecrawl\Laravel\Tools\FirecrawlSearch;
+use Laravel\Ai\Contracts\Agent;
+use Laravel\Ai\Contracts\HasTools;
+use Laravel\Ai\Promptable;
+use Stringable;
+
+class ResearchAssistant implements Agent, HasTools
+{
+    use Promptable;
+
+    public function instructions(): Stringable|string
+    {
+        return 'You are a research assistant. Use the Firecrawl tools to find and read web content.';
+    }
+
+    public function tools(): iterable
+    {
+        return [
+            new FirecrawlScrape,
+            new FirecrawlSearch,
+        ];
+    }
+}
+
+$response = ResearchAssistant::make()->prompt('What does firecrawl.dev do?');
+```
+
+<div id="available-tools">
+  ### 可用工具
+</div>
+
+| 类                 | 工具名称               | 功能                       |
+| ----------------- | ------------------ | ------------------------ |
+| `FirecrawlScrape` | `firecrawl_scrape` | 抓取单个 URL 并返回干净的 markdown |
+| `FirecrawlSearch` | `firecrawl_search` | 进行网页搜索，返回 JSON 结果        |
+| `FirecrawlMap`    | `firecrawl_map`    | 发现网站中的 URL               |
+| `FirecrawlCrawl`  | `firecrawl_crawl`  | 将多个页面爬取为 markdown        |
+
+这些工具名称与 Firecrawl MCP 服务器一致，因此代理在不同入口看到的术语也保持统一。可使用 spread helper 一次性注册这四个工具：
+
+```php
+use Firecrawl\Laravel\Tools\FirecrawlTools;
+
+public function tools(): iterable
+{
+    return [...FirecrawlTools::all()];
+}
+```
+
+每个工具也都支持显式传入客户端，适用于临时凭证或在容器外部使用。`FirecrawlTools::all()` 会将该客户端传给全部四个工具：
+
+```php
+use Firecrawl\Client\FirecrawlClient;
+
+$client = FirecrawlClient::create(apiKey: 'fc-other-key');
+
+new FirecrawlScrape($client);
+// 或
+FirecrawlTools::all($client);
+```
+
+<div id="tool-parameters">
+  ### 工具参数
+</div>
+
+每个工具都会提供一个面向模型的小型 schema。以下是代理可传递的参数：
+
+| 工具                 | 参数            | 描述                          |
+| ------------------ | ------------- | --------------------------- |
+| `firecrawl_scrape` | `url` (必填)    | 要抓取页面的绝对 URL，包括协议           |
+| `firecrawl_search` | `query` (必填)  | 搜索词                         |
+|                    | `limit`       | 返回结果的最大数量，1–20。默认值为 5       |
+| `firecrawl_map`    | `url` (必填)    | 要映射的网站基础 URL                |
+|                    | `search`      | 可选关键词，用于按相关性筛选已发现的 URL      |
+|                    | `limit`       | 返回 URL 的最大数量，1–500。默认值为 100 |
+| `firecrawl_crawl`  | `url` (必填)    | 开始爬取的 URL                   |
+|                    | `limit`       | 爬取页面的最大数量，1–25。默认值为 5       |
+
+超出范围的 `limit` 值不会被拒绝，而是会自动调整到最近的边界值，因此当模型请求 99 个搜索结果时，返回的是 20 个，而不是报错。
+
+<div id="tool-behavior">
+  ### 工具行为
+</div>
+
+限流、超时和无效 URL 等工具故障不会以抛出异常的形式处理，而是作为可读的错误字符串返回给模型，因此代理运行可以优雅降级。为保持在模型上下文范围内，输出大小会受到限制：scrape 结果会截断至 80,000 个字符；crawl 结果在总结果预算为 100,000 个字符的前提下，每页截断至 15,000 个字符；search 和 map 结果则会移除末尾条目，并用明确的标记说明有内容被省略。
+
+`firecrawl_search` 和 `firecrawl_map` 返回 JSON 结果数组。`firecrawl_scrape` 以 markdown 格式返回页面。
+
+<div id="crawl-results">
+  ### 抓取结果
+</div>
+
+`firecrawl_crawl` 最多会等待 55 秒让抓取完成，随后返回一个明确体现结果的 JSON 对象。失败、已取消或部分完成的抓取结果会通过 `status` 字段继续对模型可见，而不会被静默截断：
+
+```json
+{
+  "status": "completed",
+  "completed": 5,
+  "total": 5,
+  "pages": [
+    { "url": "https://example.com/docs", "markdown": "..." }
+  ]
+}
+```
+
+当结果装不下时，会出现两个可选字段：`omittedPages` 表示为控制在输出预算内而省略的页面数，`note` 则会告知模型服务器上还有更多页面，并提示它使用更小的 limit，或通过 `firecrawl_scrape` 抓取特定页面。该工具会报告分页信息，而不会继续跟随分页，因此需要获取大型爬取全部页面的代理应直接使用 `FirecrawlClient`。
+
+如果 wait 到期时爬取仍在进行中，工具会明确说明，并提醒模型该爬取仍可能在服务器端继续完成。启动爬取时会附带一个 UUID 幂等键，因此 HTTP 层面的重试绝不会创建重复的爬取。
+
+如果你的代理运行在排队任务中，请将爬取 limit 保持得较小，或提高 worker 的任务超时时间。wait、poll 频率和每页上限都是受保护属性，因此请通过继承该类来调整它们：
+
+```php
+use Firecrawl\Laravel\Tools\FirecrawlCrawl;
+
+class PatientCrawl extends FirecrawlCrawl
+{
+    protected int $timeoutSeconds = 120;
+    protected int $pollIntervalSeconds = 5;
+    protected int $pageCharacterLimit = 30000;
+}
+```
+
 <div id="browser">
   ## 浏览器
 </div>
