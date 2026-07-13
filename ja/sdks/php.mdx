@@ -401,6 +401,144 @@ $credits = $client->getCreditUsage();
 echo 'Remaining credits: ' . $credits->getRemainingCredits();
 ```
 
+<div id="laravel-ai-sdk-tools">
+  ## Laravel AI SDK ツール
+</div>
+
+この SDK には、[Laravel AI SDK](https://laravel.com/docs/ai-sdk) (`laravel/ai`) 向けのネイティブツールクラスが用意されており、エージェントは MCP Server や手動の HTTP 呼び出しなしで、Web のスクレイピング、検索、マップ、クロールを行えます。
+
+```bash
+composer require laravel/ai
+```
+
+<Note>`firecrawl/firecrawl-sdk` 1.9.0 以降と、`laravel/ai` 0.9 以降 (PHP 8.3+、Laravel 12+) が必要です。ツールクラスは `laravel/ai` がインストールされている場合にのみ読み込まれます。</Note>
+
+これらのツールはコンテナから `FirecrawlClient` を解決するため、既存の `config/firecrawl.php` と `FIRECRAWL_API_KEY` の設定をそのまま再利用できます：
+
+```php
+use Firecrawl\Laravel\Tools\FirecrawlScrape;
+use Firecrawl\Laravel\Tools\FirecrawlSearch;
+use Laravel\Ai\Contracts\Agent;
+use Laravel\Ai\Contracts\HasTools;
+use Laravel\Ai\Promptable;
+use Stringable;
+
+class ResearchAssistant implements Agent, HasTools
+{
+    use Promptable;
+
+    public function instructions(): Stringable|string
+    {
+        return 'You are a research assistant. Use the Firecrawl tools to find and read web content.';
+    }
+
+    public function tools(): iterable
+    {
+        return [
+            new FirecrawlScrape,
+            new FirecrawlSearch,
+        ];
+    }
+}
+
+$response = ResearchAssistant::make()->prompt('What does firecrawl.dev do?');
+```
+
+<div id="available-tools">
+  ### 利用可能なツール
+</div>
+
+| Class             | Tool name          | できること                                   |
+| ----------------- | ------------------ | --------------------------------------- |
+| `FirecrawlScrape` | `firecrawl_scrape` | 1 つの URL をスクレイピングし、整形済みの markdown を返します |
+| `FirecrawlSearch` | `firecrawl_search` | Web を検索し、JSON 形式の結果を返します                |
+| `FirecrawlMap`    | `firecrawl_map`    | Web サイト内の URL を見つけます                    |
+| `FirecrawlCrawl`  | `firecrawl_crawl`  | 複数のページをクロールして markdown に変換します           |
+
+ツール名は Firecrawl MCP server と一致しているため、エージェントはどのインターフェースでも同じ用語を使えます。スプレッドヘルパーを使うと、4 つすべてを一度に登録できます:
+
+```php
+use Firecrawl\Laravel\Tools\FirecrawlTools;
+
+public function tools(): iterable
+{
+    return [...FirecrawlTools::all()];
+}
+```
+
+各ツールは、一時的な認証情報を使う場合やコンテナ外で利用する場合に備えて、明示的にクライアントを受け取ることもできます。`FirecrawlTools::all()` は、それを4つすべてのツールに渡します：
+
+```php
+use Firecrawl\Client\FirecrawlClient;
+
+$client = FirecrawlClient::create(apiKey: 'fc-other-key');
+
+new FirecrawlScrape($client);
+// または
+FirecrawlTools::all($client);
+```
+
+<div id="tool-parameters">
+  ### ツールのパラメータ
+</div>
+
+各ツールは、モデル向けの小規模なスキーマを公開しています。エージェントが渡せるパラメータは次のとおりです。
+
+| ツール                | パラメータ              | 説明                             |
+| ------------------ | ------------------ | ------------------------------ |
+| `firecrawl_scrape` | `url` (required)   | スクレイピング対象ページの絶対 URL (スキームを含む)  |
+| `firecrawl_search` | `query` (required) | 検索 query                       |
+|                    | `limit`            | 返す結果の最大数。1～20。デフォルトは 5         |
+| `firecrawl_map`    | `url` (required)   | マップ対象の Web サイトのベース URL         |
+|                    | `search`           | 検出された URL を関連性で絞り込むための任意の語句    |
+|                    | `limit`            | 返す URL の最大数。1～500。デフォルトは 100   |
+| `firecrawl_crawl`  | `url` (required)   | クロールの開始元となる URL                |
+|                    | `limit`            | クロールするページの最大数。1～25。デフォルトは 5    |
+
+範囲外の `limit` 値はエラーとして拒否されず、最も近い上限または下限に補正されます。たとえば、検索結果を 99 件要求したモデルには、エラーではなく 20 件が返されます。
+
+<div id="tool-behavior">
+  ### ツールの動作
+</div>
+
+レート制限、タイムアウト、無効な URL などのツールの失敗は、例外としてスローされるのではなく、人間が読めるエラー文字列としてモデルに返されるため、agent run が致命的に停止せず、適切に処理を継続できます。出力はモデルのコンテキスト内に収まるよう上限が設けられています。スクレイピング結果は 80,000 文字で切り詰められ、クロールしたページは各ページ 15,000 文字までに制限され、結果全体では 100,000 文字の上限があります。また、search と map の結果では、明示的な omitted マーカーを付けて末尾の項目が省略されます。
+
+`firecrawl_search` と `firecrawl_map` は、結果の JSON 配列を返します。`firecrawl_scrape` は、ページを Markdown として返します。
+
+<div id="crawl-results">
+  ### クロール結果
+</div>
+
+`firecrawl_crawl` はクロールが完了するまで最大55秒待機し、その後、結果が明確にわかる JSON オブジェクトを返します。失敗・キャンセル・部分的なクロールも、暗黙のうちに切り捨てられることはなく、`status` フィールドを通じてモデルから確認できます。
+
+```json
+{
+  "status": "completed",
+  "completed": 5,
+  "total": 5,
+  "pages": [
+    { "url": "https://example.com/docs", "markdown": "..." }
+  ]
+}
+```
+
+結果が収まりきらない場合は、2つの任意フィールドが表示されます。`omittedPages` は出力上限内に収めるために省かれたページ数を示し、`note` はサーバー上にまだページが存在すること、また、より小さい limit を使うか `firecrawl_scrape` で特定のページをスクレイピングすべきことをモデルに伝えます。このツールはページネーションを追跡せず、ページネーションがあることを報告するだけなので、大規模なクロールの全ページが必要なエージェントは `FirecrawlClient` を直接使用してください。
+
+wait の期限が切れた時点でクロールがまだ実行中の場合、ツールはその旨を伝え、そのクロールがサーバー側で引き続き完了する可能性があることをモデルに知らせます。クロール開始には UUID の冪等性キーが付与されるため、HTTP レベルで再試行しても重複したクロールは作成されません。
+
+エージェントがキューに入った job 内で実行される場合は、クロールの limit を小さく保つか、worker の job timeout を延ばしてください。wait、poll の間隔、およびページごとの上限は protected プロパティなので、調整するにはクラスを拡張してください:
+
+```php
+use Firecrawl\Laravel\Tools\FirecrawlCrawl;
+
+class PatientCrawl extends FirecrawlCrawl
+{
+    protected int $timeoutSeconds = 120;
+    protected int $pollIntervalSeconds = 5;
+    protected int $pageCharacterLimit = 30000;
+}
+```
+
 <div id="browser">
   ## Browser
 </div>
