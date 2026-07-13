@@ -369,6 +369,134 @@ $credits = $client->getCreditUsage();
 echo 'Remaining credits: ' . $credits->getRemainingCredits();
 ```
 
+## Laravel AI SDK Tools
+
+The SDK ships native tool classes for the [Laravel AI SDK](https://laravel.com/docs/ai-sdk) (`laravel/ai`), so agents can scrape, search, map, and crawl the web without an MCP server or manual HTTP calls.
+
+```bash
+composer require laravel/ai
+```
+
+<Note>Requires `firecrawl/firecrawl-sdk` 1.9.0 or later, plus `laravel/ai` 0.9 or later (PHP 8.3+, Laravel 12+). The tool classes only load when `laravel/ai` is installed.</Note>
+
+The tools resolve the `FirecrawlClient` from the container, so your existing `config/firecrawl.php` and `FIRECRAWL_API_KEY` setup is reused as is:
+
+```php
+use Firecrawl\Laravel\Tools\FirecrawlScrape;
+use Firecrawl\Laravel\Tools\FirecrawlSearch;
+use Laravel\Ai\Contracts\Agent;
+use Laravel\Ai\Contracts\HasTools;
+use Laravel\Ai\Promptable;
+use Stringable;
+
+class ResearchAssistant implements Agent, HasTools
+{
+    use Promptable;
+
+    public function instructions(): Stringable|string
+    {
+        return 'You are a research assistant. Use the Firecrawl tools to find and read web content.';
+    }
+
+    public function tools(): iterable
+    {
+        return [
+            new FirecrawlScrape,
+            new FirecrawlSearch,
+        ];
+    }
+}
+
+$response = ResearchAssistant::make()->prompt('What does firecrawl.dev do?');
+```
+
+### Available Tools
+
+| Class | Tool name | What it does |
+|-------|-----------|--------------|
+| `FirecrawlScrape` | `firecrawl_scrape` | Scrape one URL and return clean markdown |
+| `FirecrawlSearch` | `firecrawl_search` | Search the web, returns JSON results |
+| `FirecrawlMap` | `firecrawl_map` | Discover the URLs on a website |
+| `FirecrawlCrawl` | `firecrawl_crawl` | Crawl multiple pages into markdown |
+
+The tool names match the Firecrawl MCP server, so agents see the same vocabulary across surfaces. Register all four at once with the spread helper:
+
+```php
+use Firecrawl\Laravel\Tools\FirecrawlTools;
+
+public function tools(): iterable
+{
+    return [...FirecrawlTools::all()];
+}
+```
+
+Every tool also accepts an explicit client, for one off credentials or use outside the container. `FirecrawlTools::all()` passes one to all four tools:
+
+```php
+use Firecrawl\Client\FirecrawlClient;
+
+$client = FirecrawlClient::create(apiKey: 'fc-other-key');
+
+new FirecrawlScrape($client);
+// or
+FirecrawlTools::all($client);
+```
+
+### Tool Parameters
+
+Each tool exposes a small, model-facing schema. These are the parameters the agent can pass:
+
+| Tool | Parameter | Description |
+|------|-----------|-------------|
+| `firecrawl_scrape` | `url` (required) | Absolute URL of the page to scrape, including the scheme |
+| `firecrawl_search` | `query` (required) | The search query |
+| | `limit` | Maximum results to return, 1–20. Defaults to 5 |
+| `firecrawl_map` | `url` (required) | Base URL of the website to map |
+| | `search` | Optional term to filter discovered URLs by relevance |
+| | `limit` | Maximum URLs to return, 1–500. Defaults to 100 |
+| `firecrawl_crawl` | `url` (required) | URL to start crawling from |
+| | `limit` | Maximum pages to crawl, 1–25. Defaults to 5 |
+
+Out-of-range `limit` values are clamped to the nearest bound rather than rejected, so a model that asks for 99 search results gets 20 instead of an error.
+
+### Tool Behavior
+
+Tool failures such as rate limits, timeouts, and invalid URLs are returned to the model as readable error strings rather than thrown, so agent runs degrade gracefully. Outputs are capped to stay within model context: scrape results truncate at 80,000 characters, crawl pages at 15,000 characters each under a 100,000 character whole result budget, and search and map results drop tail items with an explicit omitted marker.
+
+`firecrawl_search` and `firecrawl_map` return JSON arrays of results. `firecrawl_scrape` returns the page as markdown.
+
+### Crawl Results
+
+`firecrawl_crawl` waits up to 55 seconds for the crawl to finish, then returns a JSON object that makes the outcome explicit. Failed, cancelled, or partial crawls stay visible to the model through the `status` field rather than being silently truncated:
+
+```json
+{
+  "status": "completed",
+  "completed": 5,
+  "total": 5,
+  "pages": [
+    { "url": "https://example.com/docs", "markdown": "..." }
+  ]
+}
+```
+
+Two optional fields appear when results don't fit: `omittedPages` counts pages dropped to stay inside the output budget, and `note` tells the model that more pages exist on the server and that it should use a smaller limit or scrape specific pages with `firecrawl_scrape`. The tool reports pagination instead of following it, so agents that need every page of a large crawl should use `FirecrawlClient` directly.
+
+If the crawl is still running when the wait expires, the tool says so and reminds the model the crawl may still complete server-side. Crawl starts carry a UUID idempotency key, so an HTTP-level retry never creates a duplicate crawl.
+
+If your agent runs inside a queued job, keep the crawl limit small or raise the worker's job timeout. The wait, poll cadence, and per-page cap are protected properties, so extend the class to tune them:
+
+```php
+use Firecrawl\Laravel\Tools\FirecrawlCrawl;
+
+class PatientCrawl extends FirecrawlCrawl
+{
+    protected int $timeoutSeconds = 120;
+    protected int $pollIntervalSeconds = 5;
+    protected int $pageCharacterLimit = 30000;
+}
+```
+
 ## Browser
 
 The PHP SDK includes Browser Sandbox helpers.
