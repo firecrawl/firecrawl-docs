@@ -430,19 +430,61 @@ public function tools(): iterable
 }
 ```
 
-Every tool also accepts an explicit client, for one off credentials or use outside the container:
+Every tool also accepts an explicit client, for one off credentials or use outside the container. `FirecrawlTools::all()` passes one to all four tools:
 
 ```php
 use Firecrawl\Client\FirecrawlClient;
 
-new FirecrawlScrape(FirecrawlClient::create(apiKey: 'fc-other-key'));
+$client = FirecrawlClient::create(apiKey: 'fc-other-key');
+
+new FirecrawlScrape($client);
+// or
+FirecrawlTools::all($client);
 ```
+
+### Tool Parameters
+
+Each tool exposes a small, model-facing schema. These are the parameters the agent can pass:
+
+| Tool | Parameter | Description |
+|------|-----------|-------------|
+| `firecrawl_scrape` | `url` (required) | Absolute URL of the page to scrape, including the scheme |
+| `firecrawl_search` | `query` (required) | The search query |
+| | `limit` | Maximum results to return, 1–20. Defaults to 5 |
+| `firecrawl_map` | `url` (required) | Base URL of the website to map |
+| | `search` | Optional term to filter discovered URLs by relevance |
+| | `limit` | Maximum URLs to return, 1–500. Defaults to 100 |
+| `firecrawl_crawl` | `url` (required) | URL to start crawling from |
+| | `limit` | Maximum pages to crawl, 1–25. Defaults to 5 |
+
+Out-of-range `limit` values are clamped to the nearest bound rather than rejected, so a model that asks for 99 search results gets 20 instead of an error.
 
 ### Tool Behavior
 
 Tool failures such as rate limits, timeouts, and invalid URLs are returned to the model as readable error strings rather than thrown, so agent runs degrade gracefully. Outputs are capped to stay within model context: scrape results truncate at 80,000 characters, crawl pages at 15,000 characters each under a 100,000 character whole result budget, and search and map results drop tail items with an explicit omitted marker.
 
-`firecrawl_crawl` waits up to 55 seconds and returns a JSON object with the crawl status and pages, so failed or partial crawls are visible to the model. Crawl starts carry an idempotency key, so a retried request never creates a duplicate crawl. If your agent runs inside a queued job, keep the crawl limit small or raise the worker's job timeout. Extend the class to change the wait:
+`firecrawl_search` and `firecrawl_map` return JSON arrays of results. `firecrawl_scrape` returns the page as markdown.
+
+### Crawl Results
+
+`firecrawl_crawl` waits up to 55 seconds for the crawl to finish, then returns a JSON object that makes the outcome explicit. Failed, cancelled, or partial crawls stay visible to the model through the `status` field rather than being silently truncated:
+
+```json
+{
+  "status": "completed",
+  "completed": 5,
+  "total": 5,
+  "pages": [
+    { "url": "https://example.com/docs", "markdown": "..." }
+  ]
+}
+```
+
+Two optional fields appear when results don't fit: `omittedPages` counts pages dropped to stay inside the output budget, and `note` tells the model that more pages exist on the server and that it should use a smaller limit or scrape specific pages with `firecrawl_scrape`. The tool reports pagination instead of following it, so agents that need every page of a large crawl should use `FirecrawlClient` directly.
+
+If the crawl is still running when the wait expires, the tool says so and reminds the model the crawl may still complete server-side. Crawl starts carry a UUID idempotency key, so an HTTP-level retry never creates a duplicate crawl.
+
+If your agent runs inside a queued job, keep the crawl limit small or raise the worker's job timeout. The wait, poll cadence, and per-page cap are protected properties, so extend the class to tune them:
 
 ```php
 use Firecrawl\Laravel\Tools\FirecrawlCrawl;
@@ -450,6 +492,8 @@ use Firecrawl\Laravel\Tools\FirecrawlCrawl;
 class PatientCrawl extends FirecrawlCrawl
 {
     protected int $timeoutSeconds = 120;
+    protected int $pollIntervalSeconds = 5;
+    protected int $pageCharacterLimit = 30000;
 }
 ```
 
