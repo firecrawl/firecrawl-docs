@@ -478,12 +478,38 @@ For more details about supported locations, refer to the [Proxies documentation]
 To make requests faster, Firecrawl serves results from cache by default when a recent copy is available.
 
 - **Default freshness window**: `maxAge = 172800000` ms (2 days). If a cached page is newer than this, it’s returned instantly; otherwise, the page is scraped and then cached.
-- **Performance**: This can speed up scrapes by up to 5x when data doesn’t need to be ultra-fresh.
+- **Performance**: This can reduce latency when data does not need to be ultra-fresh.
 - **Always fetch fresh**: Set `maxAge` to `0`. Note that this bypasses the cache entirely, so every request goes through the full scraping pipeline, meaning that the request will take longer to complete and is more likely to fail. Use a non-zero `maxAge` if freshness on every request is not critical.
 - **Avoid storing**: Set `storeInCache` to `false` if you don’t want Firecrawl to cache/store results for this request.
 - **Cache-only lookup**: Set `minAge` to perform a cache-only lookup without triggering a fresh scrape. The value is in milliseconds and specifies the minimum age the cached data must be. If no cached data is found, a `404` with error code `SCRAPE_NO_CACHED_DATA` is returned. Set `minAge` to `1` to accept any cached data regardless of age.
 - **Change tracking**: Requests that include `changeTracking` bypass the cache, so `maxAge` is ignored.
-- **Credits**: Cached results still cost 1 credit per page. Caching improves speed, not credit usage.
+- **Credits**: Cached results still cost 1 credit per page. Caching improves latency, not credit usage.
+
+
+### Cache provenance metadata
+
+When Firecrawl can attest that a response was served from its own index cache, the document metadata includes:
+
+```json
+"metadata": {
+  "cache": {
+    "source": "firecrawl-index",
+    "cachedAt": "2026-07-14T12:00:00.000Z"
+  }
+}
+```
+
+If `metadata.cache` is absent, Firecrawl cannot attest cache provenance for that response. Absence does not prove a cache miss, a fresh scrape, cache bypass, or that the source page is still live. The legacy `metadata.cacheState`/`cachedAt` fields may still appear for compatibility, but new agent workflows should prefer `metadata.cache`.
+
+
+### Agent liveness checks for job and ATS pages
+
+HTTP `200`, rendered HTML, and `metadata.cache` only describe how Firecrawl obtained the response. They do not prove that a business object on the page is still active. For job postings, event pages, inventory pages, or other stateful records, add an application-level liveness gate immediately before downstream action:
+
+- Prefer the ATS, job board, marketplace, or product API when one is available.
+- Treat redirects to generic listing pages, missing apply buttons, closed/expired labels, and changed canonical IDs as not-live signals.
+- Use `maxAge: 0` for the final verification scrape if you must verify through HTML, then validate the page content itself.
+- Do not use `metadata.cache` or legacy `metadata.cacheState` as the only signal that a posting is still open.
 
 Example (force fresh content):
 
