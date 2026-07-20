@@ -1,12 +1,12 @@
 ---
 title: "Verifying Freshness and Liveness"
-description: "Understand the difference between content freshness and whether the item described by a page is still active"
+description: "Understand the difference between content freshness and whether the state represented by a page is current"
 og:title: "Verifying Freshness and Liveness | Firecrawl"
-og:description: "Understand the difference between content freshness and whether the item described by a page is still active"
+og:description: "Understand the difference between content freshness and whether the state represented by a page is current"
 sidebarTitle: "Verifying Freshness and Liveness"
 ---
 
-A successful scrape tells you what the page returned. It does not prove that the **thing described by the page** — a job posting, a product listing, an account state — is still active. These are two separate questions.
+A successful scrape tells you what the page returned. It does not prove that the **state represented by the page** is current. These are two separate questions.
 
 - **Freshness** → Is this content recent, or a reused cached copy? Controlled by `maxAge`.
 - **Liveness** → Is the underlying thing still real and active? Your application decides this from the available evidence.
@@ -34,26 +34,23 @@ Keep caching on by default. Pay the `maxAge: 0` latency cost only for the reads 
 
 ## Freshness Is Not Liveness
 
-Even with `maxAge: 0`, the result only tells you what the page returned on that retrieval. It does not tell you whether the underlying item is still active, because pages for removed items often still return HTTP 200 with content:
+Even with `maxAge: 0`, the result only tells you what the page returned on that retrieval. A page can return HTTP 200 with content while representing an outdated, unavailable, or otherwise changed state.
 
-- **Ashby** can return HTTP 200 while rendering "Job not found."
-- **Greenhouse** can redirect a removed posting to a generic board page that also returns HTTP 200.
-
-So neither the status code nor the presence of content settles liveness. Liveness is a conclusion your application draws from the evidence.
+So neither the status code nor the presence of content settles liveness. Liveness is a conclusion your application draws from source-specific evidence.
 
 ## Freshness-Sensitive Action Checklist
 
-Before an expensive or irreversible action (applying, purchasing, sending), treat scrape output as **evidence, not proof**:
+Before an action that depends on current state, treat scrape output as **evidence, not proof**:
 
 1. **Use `maxAge: 0` for the final retrieval** to bypass Firecrawl index reuse.
 2. **Do not treat HTTP 200 or non-empty content as proof of liveness.**
-3. **Inspect rendered content and redirect evidence.** `metadata.sourceURL` is the requested URL. When the engine-reported `metadata.url` differs, it can indicate a redirect; a redirect to a generic listing or board page is evidence of removal. Matching values do not prove that no redirect occurred.
+3. **Inspect rendered content and redirect evidence.** `metadata.sourceURL` is the requested URL. When the engine-reported `metadata.url` differs, it can indicate a redirect to a different resource. Matching values do not prove that no redirect occurred.
 4. **Prefer source-specific APIs or identifiers** where available — they often expose an explicit status that a rendered page hides.
 5. **Treat inconclusive evidence as `unknown`**, and stop before the expensive or irreversible step, rather than assuming active.
 
-## Worked Example: Is This Job Posting Still Open?
+## Worked Example: Collect Current Page Evidence
 
-Applicant tracking systems make the trap concrete. We bypass index reuse, then classify against the rendered markdown and any response URL reported by the scrape engine. The important outcome is that a scrape alone never yields `active` — the best it can produce without a positive signal is `unknown`.
+Bypass index reuse, then collect the rendered content and response metadata for your application's own validation rules. The scrape supplies evidence; it does not decide the domain-specific state.
 
 <CodeGroup>
 
@@ -62,100 +59,62 @@ import Firecrawl from "@mendable/firecrawl-js";
 
 const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
 
-const REMOVAL_PHRASES = [
-  "job not found",
-  "position has been filled",
-  "no longer accepting applications",
-  "this job is no longer available",
-];
-
-async function classifyPosting(url) {
+async function collectCurrentPageEvidence(url) {
   // maxAge: 0 bypasses Firecrawl index reuse.
   const doc = await firecrawl.scrape(url, {
     formats: ["markdown"],
     maxAge: 0,
   });
 
-  const markdown = (doc.markdown ?? "").toLowerCase();
-  const statusCode = doc.metadata?.statusCode;
-  // metadata.url is reported by the scrape engine and may contain redirect
-  // evidence. Fall back to the requested URL if it was not reported.
-  const responseURL = doc.metadata?.url ?? url;
+  const requestedURL = doc.metadata?.sourceURL ?? url;
+  const responseURL = doc.metadata?.url;
 
-  // A redirect away from the requested path to a generic board is removal evidence.
-  const redirectedToBoard =
-    responseURL !== url && !responseURL.includes(new URL(url).pathname);
-
-  if (REMOVAL_PHRASES.some((phrase) => markdown.includes(phrase))) {
-    return { state: "removed", reason: "removal phrase in content" };
-  }
-  if (redirectedToBoard) {
-    return { state: "removed", reason: `redirected to ${responseURL}` };
-  }
-  if (statusCode && statusCode >= 400) {
-    return { state: "removed", reason: `status ${statusCode}` };
-  }
-
-  // HTTP 200 + content is not a positive signal that the posting is open.
-  return { state: "unknown", reason: "no positive liveness signal" };
+  return {
+    markdown: doc.markdown ?? "",
+    statusCode: doc.metadata?.statusCode,
+    requestedURL,
+    responseURL,
+    possibleRedirect: Boolean(responseURL && responseURL !== requestedURL),
+  };
 }
 
-const result = await classifyPosting(postingURL);
-if (result.state !== "active" /* e.g. confirmed via the ATS API */) {
-  // Do not submit an application on "unknown". Surface it or re-check.
-}
+const evidence = await collectCurrentPageEvidence("https://example.com/resource");
+// Apply source-specific content, status, API, or identifier checks here.
+// If they are inconclusive, keep the state unknown.
 ```
 
 ```python Python
 import os
-from urllib.parse import urlparse
 
 from firecrawl import Firecrawl
 
 firecrawl = Firecrawl(api_key=os.environ["FIRECRAWL_API_KEY"])
 
-REMOVAL_PHRASES = [
-    "job not found",
-    "position has been filled",
-    "no longer accepting applications",
-    "this job is no longer available",
-]
-
-
-def classify_posting(url: str) -> dict:
+def collect_current_page_evidence(url: str) -> dict:
     # max_age=0 bypasses Firecrawl index reuse.
     doc = firecrawl.scrape(url, formats=["markdown"], max_age=0)
 
-    markdown = (doc.markdown or "").lower()
-    status_code = doc.metadata.status_code if doc.metadata else None
-    # metadata.url is reported by the scrape engine and may contain redirect
-    # evidence. Fall back to the requested URL if it was not reported.
-    response_url = (doc.metadata.url if doc.metadata else None) or url
+    metadata = doc.metadata
+    requested_url = (metadata.source_url if metadata else None) or url
+    response_url = metadata.url if metadata else None
 
-    # A redirect away from the requested path to a generic board is removal evidence.
-    requested_path = urlparse(url).path
-    redirected_to_board = response_url != url and requested_path not in response_url
-
-    if any(phrase in markdown for phrase in REMOVAL_PHRASES):
-        return {"state": "removed", "reason": "removal phrase in content"}
-    if redirected_to_board:
-        return {"state": "removed", "reason": f"redirected to {response_url}"}
-    if status_code and status_code >= 400:
-        return {"state": "removed", "reason": f"status {status_code}"}
-
-    # HTTP 200 + content is not a positive signal that the posting is open.
-    return {"state": "unknown", "reason": "no positive liveness signal"}
+    return {
+        "markdown": doc.markdown or "",
+        "status_code": metadata.status_code if metadata else None,
+        "requested_url": requested_url,
+        "response_url": response_url,
+        "possible_redirect": bool(response_url and response_url != requested_url),
+    }
 
 
-result = classify_posting(posting_url)
-if result["state"] != "active":  # e.g. confirmed via the ATS API
-    # Do not submit an application on "unknown". Surface it or re-check.
-    ...
+evidence = collect_current_page_evidence("https://example.com/resource")
+# Apply source-specific content, status, API, or identifier checks here.
+# If they are inconclusive, keep the state unknown.
 ```
 
 </CodeGroup>
 
-The decisive branch is the last one: `active`, `removed`, and `unknown` are distinct states. A scrape that succeeds but shows no positive signal is `unknown`, not `active`. Where the ATS exposes an API or a status field, prefer it over parsing rendered text (checklist step 4).
+The important boundary is after collection: Firecrawl supplies page evidence; your application interprets that evidence using source-specific rules. If those rules are inconclusive, keep the state `unknown`.
 
 ## Recommendations by Scenario
 
@@ -163,7 +122,7 @@ The decisive branch is the last one: `active`, `removed`, and `unknown` are dist
 |----------|---------------------|
 | Read product copy, docs, or reference content | Omit `maxAge` to allow the default index reuse |
 | Dashboard or report refreshed on a schedule | Non-zero `maxAge` sized to your refresh interval |
-| Final check before applying, purchasing, or sending | `maxAge: 0` to bypass index reuse + the checklist above |
+| Final check before an action that depends on current state | `maxAge: 0` to bypass index reuse + the checklist above |
 | Confirming an object is truly still active | Prefer the source's API or status field; treat a scrape as evidence only |
 | Ambiguous rendered page (200 but no positive signal) | Classify as `unknown`; stop before the irreversible step |
 
@@ -171,7 +130,7 @@ The decisive branch is the last one: `active`, `removed`, and `unknown` are dist
 
 1. **Freshness and liveness are different questions.** `maxAge` controls freshness; liveness is a decision you make from evidence.
 
-2. **HTTP 200 plus content does not prove that the item is live.** Removed postings and delisted items frequently return a 200.
+2. **HTTP 200 plus content does not prove that the represented state is current.**
 
 3. **For freshness-sensitive actions, use `maxAge: 0` and follow the checklist.** Inspect the rendered content and compare `metadata.url` against `metadata.sourceURL` for possible redirect evidence, and prefer source-specific APIs.
 
