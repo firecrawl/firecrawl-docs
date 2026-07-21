@@ -401,6 +401,144 @@ $credits = $client->getCreditUsage();
 echo 'Remaining credits: ' . $credits->getRemainingCredits();
 ```
 
+<div id="laravel-ai-sdk-tools">
+  ## Herramientas de Laravel AI SDK
+</div>
+
+El SDK incluye clases de herramientas nativas para el [Laravel AI SDK](https://laravel.com/docs/ai-sdk) (`laravel/ai`), de modo que los agentes puedan hacer scraping, buscar, mapear y rastrear la web sin un MCP Server ni llamadas HTTP manuales.
+
+```bash
+composer require laravel/ai
+```
+
+<Note>Requiere `firecrawl/firecrawl-sdk` 1.9.0 o posterior, además de `laravel/ai` 0.9 o posterior (PHP 8.3+, Laravel 12+). Las clases de las herramientas solo se cargan cuando `laravel/ai` está instalado.</Note>
+
+Las herramientas resuelven `FirecrawlClient` desde el contenedor, por lo que se reutiliza tu configuración actual de `config/firecrawl.php` y `FIRECRAWL_API_KEY` tal cual:
+
+```php
+use Firecrawl\Laravel\Tools\FirecrawlScrape;
+use Firecrawl\Laravel\Tools\FirecrawlSearch;
+use Laravel\Ai\Contracts\Agent;
+use Laravel\Ai\Contracts\HasTools;
+use Laravel\Ai\Promptable;
+use Stringable;
+
+class ResearchAssistant implements Agent, HasTools
+{
+    use Promptable;
+
+    public function instructions(): Stringable|string
+    {
+        return 'You are a research assistant. Use the Firecrawl tools to find and read web content.';
+    }
+
+    public function tools(): iterable
+    {
+        return [
+            new FirecrawlScrape,
+            new FirecrawlSearch,
+        ];
+    }
+}
+
+$response = ResearchAssistant::make()->prompt('What does firecrawl.dev do?');
+```
+
+<div id="available-tools">
+  ### Herramientas disponibles
+</div>
+
+| Clase             | Nombre de la herramienta | Qué hace                                            |
+| ----------------- | ------------------------ | --------------------------------------------------- |
+| `FirecrawlScrape` | `firecrawl_scrape`       | Hace scraping de una URL y devuelve markdown limpio |
+| `FirecrawlSearch` | `firecrawl_search`       | Busca en la web y devuelve resultados en JSON       |
+| `FirecrawlMap`    | `firecrawl_map`          | Descubre las URL de un sitio web                    |
+| `FirecrawlCrawl`  | `firecrawl_crawl`        | Rastrea varias páginas y las convierte en markdown  |
+
+Los nombres de las herramientas coinciden con los del Firecrawl MCP server, por lo que los agentes ven la misma terminología en todas las interfaces. Registra las cuatro a la vez con el helper spread:
+
+```php
+use Firecrawl\Laravel\Tools\FirecrawlTools;
+
+public function tools(): iterable
+{
+    return [...FirecrawlTools::all()];
+}
+```
+
+Cada herramienta también acepta un cliente explícito, para credenciales puntuales o para usarlo fuera del contenedor. `FirecrawlTools::all()` se lo pasa a las cuatro herramientas:
+
+```php
+use Firecrawl\Client\FirecrawlClient;
+
+$client = FirecrawlClient::create(apiKey: 'fc-other-key');
+
+new FirecrawlScrape($client);
+// o
+FirecrawlTools::all($client);
+```
+
+<div id="tool-parameters">
+  ### Parámetros de las herramientas
+</div>
+
+Cada herramienta expone un esquema pequeño pensado para el modelo. Estos son los parámetros que el agente puede proporcionar:
+
+| Herramienta        | Parámetro             | Descripción                                                                       |
+| ------------------ | --------------------- | --------------------------------------------------------------------------------- |
+| `firecrawl_scrape` | `url` (obligatorio)   | URL absoluta de la página a la que se le hará scraping, incluido el protocolo     |
+| `firecrawl_search` | `query` (obligatorio) | La consulta de búsqueda                                                           |
+|                    | `limit`               | Número máximo de resultados que se devolverán, 1–20. El valor predeterminado es 5 |
+| `firecrawl_map`    | `url` (obligatorio)   | URL base del sitio web que se va a mapear                                         |
+|                    | `search`              | Término opcional para filtrar las URL descubiertas por relevancia                 |
+|                    | `limit`               | Número máximo de URL que se devolverán, 1–500. El valor predeterminado es 100     |
+| `firecrawl_crawl`  | `url` (obligatorio)   | URL desde la que iniciar el rastreo                                               |
+|                    | `limit`               | Número máximo de páginas que se rastrearán, 1–25. El valor predeterminado es 5    |
+
+Los valores de `limit` fuera de rango se ajustan al límite más cercano en lugar de rechazarse, por lo que un modelo que solicite 99 resultados de búsqueda recibirá 20 en lugar de un error.
+
+<div id="tool-behavior">
+  ### Comportamiento de la herramienta
+</div>
+
+Los fallos de la herramienta, como límites de tasa, tiempos de espera y URL no válidas, se devuelven al modelo como cadenas de error legibles en lugar de generar excepciones, para que las ejecuciones del agente sigan funcionando de forma controlada. Las salidas se limitan para mantenerse dentro del contexto del modelo: los resultados de scraping se truncan a 80.000 caracteres, las páginas de rastreo a 15.000 caracteres cada una dentro de un presupuesto total de 100.000 caracteres por resultado completo, y los resultados de search y mapeo eliminan los elementos del final con un marcador explícito de omisión.
+
+`firecrawl_search` y `firecrawl_map` devuelven arrays JSON de resultados. `firecrawl_scrape` devuelve la página en markdown.
+
+<div id="crawl-results">
+  ### Resultados del rastreo
+</div>
+
+`firecrawl_crawl` espera hasta 55 segundos a que termine el rastreo y luego devuelve un objeto JSON que deja explícito el resultado. Los rastreos fallidos, cancelados o parciales siguen siendo visibles para el modelo a través del campo `status`, en lugar de truncarse sin avisar:
+
+```json
+{
+  "status": "completed",
+  "completed": 5,
+  "total": 5,
+  "pages": [
+    { "url": "https://example.com/docs", "markdown": "..." }
+  ]
+}
+```
+
+Aparecen dos campos opcionales cuando los resultados no caben: `omittedPages` cuenta las páginas omitidas para mantenerse dentro del presupuesto de salida, y `note` le indica al modelo que existen más páginas en el servidor y que debe usar un límite más bajo o hacer scraping de páginas específicas con `firecrawl_scrape`. La herramienta informa sobre la paginación en lugar de seguirla, por lo que los agentes que necesitan todas las páginas de un rastreo grande deben usar `FirecrawlClient` directamente.
+
+Si el rastreo sigue en ejecución cuando expira la espera, la herramienta lo indica y le recuerda al modelo que el rastreo aún puede completarse del lado del servidor. Los inicios de rastreo incluyen una clave de idempotencia UUID, por lo que un reintento a nivel HTTP nunca crea un rastreo duplicado.
+
+Si tu agente se ejecuta dentro de un trabajo en cola, mantén pequeño el límite del rastreo o aumenta el timeout del trabajo del worker. La espera, la frecuencia de poll y el límite por página son propiedades protegidas, así que extiende la clase para ajustarlas:
+
+```php
+use Firecrawl\Laravel\Tools\FirecrawlCrawl;
+
+class PatientCrawl extends FirecrawlCrawl
+{
+    protected int $timeoutSeconds = 120;
+    protected int $pollIntervalSeconds = 5;
+    protected int $pageCharacterLimit = 30000;
+}
+```
+
 <div id="browser">
   ## Browser
 </div>
