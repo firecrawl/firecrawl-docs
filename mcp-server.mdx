@@ -20,8 +20,9 @@ A Model Context Protocol (MCP) server implementation that integrates [Firecrawl]
 
 ## Choose how you want to start
 
+{/* RELEASE GATE: Remove this Warning only after local integrated E2E, the protected production canary, the production legacy-token audit confirms that accepted tokens have an unambiguous MCP audience, real Claude OAuth connections, and a real ChatGPT test confirm that offline_access is advertised and accepted, a refresh token is issued, and refresh after access-token expiry succeeds. Before publishing, regenerate the GT localizations for every source page changed by this rollout. */}
 <Warning>
-The dedicated account endpoint, deterministic keyless recovery contract, and account-connection management described below are arriving with the hosted MCP account-endpoint rollout. Today, use `/v2/mcp` keyless or with an API key header. The docs update must deploy after the account endpoint and recovery behavior are live.
+The dedicated account endpoint and recovery behavior described below are not live yet. Today, use `/v2/mcp` without credentials or with an API key in the `Authorization` header.
 </Warning>
 
 <CardGroup cols={3}>
@@ -44,9 +45,9 @@ Local coding agents such as Claude Code, Codex, Cursor, and OpenCode should star
 https://mcp.firecrawl.dev/v2/mcp
 ```
 
-The rollout contract makes anonymous initialization succeed deterministically. Keyless tool denials are returned as structured tool results rather than transport authentication challenges. Quota exhaustion returns a structured tool result or `429` with retry guidance.
+Keyless connections expose Search, Scrape, and Parse. If a request needs an account-only tool, Firecrawl explains how to connect an account or add an API key. Quota errors include retry guidance.
 
-On `/v2/mcp`, an invalid API key or unrecognized Bearer credential receives a correction-only session with no Firecrawl tools and a model-visible `CREDENTIAL_INVALID` result. A `401` with `error="invalid_token"` is reserved for recognizable expired or revoked OAuth tokens that can safely re-authenticate against the same resource. Anonymous/keyless capability and quota failures remain non-auth-shaped: they use structured tool results, or `429` for hard rate limiting.
+If a configured credential is invalid, Firecrawl returns a credential error instead of silently falling back to keyless mode. Expired or revoked OAuth connections ask compatible clients to reconnect.
 
 ### Connect your account
 
@@ -57,10 +58,6 @@ https://mcp.firecrawl.dev/v2/mcp-oauth
 ```
 
 This endpoint will have its own OAuth resource identity and will always ask an anonymous client to sign in. Compatible clients identify themselves automatically using Client ID Metadata Documents or Dynamic Client Registration, so users do not need to create an OAuth client manually. The endpoint also accepts Firecrawl API keys in an `Authorization` header.
-
-<Warning>
-The account endpoint and `https://firecrawl.dev/connect/mcp` currently return `404` in production. Until the coordinated rollout completes, use the keyless endpoint or configure an API key header; do not place a credential in the URL.
-</Warning>
 
 ### Run unattended
 
@@ -79,56 +76,35 @@ Send a Firecrawl API key to either hosted endpoint as a Bearer header. The keyle
 }
 ```
 
-Existing OAuth tokens issued for `https://mcp.firecrawl.dev/v2/mcp` remain accepted there. After rollout, new interactive connections should use the account endpoint above.
+Compatible existing OAuth tokens explicitly bound to `https://mcp.firecrawl.dev/v2/mcp` remain accepted there. Tokens with a missing or ambiguous audience fail closed. After rollout, new interactive connections should use the account endpoint above.
 
-Audience compatibility is intentionally one-way during rollout: existing `/v2/mcp` OAuth tokens also work on `/v2/mcp-oauth`, while new `/v2/mcp-oauth` tokens do not work on `/v2/mcp`. This preserves every existing connection without weakening the resource binding of newly issued account tokens.
+Audience compatibility is intentionally one-way during rollout: compatible existing tokens explicitly bound to `/v2/mcp` also work on `/v2/mcp-oauth`, while new `/v2/mcp-oauth` tokens do not work on `/v2/mcp`. This preserves compatible existing connections without weakening the resource binding of newly issued account tokens.
+
+Existing `https://mcp.firecrawl.dev/<API_KEY>/v2/mcp` configurations also continue working during the migration. New configurations should use OAuth or a Bearer header so the credential does not appear in the URL.
 
 ### Upgrade from keyless mode
 
-With the recovery rollout, when a keyless caller requests a tool that needs an account, the tool result includes two machine-readable recovery actions:
+When a keyless request needs an account-only tool, the result lists the available keyless tools and two ways to continue:
 
 ```json
 {
   "code": "KEYLESS_TOOL_NOT_AVAILABLE",
-  "message": "This tool is not available in keyless mode. If a person is present, connect a free Firecrawl account in the browser; no credit card is required and free accounts include monthly credits. For CI, servers, or unattended agents, configure an API key in the Authorization header. Then retry the same tool call.",
   "auth_mode": "keyless",
-  "request_id": "123e4567-e89b-12d3-a456-426614174000",
-  "docs_url": "https://docs.firecrawl.dev/mcp-server",
-  "account": {
-    "auth_mode": "keyless",
-    "connected": false,
-    "api_key_configured": false,
-    "safe_to_display": true
-  },
-  "retryable": false,
   "available_tools": ["firecrawl_scrape", "firecrawl_search", "firecrawl_parse"],
-  "unavailable_without_account": [
-    "firecrawl_crawl",
-    "firecrawl_map",
-    "firecrawl_extract",
-    "firecrawl_agent",
-    "firecrawl_interact",
-    "firecrawl_monitor_create"
-  ],
-  "additional_unavailable_tool_count": 17,
   "next_actions": [
     {
       "kind": "connect_account",
-      "requires_interactive_browser": true,
-      "connect_url": "https://firecrawl.dev/connect/mcp",
-      "docs_url": "https://docs.firecrawl.dev/mcp-server"
+      "connect_url": "https://firecrawl.dev/connect/mcp"
     },
     {
       "kind": "configure_api_key",
-      "requires_interactive_browser": false,
-      "header": "Authorization: Bearer <FIRECRAWL_API_KEY>",
-      "docs_url": "https://docs.firecrawl.dev/mcp-server"
+      "header": "Authorization: Bearer <FIRECRAWL_API_KEY>"
     }
   ]
 }
 ```
 
-The connect link is a human-facing setup page. During the initial rollout it does not authenticate the existing keyless session: follow its instructions to configure or re-add Firecrawl with `https://mcp.firecrawl.dev/v2/mcp-oauth`, then repeat the request through that account connection. If you instead add an API key as a Bearer header on the existing `/v2/mcp` connection, retry the original tool call there.
+To continue, connect through `https://mcp.firecrawl.dev/v2/mcp-oauth` or add an API key as a Bearer header on the existing `/v2/mcp` connection, then retry the request.
 
 ## Installation
 
@@ -349,17 +325,32 @@ If you see a `spawn npx ENOENT` error, Node.js is not installed or not in your s
 
 ### Running on Claude Code
 
-Add the Firecrawl MCP server using the Claude Code CLI. You can use the remote hosted URL or run locally:
+Start keyless, or use the Firecrawl CLI to install an environment-backed Bearer header for the full tool set:
 
 ```bash
 # Remote hosted URL (recommended, works without an API key)
 claude mcp add --transport http firecrawl https://mcp.firecrawl.dev/v2/mcp
 
-# With an API key, send it as an Authorization header
-claude mcp add --transport http firecrawl https://mcp.firecrawl.dev/v2/mcp --header "Authorization: Bearer fc-your-api-key"
+# Full account limits without storing the key in the URL
+export FIRECRAWL_API_KEY=fc-your-api-key
+firecrawl setup mcp --agent claude-code --global --yes
+```
 
-# Or run locally via npx
-claude mcp add firecrawl -e FIRECRAWL_API_KEY=fc-your-api-key -- npx -y firecrawl-mcp
+### Running on Codex
+
+Start keyless:
+
+```bash
+codex mcp add firecrawl --url https://mcp.firecrawl.dev/v2/mcp
+```
+
+For the full tool set, keep the key in an environment variable and tell Codex which variable supplies the Bearer token:
+
+```bash
+export FIRECRAWL_API_KEY=fc-your-api-key
+codex mcp add firecrawl \
+  --url https://mcp.firecrawl.dev/v2/mcp \
+  --bearer-token-env-var FIRECRAWL_API_KEY
 ```
 
 ### Running on Google Antigravity
@@ -472,8 +463,6 @@ The hosted MCP server is optimized for safe remote use. Some options that are av
 - Hosted keyless mode exposes exactly Search, Scrape, and Parse at both tool discovery and tool-call time, and is rate-limited per IP.
 - Local-only file reads are available only when you run the MCP server locally.
 - Webhooks and local file paths should be configured from a local or self-hosted MCP server when the agent needs access to local resources.
-
-For a fixed, read-only MCP surface with search and research tools, see the [Search Only MCP Endpoint](/mcp-server/search-only).
 
 ### Rate Limiting
 
