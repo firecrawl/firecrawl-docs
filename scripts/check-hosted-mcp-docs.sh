@@ -5,6 +5,7 @@
 set -eu
 
 main_page="mcp-server.mdx"
+connect_page="mcp-server/connect.mdx"
 rate_limits="rate-limits.mdx"
 oauth_guide="developer-guides/mcp-setup-guides/oauth.mdx"
 ai_onboarding="ai-onboarding.mdx"
@@ -34,6 +35,13 @@ if [ -e "mcp-server/search-only.mdx" ]; then
 fi
 forbid "$main_page" "mcp-search"
 forbid "$main_page" "(/mcp-server/search-only)"
+
+# The MCP overview owns discovery; the connection guide owns the three hosted modes.
+require "$main_page" 'href="/mcp-server/connect"'
+require "$connect_page" "https://mcp.firecrawl.dev/v2/mcp-oauth"
+require "$connect_page" "Authorization: Bearer <FIRECRAWL_API_KEY>"
+require "$connect_page" "exactly **Search, Scrape, and Parse**"
+forbid "$connect_page" "mcp-search"
 
 # Keyless is the fixed three-tool hosted surface, not the former four-tool list.
 require "$rate_limits" "exactly **Search, Scrape, and Parse** without an API key"
