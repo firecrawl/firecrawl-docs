@@ -8,6 +8,7 @@ search_page="mcp-server/search-only.mdx"
 main_page="mcp-server.mdx"
 rate_limits="rate-limits.mdx"
 oauth_guide="developer-guides/mcp-setup-guides/oauth.mdx"
+ai_onboarding="ai-onboarding.mdx"
 
 require() {
   file="$1"
@@ -32,11 +33,15 @@ require "$search_page" "hidden: true"
 require "$search_page" "Until that cutover, existing API-key callers of this endpoint remain supported."
 forbid "$search_page" "Every request requires a Firecrawl OAuth connection."
 forbid "$search_page" "API keys, anonymous access, and legacy key-in-path URLs are not accepted"
+require "$search_page" "## Available tools"
+forbid "$search_page" "## Available tools after cutover"
 forbid "$main_page" "(/mcp-server/search-only)"
 
 # Keyless is the fixed three-tool hosted surface, not the former four-tool list.
 require "$rate_limits" "exactly **Search, Scrape, and Parse** without an API key"
 forbid "$rate_limits" "Scrape, search, interact, and parse can be used"
+require "$ai_onboarding" "search, scrape, and parse without an API key"
+forbid "$ai_onboarding" "search, scrape, and interact without an API key"
 
 # OAuth redirect guidance must remain compatible with the authorization-server policy.
 require "$oauth_guide" "Firecrawl accepts HTTPS redirect URIs and loopback redirect URIs"
