@@ -47,4 +47,15 @@ require "$oauth_guide" "Firecrawl accepts HTTPS redirect URIs and loopback redir
 require "$oauth_guide" "Authorization: Bearer <FIRECRAWL_API_KEY>"
 forbid "$oauth_guide" "API-key-in-URL"
 
+# No English source guide may emit a credential-bearing hosted MCP URL.
+# Keep the value in OAuth or an Authorization header/secret store instead.
+raw_key_paths="$(find . -type f -name '*.mdx' \
+  ! -path './es/*' ! -path './fr/*' ! -path './ja/*' ! -path './pt-BR/*' ! -path './zh/*' \
+  -exec grep -nE 'mcp\.firecrawl\.dev/(fc-|YOUR|your-|<API|\$\{|\{\{)' {} + || true)"
+if [ -n "$raw_key_paths" ]; then
+  echo "English docs must not emit credential-bearing hosted MCP URLs:" >&2
+  echo "$raw_key_paths" >&2
+  exit 1
+fi
+
 echo "English-source hosted MCP documentation truth checks passed (locales not validated)."
