@@ -41,7 +41,16 @@ require "$main_page" 'href="/mcp-server/connect"'
 require "$connect_page" "https://mcp.firecrawl.dev/v2/mcp-oauth"
 require "$connect_page" "Authorization: Bearer <FIRECRAWL_API_KEY>"
 require "$connect_page" "exactly **Search, Scrape, and Parse**"
-forbid "$connect_page" "mcp-search"
+require "$connect_page" "## Legacy API-key URL support"
+require "$connect_page" "https://mcp.firecrawl.dev/<FIRECRAWL_API_KEY>/v2/mcp"
+legacy_url_count="$(grep -Foc "https://mcp.firecrawl.dev/<FIRECRAWL_API_KEY>/v2/mcp" "$connect_page")"
+if [ "$legacy_url_count" -ne 1 ]; then
+  echo "$connect_page must contain the scoped legacy URL exactly once; found $legacy_url_count" >&2
+  exit 1
+fi
+require "$connect_page" "It is not the recommended setup for new integrations."
+require "$connect_page" "It does not work for the OAuth-only search resource."
+forbid "$connect_page" "/v2/mcp-search"
 
 # Keyless is the fixed three-tool hosted surface, not the former four-tool list.
 require "$rate_limits" "exactly **Search, Scrape, and Parse** without an API key"
@@ -55,13 +64,14 @@ require "$oauth_guide" "Firecrawl accepts HTTPS redirect URIs and loopback redir
 require "$oauth_guide" "Authorization: Bearer <FIRECRAWL_API_KEY>"
 forbid "$oauth_guide" "API-key-in-URL"
 
-# No English source guide may emit a credential-bearing hosted MCP URL.
+# Only the scoped legacy fallback on the MCP connection page may emit a credential-bearing hosted MCP URL.
 # Keep the value in OAuth or an Authorization header/secret store instead.
 raw_key_paths="$(find . -type f -name '*.mdx' \
   ! -path './es/*' ! -path './fr/*' ! -path './ja/*' ! -path './pt-BR/*' ! -path './zh/*' \
+  ! -path "./$connect_page" \
   -exec grep -nE 'mcp\.firecrawl\.dev/(fc-|YOUR|your-|<API|\$\{|\{\{)' {} + || true)"
 if [ -n "$raw_key_paths" ]; then
-  echo "English docs must not emit credential-bearing hosted MCP URLs:" >&2
+  echo "English docs must not emit credential-bearing hosted MCP URLs outside the scoped legacy fallback:" >&2
   echo "$raw_key_paths" >&2
   exit 1
 fi
