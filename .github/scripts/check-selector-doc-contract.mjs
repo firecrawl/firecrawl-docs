@@ -6,7 +6,8 @@ const docsRoot = fileURLToPath(new URL('../..', import.meta.url));
 const page = readFileSync(`${docsRoot}/mcp-tool-selectors.mdx`, 'utf8');
 
 assert.match(page, /hidden: true/);
-assert.match(page, /not available in the public service yet/i);
+assert.doesNotMatch(page, /not available in the public service yet/i);
+assert.match(page, /request-scoped tool selection for hosted Firecrawl MCP/i);
 
 assert.match(page, /https:\/\/mcp\.firecrawl\.dev\/v2\/mcp\?tools=<selector>/);
 assert.match(page, /`@core-v1` is exactly `firecrawl_search`, `firecrawl_scrape`, and `firecrawl_parse`/);
