@@ -40,8 +40,9 @@ forbid "$main_page" "(/mcp-server/search-only)"
 # Keyless is the fixed three-tool hosted surface, not the former four-tool list.
 require "$rate_limits" "exactly **Search, Scrape, and Parse** without an API key"
 forbid "$rate_limits" "Scrape, search, interact, and parse can be used"
-require "$ai_onboarding" "search, scrape, and parse without an API key"
-forbid "$ai_onboarding" "search, scrape, and interact without an API key"
+require "$ai_onboarding" "CLI, SDKs, and REST API allow keyless search, scrape, interact, and parse"
+require "$ai_onboarding" "Hosted MCP exposes the narrower keyless Search, Scrape, and Parse surface"
+forbid "$ai_onboarding" "hosted MCP keyless free tier to search, scrape, and interact"
 
 # OAuth redirect guidance must remain compatible with the authorization-server policy.
 require "$oauth_guide" "Firecrawl accepts HTTPS redirect URIs and loopback redirect URIs"
