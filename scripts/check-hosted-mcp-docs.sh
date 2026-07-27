@@ -4,7 +4,6 @@
 # verification remain a release gate after this source change ships.
 set -eu
 
-search_page="mcp-server/search-only.mdx"
 main_page="mcp-server.mdx"
 rate_limits="rate-limits.mdx"
 oauth_guide="developer-guides/mcp-setup-guides/oauth.mdx"
@@ -28,13 +27,12 @@ forbid() {
   fi
 }
 
-# Search stays hidden and documents its pre-cutover API-key compatibility honestly.
-require "$search_page" "hidden: true"
-require "$search_page" "Until that cutover, existing API-key callers of this endpoint remain supported."
-forbid "$search_page" "Every request requires a Firecrawl OAuth connection."
-forbid "$search_page" "API keys, anonymous access, and legacy key-in-path URLs are not accepted"
-require "$search_page" "## Available tools"
-forbid "$search_page" "## Available tools after cutover"
+# The marketplace-only search profile is not a general Firecrawl setup surface.
+if [ -e "mcp-server/search-only.mdx" ]; then
+  echo "mcp-server/search-only.mdx must not be published as a general setup page" >&2
+  exit 1
+fi
+forbid "$main_page" "mcp-search"
 forbid "$main_page" "(/mcp-server/search-only)"
 
 # Keyless is the fixed three-tool hosted surface, not the former four-tool list.
