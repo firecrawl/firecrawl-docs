@@ -10,7 +10,7 @@ assert.doesNotMatch(page, /not available in the public service yet/i);
 assert.match(page, /request-scoped tool selection for hosted Firecrawl MCP/i);
 
 assert.match(page, /https:\/\/mcp\.firecrawl\.dev\/v2\/mcp\?tools=<selector>/);
-assert.match(page, /`@core-v1` is exactly `firecrawl_search`, `firecrawl_scrape`, and `firecrawl_parse`/);
+assert.match(page, /`@core-v1` is exactly `firecrawl_search`, `firecrawl_scrape`, and `firecrawl_map`/);
 assert.match(page, /Server instructions are static and selector-agnostic/);
 
 assert.match(page, /ordinary default session without selector filtering/);
