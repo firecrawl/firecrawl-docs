@@ -58,4 +58,15 @@ if [ -n "$raw_key_paths" ]; then
   exit 1
 fi
 
+# Local MCP examples must not make npm resolve an unreviewed package version at
+# install time. They should carry the reviewed server version explicitly.
+bare_mcp_npx="$(find . -type f -name '*.mdx' \
+  ! -path './es/*' ! -path './fr/*' ! -path './ja/*' ! -path './pt-BR/*' ! -path './zh/*' \
+  -exec grep -nE 'npx[[:space:]]+-y[[:space:]]+firecrawl-mcp($|[^@])' {} + || true)"
+if [ -n "$bare_mcp_npx" ]; then
+  echo "English docs must pin npx firecrawl-mcp examples:" >&2
+  echo "$bare_mcp_npx" >&2
+  exit 1
+fi
+
 echo "English-source hosted MCP documentation truth checks passed (locales not validated)."
