@@ -17,12 +17,13 @@ La política se define una sola vez a nivel de la organización y se aplica auto
   ## Modos
 </div>
 
-Threat Protection tiene dos modos, configurados a nivel de la organización:
+Threat Protection tiene tres modos, configurados a nivel de la organización:
 
 * **Desactivado** (predeterminado) — no se realizan verificaciones.
-* **Normal** — las URL se verifican con [Google Web Risk](https://cloud.google.com/web-risk), que marca páginas y sitios asociados con malware, ingeniería social (phishing) y software no deseado. **+2 créditos por URL analizada.**
+* **Normal** — las URL se verifican con [Google Web Risk](https://cloud.google.com/web-risk), que marca páginas y sitios asociados con malware, ingeniería social (phishing) y software no deseado. **+2 créditos por URL escaneada.**
+* **Zscaler** — las URL se verifican con el tenant de [Zscaler Internet Access](https://www.zscaler.com/products-and-solutions/zscaler-internet-access) (ZIA) de tu organización: las categorías de URL definidas por Zscaler que selecciones bloquear, además de tus categorías de URL personalizadas y listas de URL personalizadas. Consulta el [modo Zscaler](#zscaler-mode) a continuación. **Sin tarifas de escaneo** — la clasificación se realiza en tu propio tenant.
 
-Las verificaciones están diseñadas para proteger tus datos: en la inmensa mayoría de las solicitudes, la verificación se resuelve localmente con una lista de amenazas sincronizada periódicamente, por lo que las URL que extraes nunca se envían al clasificador y Firecrawl nunca almacena ningún veredicto sobre tu tráfico.
+Las verificaciones están diseñadas para proteger tus datos. En el modo Normal, la inmensa mayoría de las solicitudes se resuelven localmente con una lista de amenazas sincronizada periódicamente, por lo que las URL que extraes nunca se envían al clasificador. En el modo Zscaler, la clasificación de URL se realiza en tu propio tenant de ZIA — el mismo sistema que ya conoce la política web de tu organización. En todos los modos, Firecrawl nunca almacena ningún veredicto sobre tu tráfico.
 
 <div id="policy-controls">
   ## Controles de la política
@@ -33,21 +34,56 @@ Además del clasificador, una política puede incluir:
 * **Lista negra personalizada** — dominios exactos o patrones globales (p. ej., `*.example.com`) que siempre se bloquean, sin llamar al clasificador.
 * **Lista blanca personalizada** — dominios exactos o patrones globales que siempre se permiten. La lista blanca prevalece sobre cualquier otra regla, por lo que un dominio de confianza nunca se bloquea.
 * **TLD bloqueados** — dominios de nivel superior que se bloquean directamente (p. ej., `zip`), con coincidencia en los límites de las etiquetas.
-* **Umbral de puntuación de riesgo** — la puntuación normalizada (0–100) a partir de la cual un veredicto del clasificador se considera un bloqueo. Cuanto más bajo, más estricto. El valor predeterminado es `75`.
+* **Umbral de puntuación de riesgo** — la puntuación normalizada (0–100) a partir de la cual un veredicto del clasificador se considera un bloqueo. Cuanto más bajo, más estricto. El valor predeterminado es `75`. Se aplica al modo Normal; el modo Zscaler bloquea por categoría en su lugar.
 * **Política ante fallos** — qué hacer cuando no se puede acceder al clasificador: **bloquear** (`closed`, la opción predeterminada y recomendada para un control de seguridad) o **permitir** (`open`).
 
 Las reglas personalizadas de lista negra, lista blanca y TLD bloqueados son a nivel de dominio: coinciden con el host de la URL que se está comprobando; solo el clasificador opera sobre URL completas. Los dominios personalizados que incluyas en la lista negra o blanca se comparan usando la misma canonicalización de host que el clasificador, de modo que no se puedan usar codificaciones alternativas de una dirección (por ejemplo, una IP en formato entero) para eludir una entrada de la lista.
+
+<div id="zscaler-mode">
+  ## Modo Zscaler
+</div>
+
+El modo Zscaler permite a las organizaciones que ya mantienen políticas de URL en ZIA aplicarlas al tráfico de Firecrawl sin tener que mantener una taxonomía paralela. Funcionan en conjunto dos mecanismos:
+
+* **Clasificación en línea** — las URL se clasifican mediante la API URL Lookup de tu tenant en categorías definidas por Zscaler, y se bloquean las URL que pertenezcan a una categoría que hayas denegado.
+* **Reglas personalizadas sincronizadas** — tus categorías de URL personalizadas (listas de URL y palabras clave), así como las categorías definidas por Zscaler que hayas ampliado, se sincronizan periódicamente desde el tenant y Firecrawl las evalúa directamente, ya que la API de consulta de ZIA no devuelve clasificaciones personalizadas. Las entradas eliminadas en ZIA desaparecen en la siguiente sincronización; también puedes seleccionar manualmente **Sincronizar ahora** en el dashboard.
+
+La garantía es **tus listas personalizadas más las categorías de Zscaler que hayas seleccionado**, no «idéntico a tu política de ZIA». Las reglas de ZIA también pueden depender de usuarios, grupos, ubicaciones, la hora del día y el contexto de la solicitud, aspectos que Firecrawl no reproduce. Las reglas de palabras clave de las categorías personalizadas se aplican según el mejor esfuerzo (coincidencia de URL sin distinción entre mayúsculas y minúsculas); las entradas exactas de las listas de URL deben coincidir exactamente.
+
+<div id="connecting-your-tenant">
+  ### Conecta tu tenant
+</div>
+
+Los administradores del equipo conectan el tenant desde el dashboard (consulta más abajo) mediante un [cliente OAuth de Zidentity](https://help.zscaler.com/oneapi/understanding-oneapi): ID de cliente, secreto de cliente y tu dominio personalizado de Zidentity. Usa un rol de API con privilegios mínimos limitado a Categorías de URL. El botón **Probar conexión** verifica por separado las credenciales, el acceso a la taxonomía y el acceso a URL Lookup, de modo que un rol que puede leer categorías pero no clasificar URL se detecta durante la configuración, en lugar de en tu primer scraping. El secreto de cliente es de solo escritura y está cifrado en reposo; la compatibilidad de Zscaler con dos secretos activos te permite rotarlos sin tiempo de inactividad.
+
+Después de conectarlo, elige las categorías que quieres bloquear de la propia taxonomía de tu tenant; en el selector aparecen tanto las categorías definidas por Zscaler como las personalizadas.
+
+El tráfico de clasificación hacia tu tenant procede de una IP estática dedicada para incluir en la lista de permitido; solicita la dirección a tu equipo de cuenta.
+
+<div id="capacity-and-behavior">
+  ### Capacidad y comportamiento
+</div>
+
+La API URL Lookup de ZIA permite 1 solicitud por segundo y 400 solicitudes por hora por tenant. Firecrawl agrupa las consultas en lotes (hasta 100 URL por solicitud) y aplica estos límites a nivel de tenant, lo que permite una clasificación sostenida de aproximadamente 11 URL por segundo. El rendimiento de scraping nunca se limita: cuando la demanda supera el presupuesto o se agota el presupuesto horario, las solicitudes afectadas se resuelven de inmediato según su política de fallos, en lugar de quedar en cola indefinidamente.
+
+Dos diferencias a nivel de endpoint respecto al modo Normal:
+
+* **Los resultados de mapeo se evalúan únicamente según reglas locales** (sus listas y las reglas personalizadas sincronizadas), en lugar de clasificarse en línea: un mapeo puede devolver miles de URL, y clasificarlas consumiría el presupuesto horario en enlaces que quizá nunca se obtengan. Cada URL sigue sometiéndose a la comprobación completa cuando comienza su scraping.
+* **Los resultados de búsqueda se clasifican en línea** y los resultados bloqueados se eliminan, igual que en el modo Normal; cada resultado único consume parte del presupuesto horario de consultas.
+
+Los veredictos nunca se almacenan en caché ni se guardan (como en todos los modos), por lo que un cambio de clasificación en Zscaler se aplica en la siguiente solicitud, y los cambios en las listas personalizadas, en la siguiente sincronización.
 
 <div id="configuring-the-policy">
   ## Configuración de la política
 </div>
 
-Los administradores del equipo configuran la Protección contra amenazas desde [Controles empresariales → Protección contra amenazas](https://www.firecrawl.dev/app/enterprise-controls?tab=threat-protection) en el panel:
+Los administradores del equipo configuran la Protección contra amenazas desde [Controles empresariales → Protección contra amenazas](https://www.firecrawl.dev/app/enterprise-controls?tab=threat-protection) en el dashboard:
 
 1. Abre **Controles empresariales → Protección contra amenazas**.
 2. Selecciona un modo, define el umbral de puntuación de riesgo y añade cualquier entrada a la lista negra, lista blanca o TLD bloqueados.
-3. Selecciona si se permiten anulaciones por solicitud y define la política ante fallos.
-4. Guarda. Los cambios se aplican de inmediato: la siguiente solicitud se evalúa según la nueva política.
+3. Para el modo Zscaler: introduce la conexión del tenant, ejecuta la prueba de conexión, selecciona las categorías que quieres bloquear y define el intervalo de sincronización.
+4. Selecciona si se permiten anulaciones por solicitud y define la política ante fallos.
+5. Guarda. Los cambios se aplican de inmediato: la siguiente solicitud se evalúa según la nueva política.
 
 Solo los administradores del equipo pueden ver o cambiar la política. El resto solo puede verla en modo de solo lectura.
 
@@ -69,6 +105,8 @@ Cada endpoint que acepta URL también acepta un objeto `threatProtection` opcion
 ```
 
 Las anulaciones se aplican a la política de la organización campo por campo. Si su organización ha **deshabilitado las anulaciones de solicitud**, cualquier solicitud que incluya un objeto `threatProtection` se rechaza con un `403`; esto permite a un administrador garantizar que la política de la organización sea el nivel mínimo para cada solicitud.
+
+Una anulación puede seleccionar `"mode": "zscaler"` solo cuando la organización tiene configurada una conexión de Zscaler; la conexión en sí y la selección de categorías denegadas son de nivel organizacional y no se pueden establecer por solicitud.
 
 Si la Protección contra amenazas **se aplica** a su equipo, una anulación aún puede reforzar la política, pero no puede incluir `"mode": "off"`; una solicitud que lo intente se rechaza con un `403`.
 
@@ -98,11 +136,11 @@ Si una solicitud se redirige a una URL distinta — incluida una redirección de
   ## Facturación
 </div>
 
-Un escaneo cuesta **+2 créditos por URL analizada** en modo Normal, además del costo base de la solicitud. Algunos detalles:
+En modo Normal, un escaneo cuesta **+2 créditos por URL analizada**, además del costo base de la solicitud. **El modo Zscaler no tiene cargos por escaneo**: la clasificación se realiza en tu propio tenant de ZIA, con tus credenciales y tu cuota de API, por lo que los detalles sobre los cargos por escaneo a continuación se aplican solo al modo Normal. Algunos detalles:
 
 * Las decisiones tomadas exclusivamente según tu propia política (coincidencias con listas negras, listas blancas o TLD bloqueados) no pasan por el clasificador y **no** generan ningún cargo por escaneo.
 * Una solicitud bloqueada igualmente genera el cargo por el escaneo que produjo el veredicto.
-* Los escaneos se deduplican dentro de un solo scrape: una nueva comprobación de una redirección que se resuelve en la misma URL comparte el escaneo original, mientras que una redirección que llega a una URL diferente cuenta como un segundo escaneo.
+* Los escaneos se deduplican dentro de un solo scraping: una nueva comprobación de una redirección que se resuelve en la misma URL comparte el escaneo original, mientras que una redirección que llega a una URL diferente cuenta como un segundo escaneo.
 * **Los rastreos y las extracciones por lotes verifican cada página de forma independiente.** Los veredictos nunca se reutilizan entre páginas — no se almacena nada sobre tu tráfico (consulta arriba) — así que, en modo Normal, debes prever **+2 créditos por página extraída**. Un enlace que se descubre durante el rastreo y se bloquea factura su escaneo una vez por rastreo, sin importar cuántas páginas enlacen a él.
 * **Las búsquedas y los mapeos** escanean cada URL única del conjunto de resultados una vez por solicitud, por lo que sus cargos por escaneo aumentan en función de la cantidad de resultados escaneados, que puede superar ligeramente la cantidad devuelta cuando los resultados se recortan a tu `limit`.
 
@@ -110,14 +148,15 @@ Un escaneo cuesta **+2 créditos por URL analizada** en modo Normal, además del
   ## Referencia de errores
 </div>
 
-| Estado | Cuándo                                                                                                                                   |
-| ------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `403`  | Una solicitud se dirige a una URL bloqueada por la política (`code: unsafe_domain_blocked`).                                             |
-| `403`  | Una solicitud incluye una anulación de `threatProtection` cuando las anulaciones están deshabilitadas para la organización.              |
-| `403`  | Una anulación de `threatProtection` establece `mode: "off"` mientras la Protección contra amenazas se aplica al equipo.                  |
-| `403`  | La política de la organización se actualiza con `mode: "off"` mientras la Protección contra amenazas se aplica al equipo.                |
-| `403`  | Las opciones de Protección contra amenazas se usan en un equipo que no tiene la función habilitada.                                      |
-| `403`  | Se llama a un endpoint v0 obsoleto mientras la Protección contra amenazas se aplica al equipo (v0 no admite Protección contra amenazas). |
+| Estado | Cuándo                                                                                                                                    |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `403`  | Una solicitud se dirige a una URL bloqueada por la política (`code: unsafe_domain_blocked`).                                              |
+| `403`  | Una solicitud incluye una anulación de `threatProtection` cuando las anulaciones están deshabilitadas para la organización.               |
+| `403`  | Una anulación de `threatProtection` establece `mode: "off"` mientras la Protección contra amenazas se aplica al equipo.                   |
+| `403`  | La política de la organización se actualiza con `mode: "off"` mientras la Protección contra amenazas se aplica al equipo.                 |
+| `403`  | Las opciones de Protección contra amenazas se usan en un equipo que no tiene la función habilitada.                                       |
+| `403`  | Una anulación de `threatProtection` selecciona `mode: "zscaler"` cuando la organización no tiene configurada ninguna conexión de Zscaler. |
+| `403`  | Se llama a un endpoint v0 obsoleto mientras la Protección contra amenazas se aplica al equipo (v0 no admite Protección contra amenazas).  |
 
 <div id="notes">
   ## Notas
@@ -127,3 +166,4 @@ Un escaneo cuesta **+2 créditos por URL analizada** en modo Normal, además del
 * La lista blanca siempre prevalece, por lo que una URL en un dominio marcado explícitamente como de confianza nunca es bloqueada por el clasificador ni por una regla de TLD.
 * El código de error `unsafe_domain_blocked` se mantiene estable por compatibilidad, aunque las comprobaciones se realizan a nivel de URL.
 * Con la política de fallos establecida en `closed` (la predeterminada), una interrupción del clasificador hace que las solicitudes afectadas se bloqueen en lugar de permitirse silenciosamente.
+* Con [SIEM Audit Logging](/es/features/siem) configurado, cada decisión es visible en tu registro de auditoría: los eventos incluyen la regla que determinó la decisión, el clasificador consultado, las categorías de amenazas y —en el caso de las URL clasificadas por Zscaler— una marca `security_alert` cuando la URL tiene una clasificación de alerta de seguridad.

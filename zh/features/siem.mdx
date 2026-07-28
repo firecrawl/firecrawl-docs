@@ -1,0 +1,80 @@
+---
+title: "SIEM 审计日志"
+description: "将团队每次执行 scrape 时产生的结构化审计事件流式传输到您自己的 SIEM，首先支持 Microsoft Sentinel。由服务器端推送。"
+og:title: "SIEM 审计日志 | Firecrawl"
+og:description: "将团队每次执行 scrape 时产生的结构化审计事件流式传输到您自己的 SIEM，首先支持 Microsoft Sentinel。由服务器端推送。"
+---
+
+SIEM 审计日志会将 Firecrawl 代表您执行的每次 scrape 所产生的结构化活动事件流式传输至您组织的 SIEM——无论是直接调用 scrape、crawl、batch scrape、search、extract 还是 agent run。您的安全团队可在其现有工具中获得完整且可查询的审计轨迹，了解获取了哪些内容、使用了哪个 API 密钥，以及执行结果如何。
+
+事件由服务器端带外交付：Firecrawl 的基础设施会对事件进行批处理并推送，因此您的 API 请求无需任何变更，即使目标端响应缓慢或不可用，也不会延迟 scrape。
+
+<Note>
+  SIEM 审计日志是一项企业版功能，按组织启用。请联系您的 Firecrawl 账户团队，为您的账户启用此功能。
+</Note>
+
+<div id="supported-destinations">
+  ## 支持的目标端
+</div>
+
+首个支持的目标端是 **Microsoft Sentinel** (Azure Monitor Logs) 。事件通过 [Logs Ingestion API](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/logs-ingestion-api-overview) 传送：数据收集终结点 (DCE) 和数据收集规则 (DCR) 会将事件映射到你的 Log Analytics 工作区，并使用通过客户端凭据进行身份验证的 Microsoft Entra 应用程序。
+
+如需使用其他目标端，请联系你的账户团队。
+
+<div id="what-gets-logged">
+  ## 记录的内容
+</div>
+
+Firecrawl 代您获取的每个 URL 都会生成一个事件。您在设置过程中创建的数据收集规则会将事件映射到工作区，并按 [ASIM 网页会话架构](https://learn.microsoft.com/en-us/azure/sentinel/normalization-schema-web)进行规范化，因此您现有的 Sentinel 内容——分析规则、搜寻查询、工作簿——无需进行 Firecrawl 特定解析即可处理这些行。
+
+每一行都会记录：
+
+* **获取操作**——目标 URL 和域名、HTTP 状态以及开始和结束时间。
+* **结果**——成功、失败、封禁 (安全策略拒绝此次获取) 或已取消。`EventSeverity` 可区分提供商确认的威胁与被您自身某项策略规则封禁的获取操作。
+* **归因信息**——触发获取操作的 API 密钥 (ID 和显示名称) ，以及其所属的工作流：scrape、crawl、batch scrape、search、extract、agent 或 parse。
+* **任务分组**——同一 API 请求中的每次获取共享同一个请求标识符，因此您可在查询中将整个 crawl 重建为一个任务。
+* **您的关联 ID**——您的系统附加到请求的元数据会原样回显在该行中，使事件可与您自己的工单或会话标识符对应。
+
+启用[威胁防护](/zh/features/threat-protection)后，各行还会包含决策上下文：作出决策的规则、所使用的 classifier、涉及的威胁类别，以及——对于由 Zscaler 分类的 URL——安全告警标志。仅导出这些规范化字段；原始 classifier 响应绝不会离开 Firecrawl。
+
+<div id="setting-it-up">
+  ## 设置
+</div>
+
+您需要创建一个 Entra 应用、一个 DCE 和一个带自定义表的 DCR，然后将 Firecrawl 连接到它们。团队管理员可在 Dashboard 的 [Enterprise Controls → SIEM](https://www.firecrawl.dev/app/enterprise-controls?tab=siem-logging) 中配置连接——该页面会引导您完成每个 Azure 步骤，并提供可复制的命令。
+
+简而言之：
+
+1. **创建 Entra 应用**并设置客户端密钥。Firecrawl 使用这些凭据进行身份验证；仅向该应用授予 DCR 的 **Monitoring Metrics Publisher** 角色。
+2. **创建 DCE 和 DCR**，并为事件创建自定义表——Dashboard 提供表架构，以及将事件规范化为 ASIM 的转换。请记下 DCE 引入 URL、DCR 不可变 ID 和流名称。
+3. **在 Dashboard 中填写详细信息**：租户 ID、客户端 ID、客户端密钥、DCE URL、DCR 不可变 ID 和流名称。
+4. **保存。** Firecrawl 会通过发送测试事件来验证目标端，只有目标端接受该事件后才会启用流式传输。您可以随时再发送一个测试事件。
+
+客户端密钥为只写字段：它会以静态加密方式存储，之后不会再次显示，您可随时输入新密钥进行替换。后续保存时将密钥字段留空，会保留已存储的密钥。
+
+<div id="delivery-semantics">
+  ## 交付语义
+</div>
+
+* **按组织批量交付** — 事件会按组织分组并批量交付，通常会在 scrape 完成后的几秒内送达。
+* **采用 backoff 重试** — 目标端发生暂时性故障时，会按递增延迟策略重试。目标端中断不会立即导致审计记录丢失，待目标端恢复后将继续交付。
+* **不在请求路径中** — 交付问题绝不会拖慢或导致您的 API 请求失败。如果目标端在重试预算耗尽后仍不可用，受影响的事件会被丢弃，而不会阻塞 scrape；您可在 Dashboard 中查看交付状态。
+* **静态出口** — 交付流量来自专用静态 IP，因此您可以在 collection endpoint 前的网络控制中将 Firecrawl 加入 allowlist。请向您的账户团队索取该地址。
+
+<div id="error-reference">
+  ## 错误参考
+</div>
+
+| 状态                         | 发生情况                               |
+| -------------------------- | ---------------------------------- |
+| `403`                      | 在未启用此功能的团队中使用 SIEM 配置 API。         |
+| `400`                      | 尚未存储客户端密钥时，保存配置但未提供客户端密钥。          |
+| `200` 且 `delivered: false` | 尝试发送测试事件，但目标端拒绝了该事件；响应中包含目标端返回的错误。 |
+
+<div id="notes">
+  ## 注意事项
+</div>
+
+* SIEM 审计日志不消耗额度。
+* 事件包含请求元数据和结果，绝不会将抓取页面的*内容*发送到您的 SIEM。
+* 启用 [Zero Data Retention](/zh/features/scrape#zero-data-retention-zdr) 的团队可以使用 SIEM 审计日志；事件会标记为 `zero_data_retention: true`。
