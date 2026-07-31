@@ -7,6 +7,10 @@ description: "Search GitHub issues, merged pull requests, repository READMEs, an
   **Private beta.** The developer index is in beta test. This page is unlisted (not linked from the navigation, the Search feature page, or the MCP tools page) so it can be shared for reference while the feature is in beta. Result types, ranking signals, and filters may still change.
 </Note>
 
+<Warning>
+  **Access is granted per organization.** Every request below requires an API key belonging to an organization that has been enabled for the developer beta. Requests without that access get `403` with `Developer search is in beta and is not enabled for this team.` on the developer endpoint, and on `/search` the `developer` category is dropped from the response with no error. Contact us to have your organization enabled.
+</Warning>
+
 Firecrawl Developer is an index built for coding agents. It covers GitHub issues, merged pull requests, repository READMEs, and curated documentation sites, so an agent can answer a question about code behavior, a library or framework, an API contract, an error message, or a known bug from primary sources rather than from a general web page.
 
 - Find the issue or pull request where a bug was reported and fixed
@@ -27,13 +31,13 @@ Throughout this page, `categories` is the request parameter and always takes an 
 
 Pass `developer` in the `categories` array on `/search`. The API returns developer results in a `developer` group next to `web`, and both SDKs expose that group as `.developer`.
 
-`/search` accepts keyless requests, so the examples below run without an API key. Add one for higher rate limits. See [Rate limits](/rate-limits#keyless-no-api-key) for the current keyless allowance.
+`/search` itself accepts keyless requests, but the `developer` category does not: a request without an enabled API key still returns `200` with ordinary `web` results and no `developer` group at all. Send a key from an enabled organization to get developer results.
 
 <CodeGroup>
 
 ```bash cURL
-# No API key needed to get started; add -H "Authorization: Bearer $FIRECRAWL_API_KEY" for higher rate limits:
 curl -X POST https://api.firecrawl.dev/v2/search \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "how do I configure retries",
@@ -46,8 +50,7 @@ curl -X POST https://api.firecrawl.dev/v2/search \
 from firecrawl import Firecrawl
 
 firecrawl = Firecrawl(
-  # No API key needed to get started; add one for higher rate limits:
-  # api_key="fc-YOUR-API-KEY",
+    api_key="fc-YOUR-API-KEY",
 )
 
 result = firecrawl.search(
@@ -63,8 +66,7 @@ for item in result.developer or []:
 import { Firecrawl } from "firecrawl";
 
 const firecrawl = new Firecrawl({
-  // No API key needed to get started; add one for higher rate limits:
-  // apiKey: "fc-YOUR-API-KEY",
+  apiKey: "fc-YOUR-API-KEY",
 });
 
 const result = await firecrawl.search("how do I configure retries", {
@@ -78,7 +80,7 @@ for (const item of result.developer ?? []) {
 
 </CodeGroup>
 
-Developer results in this group carry `url`, `title`, and `description`, the same shape as a web result.
+Developer results in this group carry `url`, `title`, `description`, and `position`, the same shape as a web result, plus `category: "developer"`. Web results in the same response have no `category`, so it is the field to key on if you merge the two groups.
 
 ```json
 {
@@ -95,7 +97,9 @@ Developer results in this group carry `url`, `title`, and `description`, the sam
       {
         "url": "https://github.com/firecrawl/firecrawl/issues/1234",
         "title": "Retries are not applied to 429 responses",
-        "description": "Reported behavior and the fix that landed"
+        "description": "Reported behavior and the fix that landed",
+        "position": 1,
+        "category": "developer"
       }
     ]
   }
@@ -110,20 +114,21 @@ Developer results in this group carry `url`, `title`, and `description`, the sam
 
 | Task | Endpoint |
 | --- | --- |
-| Search the developer index | `GET` or `POST /v2/search/developer/search` |
+| Search the developer index | `GET` or `POST /v2/developer/search` |
+| Same search, alias path | `GET` or `POST /v2/search/developer` |
 
-The canonical path is `/v2/search/developer/search`, and it accepts requests without an API key so you can try it before signing up. `/v2/developer/search` serves the same search and always requires a key. A developer search bills as one search.
+The canonical path is `/v2/developer/search`. `/v2/search/developer` is an alias that serves the same search. Both require an API key from an organization enabled for the beta; both return `403` otherwise. A developer search bills as one search.
 
 <CodeGroup>
 
 ```bash cURL
-# No API key needed to get started; add -H "Authorization: Bearer $FIRECRAWL_API_KEY" for higher rate limits:
-curl -s "https://api.firecrawl.dev/v2/search/developer/search?query=how%20do%20I%20configure%20retries&k=10"
+curl -s "https://api.firecrawl.dev/v2/developer/search?query=how%20do%20I%20configure%20retries&k=10" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY"
 ```
 
 ```bash cURL (POST)
-# No API key needed to get started; add -H "Authorization: Bearer $FIRECRAWL_API_KEY" for higher rate limits:
-curl -X POST https://api.firecrawl.dev/v2/search/developer/search \
+curl -X POST https://api.firecrawl.dev/v2/developer/search \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "how do I configure retries",
@@ -223,6 +228,7 @@ To confirm an id resolves, pass it and read the `sources` array the response add
 
 - `id` is a stable result id, such as `issue:owner/repo#123`
 - `type` is one of `doc`, `issue`, `pull_request`, or `readme`
+- `title` is optional and is frequently absent on `doc` results, where the source page carries no usable title. Fall back to `url` rather than assuming the field is present
 - `passages` holds the matched passages in markdown, so tables and code blocks survive
 - `coverage` reports index health per result type, one of `ok`, `degraded`, `unavailable`, or `skipped`
 - `reranked` reports whether the ranked list went through the reranking stage
@@ -231,7 +237,11 @@ Check `coverage` when a result type you expected is missing. A `degraded` or `un
 
 ## Use it from MCP
 
-The [MCP server](/mcp-server) exposes both surfaces. Neither writes anything.
+<Warning>
+  **Not available on the MCP server yet.** The tools below are not shipped: the hosted server exposes no `firecrawl_developer_search`, and its `firecrawl_search` `categories` enum accepts only `github`, `research`, and `pdf`, so passing `developer` is rejected. Until MCP support lands, reach the index over HTTP with the endpoint above. This section describes the intended shape.
+</Warning>
+
+Once released, the [MCP server](/mcp-server) will expose both surfaces. Neither writes anything.
 
 | Tool | Purpose |
 | --- | --- |
