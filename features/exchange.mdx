@@ -1,0 +1,262 @@
+---
+title: "Exchange"
+description: "Call approved data providers through one Firecrawl contract"
+og:title: "Exchange | Firecrawl"
+og:description: "Call approved data providers through one Firecrawl contract"
+icon: "arrow-right-arrow-left"
+---
+
+Firecrawl Exchange gives your agent access to specialist data providers without
+integrating each one. Every provider publishes a contract describing what it
+returns, what options it takes, and what a call costs. You discover providers
+with your Firecrawl API key and call them the same way you call any other
+Firecrawl endpoint.
+
+<Note>
+Exchange is in beta and access is granted per account. Discovery is free;
+credits are charged only when a capability is executed.
+</Note>
+
+## How it works
+
+A provider is a data source. A capability is one thing that provider can do,
+such as searching companies or enriching a contact. Each capability publishes a
+JSON Schema for its options, a schema for its response, and a price in credits.
+
+<CardGroup cols={3}>
+  <Card title="Discover" icon="compass">
+    Browse providers and capabilities, and read each contract, for zero credits.
+  </Card>
+  <Card title="Invoke" icon="bolt">
+    Call one capability and get a direct, structured result back.
+  </Card>
+  <Card title="Compose" icon="layer-group">
+    Blend provider results into a normal web search in a single request.
+  </Card>
+</CardGroup>
+
+## Discover providers
+
+`GET /v2/exchange` returns the catalog: every published provider, its
+categories, and its capabilities. It costs no credits.
+
+<CodeGroup>
+```bash cURL
+curl -X GET "https://api.firecrawl.dev/v2/exchange" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY"
+```
+</CodeGroup>
+
+Drill into one provider, or one capability, by appending its key:
+
+<CodeGroup>
+```bash cURL
+curl -X GET "https://api.firecrawl.dev/v2/exchange/providers/acme" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY"
+
+curl -X GET "https://api.firecrawl.dev/v2/exchange/providers/acme/company-search" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY"
+```
+</CodeGroup>
+
+A capability node carries everything needed to call it:
+
+```json
+{
+  "kind": "capability",
+  "provider": "acme",
+  "id": "company-search",
+  "operation": "search",
+  "readOnly": true,
+  "delivery": "direct",
+  "creditsPerCall": 25,
+  "inputSchema": { "type": "object", "properties": { "domain": { "type": "string" } } },
+  "outputSchema": { "type": "object" },
+  "examples": [{ "kind": "request", "value": { "domain": "firecrawl.dev" } }]
+}
+```
+
+### Reading the catalog as an agent
+
+Every discovery route also returns Markdown when you ask for it, so an agent can
+read a contract as text instead of parsing JSON.
+
+<CodeGroup>
+```bash cURL
+curl -X GET "https://api.firecrawl.dev/v2/exchange/providers/acme/company-search" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY" \
+  -H "Accept: text/markdown"
+```
+</CodeGroup>
+
+The Markdown includes the capability's purpose, when to use it, its cost, and a
+ready-to-send request body.
+
+## Invoke a capability
+
+`POST /v2/exchange/invoke` executes one or more capabilities and returns their
+results directly. Each call needs a `provider`, a `capability`, the `options`
+its input schema requires, and an `idempotencyKey` that is unique within the
+request.
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://api.firecrawl.dev/v2/exchange/invoke" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "calls": [
+      {
+        "provider": "acme",
+        "capability": "company-search",
+        "options": { "domain": "firecrawl.dev" },
+        "idempotencyKey": "acme-firecrawl-dev-1"
+      }
+    ]
+  }'
+```
+
+```js Node
+const result = await firecrawl.exchangeInvoke({
+  calls: [
+    {
+      provider: "acme",
+      capability: "company-search",
+      options: { domain: "firecrawl.dev" },
+      idempotencyKey: "acme-firecrawl-dev-1",
+    },
+  ],
+});
+```
+</CodeGroup>
+
+The response reports each call separately, so one failure does not discard the
+rest:
+
+```json
+{
+  "success": true,
+  "partial": false,
+  "data": {
+    "exchange": [
+      {
+        "provider": "acme",
+        "capability": "company-search",
+        "delivery": "direct",
+        "creditsCost": 25,
+        "data": { "company": { "name": "Firecrawl" } }
+      }
+    ]
+  },
+  "creditsUsed": 25,
+  "id": "0198f3c2-..."
+}
+```
+
+`partial` is `true` when some calls succeeded and others failed. A call that
+fails carries an `error` object with a `code`, a `message`, and `retryable`
+instead of `data`.
+
+<Note>
+Reuse the same `idempotencyKey` when retrying the same logical call. Exchange
+returns the original result rather than calling the provider and charging twice.
+</Note>
+
+## Compose with web search
+
+`POST /v2/search` accepts an `exchange` array, so one request can return web
+results and provider results together. The `query` is optional when at least one
+Exchange call is present.
+
+<CodeGroup>
+```bash cURL
+curl -X POST "https://api.firecrawl.dev/v2/search" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "firecrawl funding",
+    "exchange": [
+      {
+        "provider": "acme",
+        "capability": "company-search",
+        "options": { "domain": "firecrawl.dev" },
+        "idempotencyKey": "acme-firecrawl-dev-2"
+      }
+    ]
+  }'
+```
+
+```js Node
+const result = await firecrawl.search({
+  query: "firecrawl funding",
+  exchange: [
+    {
+      provider: "acme",
+      capability: "company-search",
+      options: { domain: "firecrawl.dev" },
+      idempotencyKey: "acme-firecrawl-dev-2",
+    },
+  ],
+});
+```
+</CodeGroup>
+
+Provider results arrive under `data.exchange`, alongside `data.web`,
+`data.news`, and `data.images`.
+
+## Bring your own key
+
+Some providers are published as bring-your-own-key. You already have an account
+with the provider, so you send your own credential and Firecrawl routes the call
+without reselling their data. Pass it as `providerApiKey` on the call:
+
+```json
+{
+  "provider": "acme",
+  "capability": "company-search",
+  "options": { "domain": "firecrawl.dev" },
+  "providerApiKey": "$ACME_API_KEY",
+  "idempotencyKey": "acme-firecrawl-dev-3"
+}
+```
+
+Bring-your-own-key capabilities cost zero Firecrawl credits; the provider bills
+you directly. The credential is forwarded to the provider for that one call and
+is never stored.
+
+## Pricing
+
+Discovery costs nothing. Executing a capability costs the `creditsPerCall`
+published in its contract, and you are charged only for calls that succeed.
+Check a capability's price before calling it:
+
+<CodeGroup>
+```bash cURL
+curl -X GET "https://api.firecrawl.dev/v2/exchange/providers/acme/company-search" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY" | jq .creditsPerCall
+```
+</CodeGroup>
+
+## Errors
+
+Failures are reported per call rather than failing the whole request.
+
+| Code | Meaning |
+| --- | --- |
+| `exchange_capability_not_supported` | The capability is not available through the direct beta. |
+| `terms_acceptance_required` | Your organization must accept the provider's data terms first. |
+| `capability_disabled` | Firecrawl has temporarily disabled this capability. |
+| `provider_not_published` | The provider or capability is not published. |
+| `byok_credential_required` | The capability needs a `providerApiKey`. |
+| `exchange_price_changed` | The published price changed before execution; retry to use the new price. |
+
+## List your data on Exchange
+
+If you have an API you want agents to reach, you can publish it as a provider.
+Upload an OpenAPI specification and Firecrawl derives your capabilities from it,
+then walks you through pricing, categorisation, and ownership verification.
+Every listing is reviewed before it becomes public.
+
+<Card title="List your data" icon="upload" href="https://www.firecrawl.dev/exchange">
+  Start from the Exchange directory in your dashboard.
+</Card>
