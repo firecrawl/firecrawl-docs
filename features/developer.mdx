@@ -21,16 +21,20 @@ Firecrawl Developer is an index built for coding agents. It covers GitHub issues
 | The `developer` category on [`/search`](/features/search) | You want developer results alongside ordinary web results in a single call |
 | The developer search endpoint | You want ranked developer results only, with matched passages and the index filters |
 
-## Developer search category
+Throughout this page, `categories` is the request parameter and always takes an array. A single value in it, such as `developer`, is a category.
 
-Pass `developer` in `categories` on `/search`. The API returns developer results in a `developer` group next to `web`, and both SDKs expose that group as `.developer`.
+## Developer category on `/search`
+
+Pass `developer` in the `categories` array on `/search`. The API returns developer results in a `developer` group next to `web`, and both SDKs expose that group as `.developer`.
+
+`/search` accepts keyless requests, so the examples below run without an API key. Add one for higher rate limits. See [Rate limits](/rate-limits#keyless-no-api-key) for the current keyless allowance.
 
 <CodeGroup>
 
 ```bash cURL
+# No API key needed to get started; add -H "Authorization: Bearer $FIRECRAWL_API_KEY" for higher rate limits:
 curl -X POST https://api.firecrawl.dev/v2/search \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer fc-YOUR_API_KEY" \
   -d '{
     "query": "how do I configure retries",
     "categories": ["developer"],
@@ -41,7 +45,10 @@ curl -X POST https://api.firecrawl.dev/v2/search \
 ```python Python
 from firecrawl import Firecrawl
 
-firecrawl = Firecrawl(api_key="fc-YOUR-API-KEY")
+firecrawl = Firecrawl(
+  # No API key needed to get started; add one for higher rate limits:
+  # api_key="fc-YOUR-API-KEY",
+)
 
 result = firecrawl.search(
     "how do I configure retries",
@@ -55,7 +62,10 @@ for item in result.developer or []:
 ```js Node
 import { Firecrawl } from "firecrawl";
 
-const firecrawl = new Firecrawl({ apiKey: "fc-YOUR-API-KEY" });
+const firecrawl = new Firecrawl({
+  // No API key needed to get started; add one for higher rate limits:
+  // apiKey: "fc-YOUR-API-KEY",
+});
 
 const result = await firecrawl.search("how do I configure retries", {
   categories: ["developer"],
@@ -112,9 +122,9 @@ curl -s "https://api.firecrawl.dev/v2/search/developer/search?query=how%20do%20I
 ```
 
 ```bash cURL (POST)
+# No API key needed to get started; add -H "Authorization: Bearer $FIRECRAWL_API_KEY" for higher rate limits:
 curl -X POST https://api.firecrawl.dev/v2/search/developer/search \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer fc-YOUR_API_KEY" \
   -d '{
     "query": "how do I configure retries",
     "k": 10,
@@ -125,7 +135,7 @@ curl -X POST https://api.firecrawl.dev/v2/search/developer/search \
 </CodeGroup>
 
 <Note>
-  The Python and Node SDKs reach the developer index through the `developer` search category shown above. They do not yet expose a dedicated method for this endpoint, so call it over HTTP for now.
+  The Python and Node SDKs reach the developer index through the `developer` category shown above. They do not yet expose a dedicated method for this endpoint, so call it over HTTP for now.
 </Note>
 
 ### Filters
@@ -134,11 +144,11 @@ All filters are optional.
 
 | Filter | Meaning |
 | --- | --- |
-| `k` | Number of ranked results to return, up to 100 |
-| `types` | Restrict result kinds to any of `doc`, `issue`, `pull_request`, `readme` |
-| `repos` | Restrict to repositories, such as `firecrawl/firecrawl` |
-| `sources` | Restrict to specific index sources |
-| `passages` | Matched passages to return per result, up to 5 |
+| `k` | Number of ranked results to return. Defaults to 20, maximum 100 |
+| `types` | Result kinds to search. Any of `doc`, `issue`, `pull_request`, `readme`. Defaults to all four |
+| `repos` | Repository slugs to scope to, such as `firecrawl/firecrawl` |
+| `sources` | Documentation source ids to scope to, at most 20. See below |
+| `passages` | Matched passages to return per result. Defaults to 1, maximum 5 |
 | `language` | Repository language |
 | `topic` | Repository topic |
 | `license` | Repository license |
@@ -147,7 +157,41 @@ All filters are optional.
 | `archived` | Include or exclude archived repositories |
 | `fork` | Include or exclude forks |
 
-Repeatable filters take a repeated query parameter on `GET`, such as `types=issue&types=pull_request`, and an array in the JSON body on `POST`.
+Repeatable filters accept either form on `GET`: a repeated query parameter such as `types=issue&types=pull_request`, or one comma separated value such as `types=issue,pull_request`. On `POST`, pass an array in the JSON body.
+
+### How `repos` and `sources` scope a search
+
+The index has two halves, and these two filters scope them independently:
+
+- `repos` scopes the GitHub half, meaning the `issue`, `pull_request`, and `readme` types
+- `sources` scopes the documentation half, meaning the `doc` type
+- Passing both combines the two halves rather than intersecting them, so you get matching results from either
+
+Because each filter only applies to one half, a filter that cannot match any requested type is rejected rather than silently returning nothing:
+
+- `repos` with no GitHub type in `types` returns `400` with `repos cannot match any requested type; add github types or drop repos`
+- `sources` with no `doc` in `types` returns `400` with `sources cannot match any requested type; add doc or drop sources`
+
+### Which values `sources` accepts
+
+`sources` is not a fixed enum. It takes documentation source ids, each a nonempty string of at most 512 bytes, and at most 20 per request. Which ids exist depends on which documentation sites are currently enrolled in the index, so the set changes as sites are added.
+
+To confirm an id resolves, pass it and read the `sources` array the response adds. It appears only when you sent `sources`, and reports each id exactly as you requested it along with whether it is indexed:
+
+```json
+{
+  "success": true,
+  "results": [],
+  "sources": [
+    { "source": "some-docs-site", "indexed": true },
+    { "source": "not-enrolled", "indexed": false }
+  ]
+}
+```
+
+`indexed: true` means the source has a published generation, so documentation evidence from it may appear. `indexed: false` means nothing from that id can match, which distinguishes an unenrolled source from a query that simply found nothing.
+
+`repos` echoes back the same way, as a `repos` array reporting `indexed` plus a per type breakdown of `issue`, `pullRequest`, and `readme`.
 
 ### Response
 
