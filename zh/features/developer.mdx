@@ -7,6 +7,10 @@ description: "搜索 GitHub issue、已合并的 pull request、仓库 README �
   **私有 Beta 版。** 开发者索引目前处于 Beta 测试阶段。此页面未在导航、Search 功能页面或 MCP 工具页面中链接，便于在功能处于 Beta 阶段时分享参考。结果类型、排序信号和筛选条件仍可能变更。
 </Note>
 
+<Warning>
+  **访问权限按组织授予。** 以下每个请求都需要使用已启用开发者 Beta 版的组织所属的 API 密钥。没有该访问权限的请求在开发者端点上会收到 `403`，并显示 `Developer search is in beta and is not enabled for this team.`；在 `/search` 上，`developer` 类别会从响应中移除且不报错。请联系我们以启用您的组织。
+</Warning>
+
 Firecrawl Developer 是专为编程代理打造的索引。它涵盖 GitHub issue、已合并的 pull request、仓库 README 和精选文档站点，让代理能够基于第一手资料回答有关代码行为、库或框架、API 契约、错误消息或已知 bug 的问题，而不是依赖普通网页。
 
 * 查找报告并修复某个 bug 的 issue 或 pull request
@@ -29,14 +33,14 @@ Firecrawl Developer 是专为编程代理打造的索引。它涵盖 GitHub issu
   ## `/search` 中的开发者类别
 </div>
 
-在 `/search` 的 `categories` 数组中传入 `developer`。API 会在 `web` 分组旁以 `developer` 分组返回开发者结果，两个 SDK 都通过 `.developer` 暴露该分组。
+在 `/search` 的 `categories` 数组中传入 `developer`。API 会在 `web` 旁以 `developer` 分组返回开发者结果，两个 SDK 也都将该分组暴露为 `.developer`。
 
-`/search` 支持免密钥请求，因此以下示例无需 API 密钥即可运行。添加 API 密钥可提高限流额度。当前免密钥额度请参见[限流](/zh/rate-limits#keyless-no-api-key)。
+`/search` 本身接受免密钥请求，但 `developer` 类别不支持：未提供已启用的 API 密钥的请求仍会返回 `200` 和普通的 `web` 结果，但不会包含 `developer` 分组。请使用已启用组织的 API 密钥来获取开发者结果。
 
 <CodeGroup>
   ```bash cURL
-  # 无需 API 密钥即可开始；添加 -H "Authorization: Bearer $FIRECRAWL_API_KEY" 可提高限流额度：
   curl -X POST https://api.firecrawl.dev/v2/search \
+    -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
     -H "Content-Type: application/json" \
     -d '{
       "query": "how do I configure retries",
@@ -49,8 +53,7 @@ Firecrawl Developer 是专为编程代理打造的索引。它涵盖 GitHub issu
   from firecrawl import Firecrawl
 
   firecrawl = Firecrawl(
-    # 无需 API 密钥即可开始；添加 API 密钥可提高限流额度：
-    # api_key="fc-YOUR-API-KEY",
+      api_key="fc-YOUR-API-KEY",
   )
 
   result = firecrawl.search(
@@ -66,8 +69,7 @@ Firecrawl Developer 是专为编程代理打造的索引。它涵盖 GitHub issu
   import { Firecrawl } from "firecrawl";
 
   const firecrawl = new Firecrawl({
-    // 无需 API 密钥即可开始；添加 API 密钥可提高限流额度：
-    // apiKey: "fc-YOUR-API-KEY",
+    apiKey: "fc-YOUR-API-KEY",
   });
 
   const result = await firecrawl.search("how do I configure retries", {
@@ -80,7 +82,7 @@ Firecrawl Developer 是专为编程代理打造的索引。它涵盖 GitHub issu
   ```
 </CodeGroup>
 
-该分组中的开发者结果包含 `url`、`title` 和 `description`，结构与网页结果相同。
+该分组中的开发者结果包含 `url`、`title`、`description` 和 `position`，结构与网页结果相同，并额外包含 `category: "developer"`。同一响应中的网页结果不含 `category`，因此如果合并两个分组，可通过该字段进行区分。
 
 ```json
 {
@@ -97,7 +99,9 @@ Firecrawl Developer 是专为编程代理打造的索引。它涵盖 GitHub issu
       {
         "url": "https://github.com/firecrawl/firecrawl/issues/1234",
         "title": "Retries are not applied to 429 responses",
-        "description": "Reported behavior and the fix that landed"
+        "description": "Reported behavior and the fix that landed",
+        "position": 1,
+        "category": "developer"
       }
     ]
   }
@@ -105,28 +109,29 @@ Firecrawl Developer 是专为编程代理打造的索引。它涵盖 GitHub issu
 ```
 
 <Note>
-  **SDK 用户：**开发者结果位于独立分组中，而不在 `.web` 内。请通过 `result.developer` 读取。
+  **SDK 用户：**开发者结果会单独分组，不在 `.web` 中。请通过 `result.developer` 获取。
 </Note>
 
 <div id="developer-search-endpoint">
   ## 开发者搜索端点
 </div>
 
-| 任务      | 端点                                         |
-| ------- | ------------------------------------------ |
-| 搜索开发者索引 | `GET` 或 `POST /v2/search/developer/search` |
+| 任务        | 端点                                  |
+| --------- | ----------------------------------- |
+| 搜索开发者索引   | `GET` 或 `POST /v2/developer/search` |
+| 相同搜索，别名路径 | `GET` 或 `POST /v2/search/developer` |
 
-规范路径为 `/v2/search/developer/search`。该路径无需 API 密钥即可请求，因此你可以在注册前试用。`/v2/developer/search` 提供相同的搜索功能，但始终需要 API 密钥。每次开发者搜索均按一次搜索计费。
+规范路径为 `/v2/developer/search`。`/v2/search/developer` 是提供相同搜索功能的别名路径。两者均需要来自已启用 beta 的组织的 API 密钥；否则均返回 `403`。每次开发者搜索均按一次搜索计费。
 
 <CodeGroup>
   ```bash cURL
-  # 开始使用无需 API 密钥；如需更高的限流额度，请添加 -H "Authorization: Bearer $FIRECRAWL_API_KEY"：
-  curl -s "https://api.firecrawl.dev/v2/search/developer/search?query=how%20do%20I%20configure%20retries&k=10"
+  curl -s "https://api.firecrawl.dev/v2/developer/search?query=how%20do%20I%20configure%20retries&k=10" \
+    -H "Authorization: Bearer $FIRECRAWL_API_KEY"
   ```
 
   ```bash cURL (POST)
-  # 开始使用无需 API 密钥；如需更高的限流额度，请添加 -H "Authorization: Bearer $FIRECRAWL_API_KEY"：
-  curl -X POST https://api.firecrawl.dev/v2/search/developer/search \
+  curl -X POST https://api.firecrawl.dev/v2/developer/search \
+    -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
     -H "Content-Type: application/json" \
     -d '{
       "query": "how do I configure retries",
@@ -233,6 +238,7 @@ Firecrawl Developer 是专为编程代理打造的索引。它涵盖 GitHub issu
 
 * `id` 是稳定的结果 ID，例如 `issue:owner/repo#123`
 * `type` 为 `doc`、`issue`、`pull_request` 或 `readme` 之一
+* `title` 为可选字段，在 `doc` 结果中经常缺失，因为源页面没有可用标题。应回退到 `url`，而不要假设该字段存在
 * `passages` 包含 Markdown 格式的匹配段落，因此表格和代码块能够保留
 * `coverage` 按结果类型报告索引健康状况，取值为 `ok`、`degraded`、`unavailable` 或 `skipped`
 * `reranked` 表示排序后的列表是否经过重排序阶段
@@ -243,7 +249,11 @@ Firecrawl Developer 是专为编程代理打造的索引。它涵盖 GitHub issu
   ## 通过 MCP 使用
 </div>
 
-[MCP 服务器](/zh/mcp-server)提供这两项功能，且两者均不会写入任何内容。
+<Warning>
+  **MCP 服务器尚不可用。** 以下工具尚未发布：托管服务器不提供 `firecrawl_developer_search`，其 `firecrawl_search` 的 `categories` 枚举仅接受 `github`、`research` 和 `pdf`，因此传入 `developer` 会被拒绝。在 MCP 支持上线前，请通过 HTTP 使用上述端点访问索引。本节描述的是预期形式。
+</Warning>
+
+发布后，[MCP 服务器](/zh/mcp-server)提供这两项功能，且两者均不会写入任何内容。
 
 | 工具                                                | 用途                  |
 | ------------------------------------------------- | ------------------- |
