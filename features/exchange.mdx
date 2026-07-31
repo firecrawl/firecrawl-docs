@@ -6,27 +6,36 @@ og:description: "Call approved data providers through one Firecrawl contract"
 icon: "arrow-right-arrow-left"
 ---
 
-Firecrawl Exchange gives your agent access to specialist data providers without
-integrating each one. Every provider publishes a contract describing what it
-returns, what options it takes, and what a call costs.
+Firecrawl Exchange takes your agent beyond the web. Plenty of the data an agent
+needs is not on a page at all: it sits behind a specialist API you would
+otherwise have to find, sign up for, get a key from, and wire up as its own
+service. Exchange puts those providers behind the contract you already use.
 
-You find providers and call them through `POST /v2/search`, using the same API
-key as every other Firecrawl request.
+You find providers and call them through [`/search`](/api-reference/endpoint/search), with the same API
+key as every other Firecrawl request. Every provider publishes a contract
+describing what it returns, what options it takes, and what a call costs.
 
 <Note>
-Discovery is free; credits are charged only when a capability is executed.
+Searching the catalog adds no credits to a request. Credits are charged when a
+capability is executed; a web query alongside it bills as an ordinary search.
 </Note>
+
+<Card title="Browse the provider catalogue" icon="table-list" href="https://www.firecrawl.dev/exchange">
+  See every supported provider, its capabilities, and what each one costs.
+</Card>
 
 ## How it works
 
 A provider is a data source: FullEnrich for professional profiles, Finnhub for
 market data, and so on. A capability is one thing that provider can do, such as
 enriching a contact or looking up a quote. Each capability publishes a JSON
-Schema for its options, a schema for its response, and a price in credits.
+Schema for its options, a schema for its response, and a price in credits. The
+[provider catalogue](https://www.firecrawl.dev/exchange) lists everything
+currently available.
 
 <CardGroup cols={3}>
   <Card title="Find" icon="compass">
-    Set `sources` to `exchange` to search the catalog. Costs no credits.
+    Set `sources` to `exchange` to search the catalog. Adds no credits.
   </Card>
   <Card title="Call" icon="bolt">
     Add an `exchange` array to run a capability and get a structured result.
@@ -36,31 +45,13 @@ Schema for its options, a schema for its response, and a price in credits.
   </Card>
 </CardGroup>
 
-## Designed for agents
-
-Exchange is built so an agent can go from "I need this data" to a working call
-without a human reading documentation first.
-
-- **Nothing new to integrate.** Finding and calling both happen on
-  `POST /v2/search`, with the same API key. An agent that can already search can
-  already use Exchange.
-- **Results read like search results.** A discovered capability has a `url`, a
-  `title`, and a `description`, so it needs no separate parser.
-- **Every capability is self-describing.** A result's `url` resolves to the full
-  contract as Markdown, including a JSON Schema for its options, so an agent can
-  build a valid call rather than guessing.
-- **The price is known before the call.** `creditsPerCall` is on every result,
-  so an agent can decide whether the data is worth the spend.
-- **Calls are read-only and return directly.** No polling, no callbacks, and
-  nothing a retry can damage.
-
 ## Using Exchange
 
 <Steps>
   <Step title="Find a provider">
     Exchange has no separate catalog endpoint. Set `sources` to `exchange` on
-    `POST /v2/search` and matching capabilities come back alongside your web
-    results, shaped like any other result. Discovery costs no credits.
+    [`/search`](/api-reference/endpoint/search) and matching capabilities come back alongside your web
+    results, shaped like any other result. Searching the catalog adds no credits.
 
     <CodeGroup>
     ```js Node
@@ -105,14 +96,6 @@ without a human reading documentation first.
           "creditsPerCall": 25
         },
         {
-          "url": "https://www.firecrawl.dev/exchange/providers/acme/funding-rounds",
-          "title": "Acme — Funding rounds",
-          "description": "List funding rounds and investors for a company. 25 credits per call. Fetch the url for the full request and response contract.",
-          "provider": "acme",
-          "capability": "funding-rounds",
-          "creditsPerCall": 25
-        },
-        {
           "url": "https://www.firecrawl.dev/exchange/providers/northstar/company-profile",
           "title": "Northstar — Company profile",
           "description": "Firmographics and ownership for a domain. 15 credits per call. Fetch the url for the full request and response contract.",
@@ -126,6 +109,9 @@ without a human reading documentation first.
 
     Ranking weights a capability name above a provider blurb that merely mentions
     the words, so the closest match to your query comes first.
+
+    To see the full list rather than search it, browse the
+    [provider catalogue](https://www.firecrawl.dev/exchange).
   </Step>
 
   <Step title="Narrow the search (optional)">
@@ -134,10 +120,12 @@ without a human reading documentation first.
     `provider/capability` pairs. They compose, so a cohort plus a provider narrows
     further.
 
+    Filters work with or without a query. Drop the query to browse everything in a
+    cohort; add one to rank within it.
+
     <CodeGroup>
     ```js Node
     const result = await firecrawl.search({
-      query: "enrich a contact",
       sources: [
         {
           type: "exchange",
@@ -149,7 +137,6 @@ without a human reading documentation first.
 
     ```python Python
     result = firecrawl.search({
-        "query": "enrich a contact",
         "sources": [
             {
                 "type": "exchange",
@@ -179,7 +166,7 @@ without a human reading documentation first.
   </Step>
 
   <Step title="Call the provider">
-    Providers are called through `POST /v2/search`. Add an `exchange` array with the
+    Providers are called through [`/search`](/api-reference/endpoint/search). Add an `exchange` array with the
     `provider`, the `capability`, and the `options` its input schema requires.
 
     `query` is optional. Omit it to call providers only, or include it to get web
@@ -260,35 +247,50 @@ without a human reading documentation first.
   </Step>
 </Steps>
 
-## Returning web results too
+## One call, many providers
 
-Include a `query` to get both in one request. Provider results appear under
-`data.exchange`, next to `data.web`, `data.news`, and `data.images`.
+The `exchange` array takes up to ten calls, and a `query` runs a web search
+alongside them. So a single request can enrich a contact, pull a market quote,
+and search the web at once. Each call is reported separately, so one failure
+does not discard the others.
 
 <CodeGroup>
 ```js Node
 const result = await firecrawl.search({
-  query: "firecrawl funding",
+  query: "acme corp recent coverage",
   exchange: [
     {
-      provider: "acme",
-      capability: "company-search",
-      options: { domain: "firecrawl.dev" },
+      provider: "fullenrich",
+      capability: "contact-enrichment",
+      options: { person: { linkedin_url: "https://linkedin.com/in/jane-doe" } },
+    },
+    {
+      provider: "finnhub",
+      capability: "quote",
+      options: { symbol: "ACME" },
     },
   ],
 });
+
+result.web; // web results
+result.exchange; // one entry per provider call
 ```
 
 ```python Python
 result = firecrawl.search({
-    "query": "firecrawl funding",
+    "query": "acme corp recent coverage",
     "exchange": [
         {
-            "provider": "acme",
-            "capability": "company-search",
-            "options": {"domain": "firecrawl.dev"},
-        }
-    ]
+            "provider": "fullenrich",
+            "capability": "contact-enrichment",
+            "options": {"person": {"linkedin_url": "https://linkedin.com/in/jane-doe"}},
+        },
+        {
+            "provider": "finnhub",
+            "capability": "quote",
+            "options": {"symbol": "ACME"},
+        },
+    ],
 })
 ```
 
@@ -297,23 +299,31 @@ curl -X POST "https://api.firecrawl.dev/v2/search" \
   -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "query": "firecrawl funding",
+    "query": "acme corp recent coverage",
     "exchange": [
       {
-        "provider": "acme",
-        "capability": "company-search",
-        "options": { "domain": "firecrawl.dev" }
+        "provider": "fullenrich",
+        "capability": "contact-enrichment",
+        "options": { "person": { "linkedin_url": "https://linkedin.com/in/jane-doe" } }
+      },
+      {
+        "provider": "finnhub",
+        "capability": "quote",
+        "options": { "symbol": "ACME" }
       }
     ]
   }'
 ```
 </CodeGroup>
 
+Provider results arrive under `data.exchange`, next to `data.web`, `data.news`,
+and `data.images`.
+
 ## Bring your own key
 
 Some providers are published as bring-your-own-key. You already have an account
-with the provider, so you send your own credential and Firecrawl routes the call
-without reselling their data. Pass it as `providerApiKey` on the call:
+with the provider, so you send your own credential and Firecrawl routes the
+call. Pass it as `providerApiKey` on the call:
 
 ```js Node
 const result = await firecrawl.search({
@@ -334,7 +344,7 @@ is never stored.
 
 ## Pricing
 
-Finding a provider costs nothing. Running a capability costs the
+Searching the catalog adds no credits. Running a capability costs the
 `creditsPerCall` published in its contract, and you are charged only for calls
 that succeed. Discovery results carry the price, so you can check before
 calling.
