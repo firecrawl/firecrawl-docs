@@ -7,57 +7,59 @@ og:description: "Learn how to self-host Firecrawl to run on your own and contrib
 
 <span id="self-hosting-firecrawl" />
 
-Use this guide to decide whether the Docker Compose path fits your goal, then build Firecrawl from source and verify one successful scrape. At the end, a local API on port `3002` will return Markdown from `POST /v2/scrape`.
+Run Firecrawl on your own infrastructure and get your first scrape working with Docker Compose. This guide helps you choose the right path, builds a verified release from source, and finishes with Markdown from a local `POST /v2/scrape` request on port `3002`.
 
 <Warning>
-  This path is an evaluation and reference deployment, not a production
-  architecture. It deliberately starts without API authentication, durable
-  storage, TLS, high availability, or every Firecrawl Cloud capability.
+  This Compose setup is the fastest way to try self-hosting, not a production
+  architecture. It starts without API authentication, durable storage, TLS,
+  high availability, or every Firecrawl Cloud capability.
 </Warning>
 
-## Why?
+## Choose your path
 
-### Choose this path when
+### Self-host when
 
-- **If you need source or infrastructure control, follow this guide.** You will operate the API and every supporting service.
-- **If you want a working API without operating infrastructure, choose Firecrawl Cloud.** Compare [Open Source vs Cloud](/contributing/open-source-or-cloud) to see which managed-only capabilities matter to you.
-- **If you need an authenticated, highly available, or compliance-sensitive production service, use this guide only to validate compatibility.** You must still design and verify the controls in [Production considerations](#production-considerations).
+- **You want control over the source or infrastructure.** This guide gets the API and its supporting services running on your machine.
+- **You are comfortable operating the stack.** You will own upgrades, security, storage, monitoring, and recovery.
+- **You want to validate Firecrawl against your environment.** Get the baseline working here, then design the controls in [Before production](#before-production).
 
-**Recommendation:** use Docker Compose when infrastructure control or source access is worth the operational responsibility. If your priority is the fastest supported path to production, start with Firecrawl Cloud.
+Choose [Firecrawl Cloud](https://firecrawl.dev) when you want to start scraping without running infrastructure. See [Open Source vs Cloud](/contributing/open-source-or-cloud) for the capability differences.
 
-### Considerations
+**Our recommendation:** self-host when source access or infrastructure control is worth the operational work. If you want the fastest supported path to production, start with Firecrawl Cloud.
+
+### What you take on
 
 - You own upgrades, secrets, storage, monitoring, recovery, and incident response.
 - Scraping still sends outbound requests to target websites. Optional proxy, parsing, or AI providers add more data flows.
-- The quickstart uses known-safe evaluation defaults. Keep them until the first scrape succeeds, then change one decision at a time.
-- The commands are pinned to `v2.11.162`. Another release can change its Compose contract.
+- This guide keeps the first run intentionally simple. Get one scrape working, then change one decision at a time.
+- The commands are pinned to `v2.11.162`. A different release may use a different Compose contract.
 
-## Steps
+## Get Firecrawl running
 
-### Decisions this quickstart makes
+### Start with these defaults
 
-- **Source revision → Firecrawl `v2.11.162`.** Change it only after reviewing the target release's `docker-compose.yaml` and self-hosting notes.
-- **API authentication → disabled.** Change it only when you have a complete supported identity and database design; one environment variable is not enough.
-- **Queue backend → PostgreSQL.** Change it only when you intentionally want to operate the optional FoundationDB backend.
-- **Queue admin UI → disabled.** Enable it only with a strong `BULL_AUTH_KEY` and network controls.
-- **Optional AI and advanced scraping providers → not configured.** Add one only when the capability you need explicitly requires it.
+- **Release: Firecrawl `v2.11.162`.** Pin the code and configuration first. Upgrade after reviewing the target release's `docker-compose.yaml` and self-hosting notes.
+- **API authentication: off for this local run.** Add it only with a complete supported identity and database design; one environment variable is not enough.
+- **Queue: PostgreSQL.** Keep it unless you intentionally want to operate the optional FoundationDB backend.
+- **Queue admin UI: off.** Enable it only with a strong `BULL_AUTH_KEY` and network controls.
+- **AI and advanced scraping providers: not configured.** Add a provider when a capability you need requires it.
 
-These defaults reduce the number of variables in the first run. Defer customization until the functional smoke test passes.
+Keep the first run boring: get one scrape working, then add what your use case needs.
 
 ### Prerequisites
 
-Install the following:
+Before you start, install:
 
 - [Git](https://git-scm.com/downloads)
 - [Docker Engine](https://docs.docker.com/engine/install/) or Docker Desktop
 - Docker Compose v2, invoked as `docker compose`
 - `curl` for the verification requests
 
-Make sure port `3002` is available on the host and Docker has enough capacity to build and run several services. The project does not publish a verified minimum host size.
+Make sure port `3002` is available and Docker has enough capacity to build and run several services. Firecrawl does not publish a verified minimum host size for this stack.
 
 ### Clone the verified release
 
-This guide was source-verified against Firecrawl `v2.11.162`. Check out that exact release so the commands and configuration below match the source:
+This guide was verified against Firecrawl `v2.11.162`. Check out that exact release to keep the code, commands, and configuration in sync:
 
 ```bash
 git clone https://github.com/firecrawl/firecrawl.git
@@ -65,11 +67,11 @@ cd firecrawl
 git checkout v2.11.162
 ```
 
-If you choose another release, review that release's `docker-compose.yaml` and self-hosting notes before reusing these values.
+Want to use another release? Review its `docker-compose.yaml` and self-hosting notes before reusing these values.
 
 ### Configure the evaluation deployment
 
-Create `.env` in the repository root:
+Create the smallest working `.env` in the repository root:
 
 ```bash
 cat > .env <<'EOF'
@@ -80,30 +82,30 @@ POSTGRES_DB=postgres
 EOF
 ```
 
-Replace the PostgreSQL password before starting the stack. Keep `POSTGRES_DB=postgres` for `v2.11.162` because the bundled `pg_cron` configuration targets that database. Compose uses these values consistently for the API and PostgreSQL service. Do not commit `.env`.
+Replace the PostgreSQL password before starting the stack, and do not commit `.env`. Keep `POSTGRES_DB=postgres` for `v2.11.162` because the bundled `pg_cron` configuration targets that database. Compose passes these values to both the API and PostgreSQL service.
 
 <Note>
-  `apps/api/.env.example` is an API development template, not a drop-in root
-  Compose configuration. The evaluation path disables database authentication,
-  so requests do not need an API key or `Authorization` header.
+  `apps/api/.env.example` is for API development, not a drop-in Compose file.
+  This first run disables database authentication, so requests do not need an
+  API key or `Authorization` header.
 </Note>
 
-Leave `NUQ_BACKEND` and `BULL_AUTH_KEY` unset. This keeps PostgreSQL as the queue backend and the queue administration UI disabled.
+Leave `NUQ_BACKEND` and `BULL_AUTH_KEY` unset. You will use the PostgreSQL queue without running the queue administration UI—fewer moving parts for the first scrape.
 
 ### Build and start Firecrawl
 
-Build the checked-out source and start the stack in the background:
+Build the checked-out source and start everything in the background:
 
 ```bash
 docker compose up --build -d
 docker compose ps --all
 ```
 
-Compose may warn that optional variables are unset; they can remain blank for this baseline deployment. `docker compose ps --all` should show the API and supporting services running, and one-shot initialization services completed successfully. Some services may take additional time to initialize.
+Warnings about unset optional variables are expected for this baseline. `docker compose ps --all` should show the API and supporting services running, with one-shot initialization services completed. Give the stack a little time if services are still starting.
 
 ### Check API reachability
 
-Once the API container is running, check that its HTTP process is reachable:
+First, make sure the API can answer an HTTP request:
 
 ```bash
 curl \
@@ -121,14 +123,14 @@ Expected response:
 ```
 
 <Warning>
-  This endpoint only confirms that the API process can respond. It does not check
-  Redis, PostgreSQL, RabbitMQ, Playwright, workers, or outbound network access.
-  Complete the functional smoke test below before treating the deployment as usable.
+  This is a heartbeat, not an end-to-end test. It does not check Redis,
+  PostgreSQL, RabbitMQ, Playwright, workers, or outbound network access. Run the
+  scrape below before treating the deployment as usable.
 </Warning>
 
 ### Run a functional smoke test
 
-Send one synchronous scrape request. The request timeout is in milliseconds; curl's client timeout is in seconds and is slightly longer:
+Now test the path that matters: one real scrape. The request timeout is in milliseconds; curl's client timeout is in seconds and is slightly longer:
 
 ```bash
 curl \
@@ -160,47 +162,47 @@ A successful response has this shape:
 }
 ```
 
-This verifies the API, scraping pipeline, one scraping-engine path, and outbound access together. Exact metadata can vary with the target response.
+This checks the API, scraping pipeline, one scraping-engine path, and outbound access together. Exact metadata can vary with the target response.
 
-If the response contains these success fields, the evaluation journey is complete. Decide what to add next instead of changing the baseline configuration preemptively.
+If you get these success fields, Firecrawl is working end to end on your infrastructure. Keep this baseline, then choose what to add next.
 
 ## Capability boundaries
 
-Use the capability you need to choose the next path:
+Your first scrape works. Add the next capability because you need it, not because it exists:
 
 | If you need | Decision |
 | --- | --- |
-| Core scrape, crawl, map, and search routes | Continue with the default stack. Fetch and Playwright processing are included. |
-| LLM-backed extraction or formats | Add an OpenAI-compatible provider or Ollama, then verify that path separately. |
-| Fire-engine or its advanced anti-bot behavior | Operate and configure that service separately; it is not included. |
-| Agent, Browser, interact, feedback, or specialized product, menu, audio, and video formats | Use Firecrawl Cloud or verify the external service requirements for the specific capability. |
+| Core scrape, crawl, map, and search routes | Keep the default stack. Fetch and Playwright processing are included. |
+| LLM-backed extraction or formats | Connect an OpenAI-compatible provider or Ollama, then test that path separately. |
+| Fire-engine or its advanced anti-bot behavior | Run and configure that service separately; it is not included. |
+| Agent, Browser, interact, feedback, or specialized product, menu, audio, and video formats | Use Firecrawl Cloud, or verify the external service requirements for the specific capability. |
 
 For the broader product comparison, see [Open Source vs Cloud](/contributing/open-source-or-cloud). For release-specific configuration, use the pinned [`docker-compose.yaml`](https://github.com/firecrawl/firecrawl/blob/v2.11.162/docker-compose.yaml) as the companion source.
 
-## Production considerations
+## Before production
 
-A successful smoke test proves that the evaluation path works. It does not prove production readiness. Before moving beyond a trusted network, make these decisions:
+Compose gets you to first success. Production needs a few explicit choices before the API leaves a trusted network:
 
 - **If data must survive service replacement,** add durable storage for PostgreSQL, Redis, and RabbitMQ, then define and test backup and restore procedures. The provided Compose file does not add those volumes.
 - **If users or untrusted networks can reach the API,** add a supported authentication design, network access controls, and TLS at a reverse proxy or ingress. Do not expose this unauthenticated baseline publicly.
-- **If you have availability or capacity requirements,** define service-level objectives, monitoring, resource sizing, scaling triggers, and upgrade and rollback procedures. The Compose limits are not verified minimum requirements.
+- **If you have availability or capacity requirements,** set uptime targets, monitoring, resource sizing, scaling triggers, and upgrade and rollback procedures. The Compose limits are not verified minimum requirements.
 - **If data location or compliance matters,** map requests to target websites and every optional AI, proxy, or parsing provider before enabling them.
 - **If secrets must be managed centrally,** move the database password out of `.env` and into your platform's secret-management system.
 
-These are architecture decisions, not additional quickstart environment variables.
+These are infrastructure decisions. No single `.env` switch makes the stack production-ready.
 
-## Next steps
+## Where to go next
 
-- **If you are only evaluating Firecrawl,** keep the API on a trusted network and run `docker compose down` when you are finished.
-- **If you need another open-source capability,** use [Capability boundaries](#capability-boundaries) to identify the required provider or service and verify it as a separate path.
-- **If you need managed infrastructure or Cloud-only capabilities,** compare [Open Source vs Cloud](/contributing/open-source-or-cloud).
-- **If you are preparing for production,** complete every decision in [Production considerations](#production-considerations) before exposing the API.
+- **Still evaluating?** Keep the API on a trusted network and run `docker compose down` when you are finished.
+- **Adding an open-source capability?** Use [Capability boundaries](#capability-boundaries) to find the required provider or service, then test that path on its own.
+- **Want managed infrastructure or Cloud-only capabilities?** Compare [Open Source vs Cloud](/contributing/open-source-or-cloud).
+- **Going to production?** Complete every decision in [Before production](#before-production) before exposing the API.
 
 ## Troubleshooting
 
 ### You're bypassing authentication
 
-If you see this warning with `USE_DB_AUTHENTICATION=false`, continue: it is expected for the evaluation deployment. Requests use a self-hosted identity and need no API key. If the API is reachable from an untrusted network, stop and add the controls described in [Production considerations](#production-considerations).
+If you see this warning with `USE_DB_AUTHENTICATION=false`, you are on the expected first-run path. Requests use a self-hosted identity and need no API key. If the API is reachable from an untrusted network, stop and add the controls in [Before production](#before-production).
 
 ### Docker containers fail to start
 
