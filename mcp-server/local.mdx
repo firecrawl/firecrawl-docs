@@ -1,32 +1,72 @@
 ---
 title: Run Firecrawl MCP locally
-description: Install and configure the local Firecrawl MCP server.
+description: Run the Firecrawl MCP server as a local process and connect it to Firecrawl Cloud or a self-hosted Firecrawl API.
 sidebarTitle: Run locally
 ---
 
-## Prerequisites
+Run Firecrawl MCP locally when your agent launches tools over stdio, needs local-file access, or connects to a Firecrawl API on infrastructure you control. The MCP server and the Firecrawl API are separate services: choose the API backend first, then start MCP with the matching environment variables.
+
+## Choose the Firecrawl API backend
+
+| If you need | Use |
+| --- | --- |
+| The fastest managed path | Firecrawl Cloud with `FIRECRAWL_API_KEY` |
+| Source or infrastructure control | A verified self-hosted API with `FIRECRAWL_API_URL` |
+| Direct local-file Parse | Local MCP connected to a self-hosted Firecrawl API |
+| Safe remote MCP without operating this process | The hosted Firecrawl MCP server |
+
+If you have not started the API yet, follow [Self-hosting Firecrawl](/contributing/self-host) and verify one scrape before adding MCP.
+
+## Install the prerequisites
 
 - Node.js 22 or newer
 - npm and `npx`, included with Node.js
-- A Firecrawl API key for the cloud API, or a self-hosted Firecrawl API URL
+- A Firecrawl Cloud API key or a working self-hosted Firecrawl API URL
 
-Confirm the installed Node.js version:
+Confirm Node.js:
 
 ```bash
 node --version
 ```
 
-## Run over stdio
+## Run MCP with Firecrawl Cloud
+
+For clients that launch MCP as a local stdio process:
 
 ```bash
 env FIRECRAWL_API_KEY=fc-YOUR_API_KEY npx -y firecrawl-mcp@3.23.0
 ```
 
-This is the default transport for clients that launch the MCP server as a local process.
+This is the smallest managed path. Firecrawl Cloud supplies the API backend while the MCP process runs on your machine.
 
-## Run with Streamable HTTP
+## Connect MCP to self-hosted Firecrawl
 
-Use HTTP transport for clients such as n8n that connect to an already-running MCP server:
+For the unauthenticated trusted-network quickstart:
+
+```bash
+env FIRECRAWL_API_URL=http://localhost:3002 \
+  npx -y firecrawl-mcp@3.23.0
+```
+
+For a self-hosted API with an API-key-compatible authentication layer:
+
+```bash
+env FIRECRAWL_API_URL=https://firecrawl.your-domain.com \
+  FIRECRAWL_API_KEY=your-api-key \
+  npx -y firecrawl-mcp@3.23.0
+```
+
+Use the key only when your deployment requires it. MCP can expose only the tools supported by the services configured in that deployment; see [self-hosted feature support](/contributing/self-host#self-hosted-feature-support).
+
+<Warning>
+  Do not expose the unauthenticated self-hosting quickstart publicly. Add TLS,
+  network controls, and a supported authentication design before using a
+  remote API URL.
+</Warning>
+
+## Run MCP over Streamable HTTP
+
+Use HTTP transport when a client such as n8n connects to an already-running MCP server:
 
 ```bash
 env HTTP_STREAMABLE_SERVER=true \
@@ -40,15 +80,19 @@ Connect the client to:
 http://localhost:3000/mcp
 ```
 
-Confirm the server is ready:
+Confirm the MCP process is ready:
 
 ```bash
 curl http://localhost:3000/health
 ```
 
-The health check returns `ok`. The local route is `/mcp`; `/v2/mcp` is the hosted Firecrawl route.
+The health check returns `ok`. The local MCP route is `/mcp`; `/v2/mcp` is the hosted Firecrawl route.
 
-## Install globally
+To use HTTP transport with self-hosted Firecrawl, replace `FIRECRAWL_API_KEY` with the `FIRECRAWL_API_URL` configuration from the previous section and add a key only when the API requires one.
+
+## Persist local MCP configuration
+
+Install the package globally when you prefer a stable local command:
 
 ```bash
 npm install -g firecrawl-mcp@3.23.0
@@ -60,44 +104,14 @@ Then run:
 env FIRECRAWL_API_KEY=fc-YOUR_API_KEY firecrawl-mcp
 ```
 
-## Configuration
-
-### Environment Variables
-
-#### Cloud and self-hosted API
-
-- `FIRECRAWL_API_KEY`: Your Firecrawl API key
-  - Required when using cloud API (default)
-  - Optional when using self-hosted instance with `FIRECRAWL_API_URL`
-- `FIRECRAWL_API_URL` (Optional): Custom API endpoint for self-hosted instances
-  - Example: `https://firecrawl.your-domain.com`
-  - If not provided, the cloud API will be used (requires API key)
-
-### Configuration Examples
-
-For cloud API usage:
-
-```bash
-export FIRECRAWL_API_KEY=your-api-key
-```
-
-For self-hosted instance:
-
-```bash
-export FIRECRAWL_API_URL=https://firecrawl.your-domain.com
-export FIRECRAWL_API_KEY=your-api-key  # If your instance requires auth
-```
-
-### Custom configuration with Claude Desktop
-
-Add this to your `claude_desktop_config.json`:
+For Claude Desktop, add a local stdio server to `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
-    "mcp-server-firecrawl": {
+    "firecrawl": {
       "command": "npx",
-      "args": ["-y", "firecrawl-mcp"],
+      "args": ["-y", "firecrawl-mcp@3.23.0"],
       "env": {
         "FIRECRAWL_API_KEY": "YOUR_API_KEY_HERE"
       }
@@ -106,18 +120,18 @@ Add this to your `claude_desktop_config.json`:
 }
 ```
 
-### Hosted MCP vs local MCP
+For self-hosted Firecrawl, replace `FIRECRAWL_API_KEY` with `FIRECRAWL_API_URL`, or include both when your API requires the key.
 
-The hosted MCP server is optimized for safe remote use. Some options that are available when running the MCP server locally are narrowed or unavailable remotely:
+## Understand local and hosted boundaries
 
-- Hosted keyless mode exposes only Search, Scrape, and Parse and is rate-limited per IP.
-- Local-only file reads are available only when you run the MCP server locally.
-- Webhooks and local file paths should be configured from a local or self-hosted MCP server when the agent needs access to local resources.
+- Hosted keyless MCP exposes only Search, Scrape, and Parse and is rate-limited per IP.
+- Local-only file reads require a local MCP process.
+- Direct local-file parsing with `firecrawl_parse` requires `FIRECRAWL_API_URL` pointing to a self-hosted Firecrawl API. A local MCP server configured only with a Cloud API key cannot upload a local file through that tool.
+- Webhooks and local file paths should be configured from local or self-hosted MCP when the agent must reach resources on your network.
+- Firecrawl API rate limits still apply. Use a Cloud API key for higher managed limits, or define and monitor capacity for your self-hosted deployment.
 
-<Note>
-Direct local-file parsing with `firecrawl_parse` requires `FIRECRAWL_API_URL` pointing to a self-hosted Firecrawl API. A local MCP server configured only with a cloud API key cannot upload a local file through that tool.
-</Note>
+## Where to go next
 
-### Rate Limiting
-
-Rate limits are enforced by Firecrawl. Use an API key for higher limits and access to the full tool set.
+- Review [Tools and operations](/mcp-server/tools) for the current tool inventory and self-hosted availability notes.
+- Use [Connect an MCP client](/mcp-server/connect) for client-specific setup.
+- Return to [Self-hosting Firecrawl](/contributing/self-host) for capability and production decisions.
