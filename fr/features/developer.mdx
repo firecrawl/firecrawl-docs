@@ -155,20 +155,22 @@ Tous les filtres sont facultatifs.
 
 | Filtre      | Signification                                                                                                    |
 | ----------- | ---------------------------------------------------------------------------------------------------------------- |
-| `k`         | Nombre de résultats classés à renvoyer. Valeur par défaut : 20 ; maximum : 100                                   |
+| `k`         | Nombre de résultats classés à renvoyer. Valeur par défaut : 10 ; maximum : 100                                   |
 | `types`     | Types de résultats à rechercher : `doc`, `issue`, `pull_request` ou `readme`. Par défaut, les quatre sont inclus |
 | `repos`     | Slugs des dépôts auxquels limiter la recherche, par exemple `firecrawl/firecrawl`                                |
 | `sources`   | Identifiants des sources de documentation auxquels limiter la recherche, avec un maximum de 20. Voir ci-dessous  |
 | `passages`  | Passages correspondants à renvoyer par résultat. Valeur par défaut : 1 ; maximum : 5                             |
-| `language`  | Langue du dépôt                                                                                                  |
-| `topic`     | Sujet du dépôt                                                                                                   |
-| `license`   | Licence du dépôt                                                                                                 |
+| `language`  | Langue principale du dépôt, par exemple `Rust`                                                                   |
+| `topic`     | Sujet du dépôt, par exemple `async`                                                                              |
+| `license`   | Licence du dépôt, par exemple `MIT`                                                                              |
 | `min_stars` | Nombre minimal d&#39;étoiles du dépôt                                                                            |
 | `max_stars` | Nombre maximal d&#39;étoiles du dépôt                                                                            |
 | `archived`  | Inclure ou exclure les dépôts archivés                                                                           |
 | `fork`      | Inclure ou exclure les forks                                                                                     |
 
 Les filtres pouvant être répétés acceptent l&#39;un ou l&#39;autre format avec `GET` : un paramètre de requête répété, tel que `types=issue&types=pull_request`, ou une valeur unique séparée par des virgules, telle que `types=issue,pull_request`. Avec `POST`, transmettez un tableau dans le corps JSON.
+
+Les filtres `language`, `topic`, `license`, `min_stars`, `max_stars`, `archived` et `fork` décrivent un dépôt GitHub. Ils ne limitent pas l’index comme le font `repos` et `sources`. Lisez [comment les filtres de dépôt limitent une recherche](#how-the-repository-filters-scope-a-search) avant d’en envoyer un.
 
 <div id="how-repos-and-sources-scope-a-search">
   ### Comment `repos` et `sources` définissent le périmètre d’une recherche
@@ -208,6 +210,36 @@ Pour vérifier qu’un identifiant est résolu, transmettez-le et consultez le t
 
 `repos` est renvoyé de la même manière, sous la forme d&#39;un tableau `repos` indiquant `indexed` ainsi qu&#39;une répartition par type entre `issue`, `pullRequest` et `readme`.
 
+<div id="how-the-repository-filters-scope-a-search">
+  ### Comment les filtres de dépôt définissent le périmètre d’une recherche
+</div>
+
+Les sept filtres de dépôt — `language`, `topic`, `license`, `min_stars`, `max_stars`, `archived` et `fork` — décrivent un dépôt GitHub. La plupart des pages de documentation de l’index proviennent d’un site web exploré, sans dépôt associé. Aucun critère de dépôt ne peut inclure ou exclure une telle page.
+
+Une requête qui envoie l’un de ces filtres sans définir le périmètre `sources` n’obtient donc aucun résultat `doc`. Sa réponse ne contient que des éléments GitHub : les types `issue`, `pull_request` et `readme`. La cartographie `coverage` indique que `doc` est `unavailable`, car la partie documentation de l’index n’a jamais été interrogée. C’est le comportement prévu, et non un défaut de l’index.
+
+Pour conserver les résultats de documentation, supprimez les filtres de dépôt. Vous pouvez également définir le périmètre de la partie documentation avec `sources`, puis consulter `coverage` pour confirmer que le type `doc` a répondu.
+
+<CodeGroup>
+  ```bash cURL
+  # Aucune clé API n'est nécessaire pour démarrer ; ajoutez -H "Authorization: Bearer $FIRECRAWL_API_KEY" pour des limites de débit plus élevées :
+  curl -s "https://api.firecrawl.dev/v2/search/developer?query=how%20do%20I%20configure%20retries&k=10&language=Rust&license=MIT"
+  ```
+
+  ```bash cURL (POST)
+  curl -X POST https://api.firecrawl.dev/v2/search/developer \
+    -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "query": "how do I configure retries",
+      "k": 10,
+      "types": ["issue", "pull_request"],
+      "language": "Rust",
+      "license": "MIT"
+    }'
+  ```
+</CodeGroup>
+
 <div id="response">
   ### Réponse
 </div>
@@ -242,10 +274,10 @@ Pour vérifier qu’un identifiant est résolu, transmettez-le et consultez le t
 * `type` est l’un des suivants : `doc`, `issue`, `pull_request` ou `readme`
 * `title` est facultatif et souvent absent des résultats `doc`, lorsque la page source ne comporte aucun titre utilisable. Utilisez plutôt `url` sans supposer que ce champ est présent
 * `passages` contient les passages correspondants au format Markdown, afin de préserver les tableaux et les blocs de code
-* `coverage` indique l’état de l’index pour chaque type de résultat : `ok`, `degraded`, `unavailable` ou `skipped`
+* `coverage` indique le résultat pour chaque type de résultat : `ok`, `degraded`, `unavailable` ou `skipped`
 * `reranked` indique si la liste classée est passée par l’étape de reclassement
 
-Vérifiez `coverage` lorsqu’un type de résultat attendu est absent. Un état `degraded` ou `unavailable` signifie que l’absence est due à l’index plutôt qu’à la requête.
+Vérifiez `coverage` lorsqu’un type de résultat attendu est absent. `skipped` signifie que votre valeur `types` ne demandait pas ce type. Un état `degraded` ou `unavailable` signifie que l’absence est due à l’index ou à un filtre, et non à la requête. Un filtre de dépôt est l’une de ces causes, comme l’explique [la manière dont les filtres de dépôt définissent le périmètre d’une recherche](#how-the-repository-filters-scope-a-search).
 
 <div id="use-it-from-mcp">
   ## Utilisation depuis MCP

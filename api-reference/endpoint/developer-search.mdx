@@ -22,6 +22,36 @@ Because each filter only applies to one half, a filter that cannot match any req
 - `repos` with no GitHub type in `types` returns `400` with `repos cannot match any requested type; add github types or drop repos`
 - `sources` with no `doc` in `types` returns `400` with `sources cannot match any requested type; add doc or drop sources`
 
+## How the repository filters scope a search
+
+The seven repository filters — `language` (such as `Rust`), `topic` (such as `async`), `license` (such as `MIT`), `min_stars`, `max_stars`, `archived`, and `fork` — describe a GitHub repository. Most documentation pages in the index come from a crawled website with no repository behind it, and no repository fact can admit or exclude such a page.
+
+A request that sends one of these filters and no `sources` scope therefore gets no `doc` results. Its response holds GitHub evidence only: the `issue`, `pull_request`, and `readme` types. The `coverage` map reports `doc` as `unavailable`, because the documentation half of the index never ran. This is the design, not an index fault.
+
+To keep documentation results, drop the repository filters. You can also scope the documentation half with `sources`, then read `coverage` to confirm that the `doc` type answered.
+
+<CodeGroup>
+
+```bash cURL
+# No API key needed to get started; add -H "Authorization: Bearer $FIRECRAWL_API_KEY" for higher rate limits:
+curl -s "https://api.firecrawl.dev/v2/search/developer?query=how%20do%20I%20configure%20retries&k=10&language=Rust&license=MIT"
+```
+
+```bash cURL (POST)
+curl -X POST https://api.firecrawl.dev/v2/search/developer \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "how do I configure retries",
+    "k": 10,
+    "types": ["issue", "pull_request"],
+    "language": "Rust",
+    "license": "MIT"
+  }'
+```
+
+</CodeGroup>
+
 ## Which values `sources` accepts
 
 `sources` is not a fixed enum. It takes documentation source ids, each a nonempty string of at most 512 characters, and at most 20 per request. The ids reflect the documentation sites in the index, and the set grows over time.
@@ -56,5 +86,12 @@ To confirm an id resolves, pass it and read the `sources` array the response add
   ]
 }
 ```
+
+## Reading `coverage`
+
+`coverage` reports the outcome for each result type, one of `ok`, `degraded`, `unavailable`, or `skipped`. Check it when a result type you expected is missing:
+
+- `skipped` means your `types` value did not ask for that type
+- `degraded` or `unavailable` means the gap came from the index or from a filter, not from the query. A repository filter is one such cause, as [how the repository filters scope a search](#how-the-repository-filters-scope-a-search) describes
 
 For a workflow overview, see the [Developer Index guide](/features/developer).

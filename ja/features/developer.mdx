@@ -155,20 +155,22 @@ Firecrawl Developer は、コーディングエージェント向けに構築さ
 
 | フィルター       | 意味                                                                   |
 | ----------- | -------------------------------------------------------------------- |
-| `k`         | 返すランク付け済み結果の数。デフォルトは20、最大100                                         |
+| `k`         | 返すランク付け済み結果の数。デフォルトは10、最大100                                         |
 | `types`     | 検索対象の結果の種類。`doc`、`issue`、`pull_request`、`readme` のいずれか。デフォルトでは4種類すべて |
 | `repos`     | 対象を絞り込むリポジトリスラッグ。例: `firecrawl/firecrawl`                            |
 | `sources`   | 対象を絞り込むドキュメントのソース ID。最大20件。以下を参照                                     |
 | `passages`  | 結果ごとに返す一致した本文箇所。デフォルトは1、最大5                                          |
-| `language`  | リポジトリの言語                                                             |
-| `topic`     | リポジトリのトピック                                                           |
-| `license`   | リポジトリのライセンス                                                          |
+| `language`  | リポジトリの主要言語。例: `Rust`                                                 |
+| `topic`     | リポジトリのトピック。例: `async`                                                |
+| `license`   | リポジトリのライセンス。例: `MIT`                                                 |
 | `min_stars` | リポジトリのスター数の下限                                                        |
 | `max_stars` | リポジトリのスター数の上限                                                        |
 | `archived`  | アーカイブ済みリポジトリを含めるか除外するか                                               |
 | `fork`      | フォークを含めるか除外するか                                                       |
 
 繰り返し指定可能なフィルターは、`GET` では `types=issue&types=pull_request` のようにクエリパラメータを繰り返す形式、または `types=issue,pull_request` のように1つのカンマ区切り値として指定する形式のいずれかを使用できます。`POST` では、JSON ボディで配列を渡します。
+
+`language`、`topic`、`license`、`min_stars`、`max_stars`、`archived`、`fork` フィルターは GitHub リポジトリを説明します。これらは `repos` や `sources` のようにインデックスの対象範囲を絞り込みません。指定する前に、[リポジトリフィルターが検索範囲を絞り込む仕組み](#how-the-repository-filters-scope-a-search)を確認してください。
 
 <div id="how-repos-and-sources-scope-a-search">
   ### `repos` と `sources` による検索範囲の指定
@@ -208,6 +210,36 @@ ID が有効かどうかを確認するには、その ID を指定し、レス�
 
 `repos` も同様に返され、`indexed` と、タイプ別の `issue`、`pullRequest`、`readme` の内訳を含む `repos` 配列として返されます。
 
+<div id="how-the-repository-filters-scope-a-search">
+  ### リポジトリフィルターが検索範囲に与える影響
+</div>
+
+7 つのリポジトリフィルター (`language`、`topic`、`license`、`min_stars`、`max_stars`、`archived`、`fork`) は、GitHub リポジトリの属性を指定します。インデックス内のドキュメントページの多くは、リポジトリに紐付かないクロール済みの Web サイトから取得されています。そのようなページは、リポジトリの属性では対象に含めることも除外することもできません。
+
+そのため、これらのフィルターのいずれかを指定し、`sources` スコープを指定しないリクエストでは、`doc` 結果は返されません。レスポンスには GitHub のエビデンスのみが含まれ、対象となるのは `issue`、`pull_request`、`readme` タイプです。インデックスのドキュメント部分は実行されないため、`coverage` マップでは `doc` が `unavailable` と報告されます。これは仕様であり、インデックスの不具合ではありません。
+
+ドキュメント結果を取得するには、リポジトリフィルターを外してください。`sources` でドキュメント部分の範囲を指定し、`coverage` を確認して `doc` タイプが応答したことを確認することもできます。
+
+<CodeGroup>
+  ```bash cURL
+  # 開始時に API キーは不要です。より高いレート制限を利用するには、-H "Authorization: Bearer $FIRECRAWL_API_KEY" を追加してください:
+  curl -s "https://api.firecrawl.dev/v2/search/developer?query=how%20do%20I%20configure%20retries&k=10&language=Rust&license=MIT"
+  ```
+
+  ```bash cURL (POST)
+  curl -X POST https://api.firecrawl.dev/v2/search/developer \
+    -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "query": "how do I configure retries",
+      "k": 10,
+      "types": ["issue", "pull_request"],
+      "language": "Rust",
+      "license": "MIT"
+    }'
+  ```
+</CodeGroup>
+
 <div id="response">
   ### レスポンス
 </div>
@@ -242,10 +274,10 @@ ID が有効かどうかを確認するには、その ID を指定し、レス�
 * `type` は、`doc`、`issue`、`pull_request`、`readme` のいずれかです
 * `title` は任意であり、ソースページに使用可能なタイトルがない `doc` 結果では存在しないことがよくあります。フィールドが存在すると想定せず、代わりに `url` を使用してください
 * `passages` には一致した本文箇所が Markdown 形式で格納されるため、表やコードブロックも保持されます
-* `coverage` は結果タイプごとのインデックスの健全性を示します。値は `ok`、`degraded`、`unavailable`、`skipped` のいずれかです
+* `coverage` は結果タイプごとの結果を示します。値は `ok`、`degraded`、`unavailable`、`skipped` のいずれかです
 * `reranked` は、ランク付けされたリストが再ランキング処理を経たかどうかを示します
 
-想定していた結果タイプが見つからない場合は、`coverage` を確認してください。status が `degraded` または `unavailable` の場合、その欠落は query ではなくインデックスに起因します。
+想定していた結果タイプが見つからない場合は、`coverage` を確認してください。`skipped` は、`types` の値でそのタイプが要求されなかったことを意味します。status が `degraded` または `unavailable` の場合、その欠落は query ではなくインデックスまたはフィルターに起因します。リポジトリフィルターもそのような原因の一つであり、[リポジトリフィルターが検索範囲をどのように絞り込むか](#how-the-repository-filters-scope-a-search)で説明しています。
 
 <div id="use-it-from-mcp">
   ## MCP から使用する
