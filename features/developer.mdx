@@ -151,20 +151,22 @@ All filters are optional.
 
 | Filter | Meaning |
 | --- | --- |
-| `k` | Number of ranked results to return. Defaults to 20, maximum 100 |
+| `k` | Number of ranked results to return. Defaults to 10, maximum 100 |
 | `types` | Result kinds to search. Any of `doc`, `issue`, `pull_request`, `readme`. Defaults to all four |
 | `repos` | Repository slugs to scope to, such as `firecrawl/firecrawl` |
 | `sources` | Documentation source ids to scope to, at most 20. See below |
 | `passages` | Matched passages to return per result. Defaults to 1, maximum 5 |
-| `language` | Repository language |
-| `topic` | Repository topic |
-| `license` | Repository license |
+| `language` | Repository primary language, such as `Rust` |
+| `topic` | Repository topic, such as `async` |
+| `license` | Repository license, such as `MIT` |
 | `min_stars` | Lower bound on repository stars |
 | `max_stars` | Upper bound on repository stars |
 | `archived` | Include or exclude archived repositories |
 | `fork` | Include or exclude forks |
 
 Repeatable filters accept either form on `GET`: a repeated query parameter such as `types=issue&types=pull_request`, or one comma separated value such as `types=issue,pull_request`. On `POST`, pass an array in the JSON body.
+
+The `language`, `topic`, `license`, `min_stars`, `max_stars`, `archived`, and `fork` filters describe a GitHub repository. They do not scope the index the way `repos` and `sources` do. Read [how the repository filters scope a search](#how-the-repository-filters-scope-a-search) before you send one.
 
 ### How `repos` and `sources` scope a search
 
@@ -200,6 +202,36 @@ To confirm an id resolves, pass it and read the `sources` array the response add
 
 `repos` echoes back the same way, as a `repos` array reporting `indexed` plus a per type breakdown of `issue`, `pullRequest`, and `readme`.
 
+### How the repository filters scope a search
+
+The seven repository filters — `language`, `topic`, `license`, `min_stars`, `max_stars`, `archived`, and `fork` — describe a GitHub repository. Most documentation pages in the index come from a crawled website with no repository behind it. No repository fact can admit or exclude such a page.
+
+A request that sends one of these filters and no `sources` scope therefore gets no `doc` results. Its response holds GitHub evidence only: the `issue`, `pull_request`, and `readme` types. The `coverage` map reports `doc` as `unavailable`, because the documentation half of the index never ran. This is the design, not an index fault.
+
+To keep documentation results, drop the repository filters. You can also scope the documentation half with `sources`, then read `coverage` to confirm that the `doc` type answered.
+
+<CodeGroup>
+
+```bash cURL
+# No API key needed to get started; add -H "Authorization: Bearer $FIRECRAWL_API_KEY" for higher rate limits:
+curl -s "https://api.firecrawl.dev/v2/search/developer?query=how%20do%20I%20configure%20retries&k=10&language=Rust&license=MIT"
+```
+
+```bash cURL (POST)
+curl -X POST https://api.firecrawl.dev/v2/search/developer \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "how do I configure retries",
+    "k": 10,
+    "types": ["issue", "pull_request"],
+    "language": "Rust",
+    "license": "MIT"
+  }'
+```
+
+</CodeGroup>
+
 ### Response
 
 ```json
@@ -232,10 +264,10 @@ To confirm an id resolves, pass it and read the `sources` array the response add
 - `type` is one of `doc`, `issue`, `pull_request`, or `readme`
 - `title` is optional and is frequently absent on `doc` results, where the source page carries no usable title. Fall back to `url` rather than assuming the field is present
 - `passages` holds the matched passages in markdown, so tables and code blocks survive
-- `coverage` reports index health per result type, one of `ok`, `degraded`, `unavailable`, or `skipped`
+- `coverage` reports the outcome for each result type, one of `ok`, `degraded`, `unavailable`, or `skipped`
 - `reranked` reports whether the ranked list went through the reranking stage
 
-Check `coverage` when a result type you expected is missing. A `degraded` or `unavailable` status means the gap came from the index rather than from the query.
+Check `coverage` when a result type you expected is missing. `skipped` means your `types` value did not ask for that type. A `degraded` or `unavailable` status means the gap came from the index or from a filter, not from the query. A repository filter is one such cause, as [how the repository filters scope a search](#how-the-repository-filters-scope-a-search) describes.
 
 ## Use it from MCP
 
