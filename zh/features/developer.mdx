@@ -155,20 +155,22 @@ Firecrawl Developer 是专为编程代理打造的索引。它涵盖 GitHub issu
 
 | 筛选条件        | 含义                                                             |
 | ----------- | -------------------------------------------------------------- |
-| `k`         | 返回的排序结果数量。默认值为 20，最大值为 100                                     |
+| `k`         | 返回的排序结果数量。默认值为 10，最大值为 100                                     |
 | `types`     | 要搜索的结果类型。可选值为 `doc`、`issue`、`pull_request`、`readme`。默认包含全部四种类型 |
 | `repos`     | 限定范围的仓库 slug，例如 `firecrawl/firecrawl`                          |
 | `sources`   | 限定范围的文档 source id，最多 20 个。请参见下文                                |
 | `passages`  | 每个结果返回的匹配段落数。默认值为 1，最大值为 5                                     |
-| `language`  | 仓库语言                                                           |
-| `topic`     | 仓库主题                                                           |
-| `license`   | 仓库许可证                                                          |
+| `language`  | 仓库的主要语言，例如 `Rust`                                              |
+| `topic`     | 仓库主题，例如 `async`                                                |
+| `license`   | 仓库许可证，例如 `MIT`                                                 |
 | `min_stars` | 仓库星标数下限                                                        |
 | `max_stars` | 仓库星标数上限                                                        |
 | `archived`  | 包含或排除已归档的仓库                                                    |
 | `fork`      | 包含或排除分叉仓库                                                      |
 
 可重复的筛选条件在 `GET` 请求中支持以下任一形式：重复的查询参数，例如 `types=issue&types=pull_request`；或单个逗号分隔的值，例如 `types=issue,pull_request`。在 `POST` 请求中，请在 JSON 请求正文中传入数组。
+
+`language`、`topic`、`license`、`min_stars`、`max_stars`、`archived` 和 `fork` 筛选条件描述 GitHub 仓库。它们不会像 `repos` 和 `sources` 那样限定索引范围。在发送这些筛选条件前，请阅读[仓库筛选条件如何限定搜索范围](#how-the-repository-filters-scope-a-search)。
 
 <div id="how-repos-and-sources-scope-a-search">
   ### `repos` 和 `sources` 如何限定搜索范围
@@ -208,6 +210,36 @@ Firecrawl Developer 是专为编程代理打造的索引。它涵盖 GitHub issu
 
 `repos` 也会以相同方式返回，作为一个 `repos` 数组，包含 `indexed` 以及按类型细分的 `issue`、`pullRequest` 和 `readme`。
 
+<div id="how-the-repository-filters-scope-a-search">
+  ### 仓库筛选条件如何限定搜索范围
+</div>
+
+七个仓库筛选条件——`language`、`topic`、`license`、`min_stars`、`max_stars`、`archived` 和 `fork`——用于描述 GitHub 仓库。索引中的大多数文档页面来自已爬取的网站，并不对应任何仓库。任何仓库属性都无法将这类页面纳入或排除。
+
+因此，请求中使用了其中任一筛选条件但未指定 `sources` 范围时，不会返回 `doc` 结果。响应中只包含 GitHub 证据：`issue`、`pull_request` 和 `readme` 类型。由于索引中的文档部分不会运行，`coverage` 映射会将 `doc` 标记为 `unavailable`。这是预期设计，并非索引故障。
+
+要保留文档结果，请移除仓库筛选条件。你也可以使用 `sources` 限定文档部分的范围，然后查看 `coverage`，确认 `doc` 类型是否返回答案。
+
+<CodeGroup>
+  ```bash cURL
+  # 开始使用无需 API 密钥；如需更高的限流，请添加 -H "Authorization: Bearer $FIRECRAWL_API_KEY"：
+  curl -s "https://api.firecrawl.dev/v2/search/developer?query=how%20do%20I%20configure%20retries&k=10&language=Rust&license=MIT"
+  ```
+
+  ```bash cURL (POST)
+  curl -X POST https://api.firecrawl.dev/v2/search/developer \
+    -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "query": "how do I configure retries",
+      "k": 10,
+      "types": ["issue", "pull_request"],
+      "language": "Rust",
+      "license": "MIT"
+    }'
+  ```
+</CodeGroup>
+
 <div id="response">
   ### 响应
 </div>
@@ -242,10 +274,10 @@ Firecrawl Developer 是专为编程代理打造的索引。它涵盖 GitHub issu
 * `type` 为 `doc`、`issue`、`pull_request` 或 `readme` 之一
 * `title` 为可选字段，在 `doc` 结果中经常缺失，因为源页面没有可用标题。应回退到 `url`，而不要假设该字段存在
 * `passages` 包含 Markdown 格式的匹配段落，因此表格和代码块能够保留
-* `coverage` 按结果类型报告索引健康状况，取值为 `ok`、`degraded`、`unavailable` 或 `skipped`
+* `coverage` 按结果类型报告处理结果，取值为 `ok`、`degraded`、`unavailable` 或 `skipped`
 * `reranked` 表示排序后的列表是否经过重排序阶段
 
-如果缺少预期的结果类型，请检查 `coverage`。`degraded` 或 `unavailable` 状态表示缺失是由索引造成的，而非 query。
+如果缺少预期的结果类型，请检查 `coverage`。`skipped` 表示你的 `types` 值未请求该类型。`degraded` 或 `unavailable` 状态表示缺失是由索引或筛选条件造成的，而非 query。仓库筛选条件便是其中一种原因，详见[仓库筛选条件如何限定搜索范围](#how-the-repository-filters-scope-a-search)。
 
 <div id="use-it-from-mcp">
   ## 通过 MCP 使用
