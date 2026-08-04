@@ -155,20 +155,22 @@ Todos os filtros são opcionais.
 
 | Filtro      | Significado                                                                                        |
 | ----------- | -------------------------------------------------------------------------------------------------- |
-| `k`         | Número de resultados ranqueados a retornar. O padrão é 20, com máximo de 100                       |
+| `k`         | Número de resultados ranqueados a retornar. O padrão é 10, com máximo de 100                       |
 | `types`     | Tipos de resultado a buscar: `doc`, `issue`, `pull_request` ou `readme`. O padrão inclui os quatro |
 | `repos`     | Slugs dos repositórios aos quais restringir a busca, como `firecrawl/firecrawl`                    |
 | `sources`   | IDs das fontes de documentação às quais restringir a busca, no máximo 20. Veja abaixo              |
 | `passages`  | Trechos correspondentes a retornar por resultado. O padrão é 1, com máximo de 5                    |
-| `language`  | Linguagem do repositório                                                                           |
-| `topic`     | Tópico do repositório                                                                              |
-| `license`   | Licença do repositório                                                                             |
+| `language`  | Linguagem principal do repositório, como `Rust`                                                    |
+| `topic`     | Tópico do repositório, como `async`                                                                |
+| `license`   | Licença do repositório, como `MIT`                                                                 |
 | `min_stars` | Limite inferior de estrelas do repositório                                                         |
 | `max_stars` | Limite superior de estrelas do repositório                                                         |
 | `archived`  | Incluir ou excluir repositórios arquivados                                                         |
 | `fork`      | Incluir ou excluir forks                                                                           |
 
 Filtros repetíveis aceitam qualquer uma das formas em `GET`: um parâmetro de query repetido, como `types=issue&types=pull_request`, ou um único valor separado por vírgulas, como `types=issue,pull_request`. Em `POST`, passe um array no corpo JSON.
+
+Os filtros `language`, `topic`, `license`, `min_stars`, `max_stars`, `archived` e `fork` descrevem um repositório do GitHub. Eles não restringem o índice da mesma forma que `repos` e `sources`. Leia [como os filtros de repositório restringem uma busca](#how-the-repository-filters-scope-a-search) antes de enviar um.
 
 <div id="how-repos-and-sources-scope-a-search">
   ### Como `repos` e `sources` restringem uma busca
@@ -208,6 +210,36 @@ Para confirmar que um ID é reconhecido, informe-o e consulte o array `sources` 
 
 `repos` é retornado da mesma forma, como um array `repos` que informa `indexed` e uma divisão por tipo entre `issue`, `pullRequest` e `readme`.
 
+<div id="how-the-repository-filters-scope-a-search">
+  ### Como os filtros de repositório restringem uma busca
+</div>
+
+Os sete filtros de repositório — `language`, `topic`, `license`, `min_stars`, `max_stars`, `archived` e `fork` — descrevem um repositório do GitHub. A maioria das páginas de documentação no índice vem de um site rastreado sem um repositório associado. Nenhuma característica de repositório pode incluir ou excluir uma página desse tipo.
+
+Portanto, uma solicitação que envia um desses filtros sem restringir com `sources` não retorna resultados do tipo `doc`. A resposta contém apenas evidências do GitHub: os tipos `issue`, `pull_request` e `readme`. O mapa `coverage` informa `doc` como `unavailable`, porque a parte da documentação do índice não foi consultada. Isso é intencional, não uma falha do índice.
+
+Para manter os resultados de documentação, remova os filtros de repositório. Você também pode restringir a parte da documentação com `sources` e, em seguida, verificar `coverage` para confirmar que o tipo `doc` retornou resultados.
+
+<CodeGroup>
+  ```bash cURL
+  # Nenhuma chave de API é necessária para começar; adicione -H "Authorization: Bearer $FIRECRAWL_API_KEY" para limites de taxa mais altos:
+  curl -s "https://api.firecrawl.dev/v2/search/developer?query=how%20do%20I%20configure%20retries&k=10&language=Rust&license=MIT"
+  ```
+
+  ```bash cURL (POST)
+  curl -X POST https://api.firecrawl.dev/v2/search/developer \
+    -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "query": "how do I configure retries",
+      "k": 10,
+      "types": ["issue", "pull_request"],
+      "language": "Rust",
+      "license": "MIT"
+    }'
+  ```
+</CodeGroup>
+
 <div id="response">
   ### Resposta
 </div>
@@ -242,10 +274,10 @@ Para confirmar que um ID é reconhecido, informe-o e consulte o array `sources` 
 * `type` pode ser `doc`, `issue`, `pull_request` ou `readme`
 * `title` é opcional e frequentemente está ausente em resultados `doc`, nos quais a página de origem não tem um título utilizável. Use `url` como alternativa em vez de presumir que o campo está presente
 * `passages` contém os trechos correspondentes em markdown, preservando tabelas e blocos de código
-* `coverage` informa a integridade do índice para cada tipo de resultado: `ok`, `degraded`, `unavailable` ou `skipped`
+* `coverage` informa o resultado para cada tipo de resultado: `ok`, `degraded`, `unavailable` ou `skipped`
 * `reranked` informa se a lista ranqueada passou pela etapa de reranqueamento
 
-Verifique `coverage` quando um tipo de resultado esperado estiver ausente. Um status `degraded` ou `unavailable` indica que a lacuna se deve ao índice, e não à query.
+Verifique `coverage` quando um tipo de resultado esperado estiver ausente. `skipped` significa que seu valor de `types` não solicitou esse tipo. Um status `degraded` ou `unavailable` indica que a lacuna se deve ao índice ou a um filtro, e não à query. Um filtro de repositório é uma dessas causas, conforme descreve [como os filtros de repositório restringem uma busca](#how-the-repository-filters-scope-a-search).
 
 <div id="use-it-from-mcp">
   ## Use pelo MCP

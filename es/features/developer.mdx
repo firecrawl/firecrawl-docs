@@ -155,20 +155,22 @@ Todos los filtros son opcionales.
 
 | Filtro      | Significado                                                                                                                     |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `k`         | Número de resultados ordenados que se devolverán. El valor predeterminado es 20; el máximo es 100                               |
+| `k`         | Número de resultados ordenados que se devolverán. El valor predeterminado es 10; el máximo es 100                               |
 | `types`     | Tipos de resultados en los que buscar: `doc`, `issue`, `pull_request` o `readme`. De forma predeterminada, se buscan los cuatro |
-| `repos`     | Slugs de repositorios a los que limitar la búsqueda, como `firecrawl/firecrawl`                                                 |
-| `sources`   | IDs de fuentes de documentación a los que limitar la búsqueda; máximo 20. Consulta la sección siguiente                         |
+| `repos`     | Slugs de repositorios a los que acotar la búsqueda, como `firecrawl/firecrawl`                                                 |
+| `sources`   | IDs de fuentes de documentación a los que acotar la búsqueda; máximo 20. Consulta la sección siguiente                         |
 | `passages`  | Pasajes coincidentes que se devolverán por resultado. El valor predeterminado es 1; el máximo es 5                              |
-| `language`  | Lenguaje del repositorio                                                                                                        |
-| `topic`     | Tema del repositorio                                                                                                            |
-| `license`   | Licencia del repositorio                                                                                                        |
+| `language`  | Lenguaje principal del repositorio, como `Rust`                                                                                 |
+| `topic`     | Tema del repositorio, como `async`                                                                                              |
+| `license`   | Licencia del repositorio, como `MIT`                                                                                            |
 | `min_stars` | Límite inferior de estrellas del repositorio                                                                                    |
 | `max_stars` | Límite superior de estrellas del repositorio                                                                                    |
 | `archived`  | Incluir o excluir repositorios archivados                                                                                       |
 | `fork`      | Incluir o excluir bifurcaciones                                                                                                 |
 
 Los filtros repetibles aceptan cualquiera de los dos formatos en `GET`: un parámetro de consulta repetido, como `types=issue&types=pull_request`, o un único valor separado por comas, como `types=issue,pull_request`. En `POST`, pasa un array en el cuerpo JSON.
+
+Los filtros `language`, `topic`, `license`, `min_stars`, `max_stars`, `archived` y `fork` describen un repositorio de GitHub. No acotan el índice como lo hacen `repos` y `sources`. Lee [cómo los filtros de repositorio acotan una búsqueda](#how-the-repository-filters-scope-a-search) antes de enviar alguno.
 
 <div id="how-repos-and-sources-scope-a-search">
   ### Cómo `repos` y `sources` acotan una búsqueda
@@ -208,6 +210,36 @@ Para confirmar que un ID se resuelve, envíalo y consulta el array `sources` que
 
 `repos` se devuelve de la misma forma, como un array `repos` que indica `indexed` y un desglose por tipo de `issue`, `pullRequest` y `readme`.
 
+<div id="how-the-repository-filters-scope-a-search">
+  ### Cómo los filtros de repositorio acotan una búsqueda
+</div>
+
+Los siete filtros de repositorio — `language`, `topic`, `license`, `min_stars`, `max_stars`, `archived` y `fork` — describen un repositorio de GitHub. La mayoría de las páginas de documentación del índice proceden de un sitio web rastreado sin un repositorio asociado. Ningún dato del repositorio puede incluir ni excluir una página de este tipo.
+
+Por lo tanto, una solicitud que envía uno de estos filtros sin un ámbito de `sources` no obtiene resultados de tipo `doc`. Su respuesta solo contiene evidencia de GitHub: los tipos `issue`, `pull_request` y `readme`. El mapa de `coverage` muestra `doc` como `unavailable`, porque la parte de documentación del índice no se ejecutó. Esto es intencional, no un fallo del índice.
+
+Para conservar los resultados de documentación, elimina los filtros de repositorio. También puedes acotar la parte de documentación con `sources` y consultar `coverage` para confirmar que el tipo `doc` respondió.
+
+<CodeGroup>
+  ```bash cURL
+  # No necesitas una clave de API para empezar; añade -H "Authorization: Bearer $FIRECRAWL_API_KEY" para obtener límites de tasa más altos:
+  curl -s "https://api.firecrawl.dev/v2/search/developer?query=how%20do%20I%20configure%20retries&k=10&language=Rust&license=MIT"
+  ```
+
+  ```bash cURL (POST)
+  curl -X POST https://api.firecrawl.dev/v2/search/developer \
+    -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "query": "how do I configure retries",
+      "k": 10,
+      "types": ["issue", "pull_request"],
+      "language": "Rust",
+      "license": "MIT"
+    }'
+  ```
+</CodeGroup>
+
 <div id="response">
   ### Respuesta
 </div>
@@ -242,10 +274,10 @@ Para confirmar que un ID se resuelve, envíalo y consulta el array `sources` que
 * `type` puede ser `doc`, `issue`, `pull_request` o `readme`
 * `title` es opcional y suele estar ausente en los resultados `doc`, donde la página de origen no tiene un título utilizable. Usa `url` como alternativa en lugar de asumir que el campo está presente
 * `passages` contiene los pasajes coincidentes en Markdown para conservar las tablas y los bloques de código
-* `coverage` indica el estado del índice para cada tipo de resultado: `ok`, `degraded`, `unavailable` o `skipped`
+* `coverage` indica el resultado para cada tipo de resultado: `ok`, `degraded`, `unavailable` o `skipped`
 * `reranked` indica si la lista ordenada pasó por la fase de reordenamiento
 
-Comprueba `coverage` si falta un tipo de resultado que esperabas. Un estado `degraded` o `unavailable` significa que la ausencia se debe al índice y no a la query.
+Comprueba `coverage` si falta un tipo de resultado que esperabas. `skipped` significa que tu valor de `types` no solicitó ese tipo. Un estado `degraded` o `unavailable` significa que la ausencia se debe al índice o a un filtro, no a la query. Un filtro de repositorio es una de esas causas, como se describe en [cómo los filtros de repositorio acotan una búsqueda](#how-the-repository-filters-scope-a-search).
 
 <div id="use-it-from-mcp">
   ## Úsalo desde MCP
