@@ -62,7 +62,7 @@ if [ "$next_setup_section" != "## Set up with an API key" ]; then
   exit 1
 fi
 
-for retired_page in mcp-server/connect.mdx mcp-server/clients.mdx; do
+for retired_page in mcp-server/connect.mdx mcp-server/clients.mdx mcp-server/development.mdx; do
   if [ -e "$retired_page" ]; then
     echo "$retired_page must be consolidated into $main_page" >&2
     exit 1
@@ -70,6 +70,11 @@ for retired_page in mcp-server/connect.mdx mcp-server/clients.mdx; do
 done
 require docs.json '"source": "/mcp-server/connect"'
 require docs.json '"source": "/mcp-server/clients"'
+development_redirect_count="$(jq '[.redirects[] | select(.source == "/mcp-server/development" and .destination == "/mcp-server" and (.permanent // true) == true)] | length' docs.json)"
+if [ "$development_redirect_count" -ne 1 ]; then
+  echo "Expected one permanent /mcp-server/development redirect to /mcp-server" >&2
+  exit 1
+fi
 forbid docs.json '"mcp-server/connect"'
 forbid docs.json '"mcp-server/clients"'
 forbid docs.json '"mcp-server/development"'
@@ -77,7 +82,7 @@ forbid docs.json '"mcp-server/development"'
 # Keep the compact core MCP journey prominent in the main Documentation sidebar,
 # as well as contextualized under Build with AI.
 expected_mcp_pages='["mcp-server","mcp-server/tools","mcp-server/local"]'
-documentation_mcp_pages="$(jq -c '.navigation.languages[] | select(.language == "en") | .versions[0].tabs[] | select(.tab == "Documentation") | .groups[] | select(.group == "Get Started") | .pages[1] | select(.group == "MCP" and has("icon") | not) | .pages' docs.json)"
+documentation_mcp_pages="$(jq -c '.navigation.languages[] | select(.language == "en") | .versions[0].tabs[] | select(.tab == "Documentation") | .groups[] | select(.group == "Get Started") | .pages[1] | select(.group == "MCP" and (has("icon") | not)) | .pages' docs.json)"
 build_with_ai_mcp_pages="$(jq -c '.navigation.languages[] | select(.language == "en") | .versions[0].tabs[] | select(.tab == "Build with AI") | .groups[] | select(.group == "AI Tools") | .pages[] | select(type == "object" and .group == "MCP") | .pages' docs.json)"
 build_with_ai_mcp_icon_count="$(jq '[.navigation.languages[] | select(.language == "en") | .versions[0].tabs[] | select(.tab == "Build with AI") | .groups[] | select(.group == "AI Tools") | .pages[] | select(type == "object" and .group == "MCP" and has("icon"))] | length' docs.json)"
 if [ "$documentation_mcp_pages" != "$expected_mcp_pages" ] || [ "$build_with_ai_mcp_pages" != "$expected_mcp_pages" ] || [ "$build_with_ai_mcp_icon_count" -ne 0 ]; then
@@ -100,7 +105,13 @@ forbid "$ai_onboarding" "hosted MCP keyless free tier to search, scrape, and int
 # OAuth redirect guidance must remain compatible with the authorization-server policy.
 require "$oauth_guide" "Firecrawl accepts HTTPS redirect URIs and loopback redirect URIs"
 require "$oauth_guide" "Authorization: Bearer <FIRECRAWL_API_KEY>"
+require "$oauth_guide" "[Getting started with MCP](/mcp-server)"
+forbid "$oauth_guide" "](/mcp-server/connect)"
 forbid "$oauth_guide" "API-key-in-URL"
+
+# Onboarding must advertise only the client setup that is actually maintained.
+require "$ai_onboarding" "Windsurf users should follow the [Windsurf quickstart](/quickstarts/windsurf)."
+forbid "$ai_onboarding" "View installation instructions for Cursor, Claude Desktop, Windsurf, VS Code"
 
 # Only the scoped legacy fallback on the MCP setup page may emit a credential-bearing hosted MCP URL.
 # Keep the value in OAuth or an Authorization header/secret store instead.
