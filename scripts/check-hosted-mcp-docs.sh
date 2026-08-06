@@ -6,6 +6,7 @@ set -eu
 
 main_page="mcp-server.mdx"
 connect_page="mcp-server/connect.mdx"
+clients_page="mcp-server/clients.mdx"
 rate_limits="rate-limits.mdx"
 oauth_guide="developer-guides/mcp-setup-guides/oauth.mdx"
 ai_onboarding="ai-onboarding.mdx"
@@ -37,7 +38,12 @@ forbid "$main_page" "mcp-search"
 forbid "$main_page" "(/mcp-server/search-only)"
 
 # The MCP overview owns discovery; the connection guide owns the three hosted modes.
-require "$main_page" 'href="/mcp-server/connect"'
+require "$main_page" 'title="Connect via OAuth"'
+require "$main_page" 'title="Connect via API key"'
+require "$main_page" 'title="Try keyless MCP"'
+require "$connect_page" "## Connect via OAuth"
+require "$connect_page" "## Connect via API key"
+require "$connect_page" "## Try keyless MCP"
 require "$connect_page" "https://mcp.firecrawl.dev/v2/mcp-oauth"
 require "$connect_page" "Authorization: Bearer <FIRECRAWL_API_KEY>"
 require "$connect_page" "exactly **Search, Scrape, and Parse**"
@@ -51,6 +57,24 @@ fi
 require "$connect_page" "It is not the recommended setup for new integrations."
 require "$connect_page" "It does not work for the OAuth-only search resource."
 forbid "$connect_page" "/v2/mcp-search"
+
+# The primary docs navigation and client guide reflect the highest-volume journey.
+introduction_line="$(grep -n '^[[:space:]]*"introduction",' docs.json | head -n 1 | cut -d: -f1)"
+mcp_group_line="$(grep -n '^[[:space:]]*"group": "MCP",' docs.json | head -n 1 | cut -d: -f1)"
+cli_line="$(grep -n '^[[:space:]]*"sdks/cli",' docs.json | head -n 1 | cut -d: -f1)"
+if [ "$introduction_line" -ge "$mcp_group_line" ] || [ "$mcp_group_line" -ge "$cli_line" ]; then
+  echo "Primary navigation must order Introduction, MCP, then CLI" >&2
+  exit 1
+fi
+
+codex_line="$(grep -n '^## Codex$' "$clients_page" | cut -d: -f1)"
+claude_desktop_line="$(grep -n '^## Claude Desktop$' "$clients_page" | cut -d: -f1)"
+claude_code_line="$(grep -n '^## Claude Code$' "$clients_page" | cut -d: -f1)"
+cursor_line="$(grep -n '^## Cursor$' "$clients_page" | cut -d: -f1)"
+if [ "$codex_line" -ge "$claude_desktop_line" ] || [ "$claude_desktop_line" -ge "$claude_code_line" ] || [ "$claude_code_line" -ge "$cursor_line" ]; then
+  echo "Client setup must prioritize Codex, Claude Desktop, Claude Code, then Cursor" >&2
+  exit 1
+fi
 
 # Keyless is the fixed three-tool hosted surface, not the former four-tool list.
 require "$rate_limits" "exactly **Search, Scrape, and Parse** without an API key"
