@@ -1,0 +1,68 @@
+---
+title: "SIEM Audit Logging"
+description: "Stream a structured audit event for every scrape your team runs to your own SIEM, starting with Microsoft Sentinel. Delivered server-side."
+og:title: "SIEM Audit Logging | Firecrawl"
+og:description: "Stream a structured audit event for every scrape your team runs to your own SIEM, starting with Microsoft Sentinel. Delivered server-side."
+---
+
+SIEM Audit Logging streams a structured activity event to your organization's SIEM for every scrape Firecrawl performs on your behalf — whether it came from a direct scrape call, a crawl, a batch scrape, a search, an extract, or an agent run. Your security team gets a complete, queryable audit trail of what was fetched, by which API key, and with what outcome, inside the tooling they already use.
+
+Delivery is server-side and out-of-band: events are batched and pushed from Firecrawl's infrastructure, so nothing changes about your API requests and a slow or unavailable destination never delays a scrape.
+
+<Note>
+SIEM Audit Logging is an enterprise feature and is gated per organization. Contact your Firecrawl account team to have it enabled for your account.
+</Note>
+
+## Supported destinations
+
+The first supported destination is **Microsoft Sentinel** (Azure Monitor Logs). Events are delivered through the [Logs Ingestion API](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/logs-ingestion-api-overview): a Data Collection Endpoint (DCE) plus a Data Collection Rule (DCR) that maps the events into your Log Analytics workspace, authenticated with a Microsoft Entra application using client credentials.
+
+If you need a different destination, talk to your account team.
+
+## What gets logged
+
+One event per URL Firecrawl fetches on your behalf. The Data Collection Rule you create during setup maps events into your workspace normalized to the [ASIM web session schema](https://learn.microsoft.com/en-us/azure/sentinel/normalization-schema-web), so your existing Sentinel content — analytics rules, hunting queries, workbooks — works against the rows without Firecrawl-specific parsing.
+
+Each row captures:
+
+- **The fetch** — the target URL and domain, HTTP status, and start/end times.
+- **The outcome** — success, failure, blocked (a security policy refused the fetch), or cancelled. `EventSeverity` distinguishes a provider-confirmed threat from a fetch blocked by one of your own policy rules.
+- **Attribution** — the API key (ID and display name) that triggered the fetch, and the workflow it came from: scrape, crawl, batch scrape, search, extract, agent, or parse.
+- **Job grouping** — a request identifier shared by every fetch of one API request, so a whole crawl reconstructs as one job in your queries.
+- **Your correlation IDs** — metadata your systems attach to requests is echoed on the row, so events line up with your own ticket or session identifiers.
+
+When [Threat Protection](/features/threat-protection) is active, rows also carry the decision context: the rule that decided, the classifier consulted, the threat categories involved, and — for Zscaler-classified URLs — a security-alert flag. Only these normalized fields are exported; raw classifier responses never leave Firecrawl.
+
+## Setting it up
+
+You will create an Entra application, a DCE, a DCR with a custom table, and then connect Firecrawl to them. Team admins configure the connection from [Enterprise Controls → SIEM](https://www.firecrawl.dev/app/enterprise-controls?tab=siem-logging) in the dashboard — the page walks through each Azure step with copyable commands.
+
+In short:
+
+1. **Create an Entra application** with a client secret. Firecrawl authenticates with these credentials; grant the app only the **Monitoring Metrics Publisher** role on the DCR.
+2. **Create a DCE and a DCR** with a custom table for the events — the dashboard provides the table schema and the transform that normalizes events to ASIM. Note the DCE ingestion URL, the DCR immutable ID, and the stream name.
+3. **Enter the details in the dashboard**: tenant ID, client ID, client secret, DCE URL, DCR immutable ID, and stream name.
+4. **Save.** Firecrawl verifies the destination by delivering a test event and only enables streaming once the destination accepts it. You can send another test event at any time.
+
+The client secret is write-only: it is encrypted at rest, never shown again, and can be replaced at any time by entering a new one. Leaving the secret field blank on later saves keeps the stored secret.
+
+## Delivery semantics
+
+- **Batched per organization** — events are grouped and delivered in batches, typically within a few seconds of the scrape finishing.
+- **Retries with backoff** — transient destination failures are retried on a delay ladder. A destination outage does not lose the audit trail immediately, and delivery resumes when the destination recovers.
+- **Never in the request path** — delivery problems never slow down or fail your API requests. If the destination stays unavailable past the retry budget, affected events are dropped rather than blocking scrapes; delivery health is visible in the dashboard.
+- **Static egress** — delivery traffic originates from a dedicated static IP, so you can allowlist Firecrawl on network controls in front of your collection endpoint. Ask your account team for the address.
+
+## Error reference
+
+| Status | When |
+| --- | --- |
+| `403` | The SIEM configuration API is used on a team without the feature enabled. |
+| `400` | The configuration is saved without a client secret when none is stored yet. |
+| `200` with `delivered: false` | A test event was attempted and the destination rejected it; the response includes the destination's error. |
+
+## Notes
+
+- SIEM Audit Logging adds no credit charges.
+- Events describe request metadata and outcomes — scraped page *content* is never sent to your SIEM.
+- Teams with [Zero Data Retention](/features/scrape#zero-data-retention-zdr) can use SIEM Audit Logging; events are flagged with `zero_data_retention: true`.

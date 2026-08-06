@@ -1,0 +1,80 @@
+---
+title: "Registro de auditoría SIEM"
+description: "Envía un evento de auditoría estructurado a tu propio SIEM por cada scraping que realiza tu equipo, comenzando con Microsoft Sentinel. Entrega del lado del servidor."
+og:title: "Registro de auditoría SIEM | Firecrawl"
+og:description: "Envía un evento de auditoría estructurado a tu propio SIEM por cada scraping que realiza tu equipo, comenzando con Microsoft Sentinel. Entrega del lado del servidor."
+---
+
+El registro de auditoría SIEM envía un evento de actividad estructurado al SIEM de tu organización por cada scraping que Firecrawl realiza en tu nombre, ya sea mediante una llamada de scraping directa, un crawl, una extracción por lotes, una búsqueda, una extracción o una ejecución de agente. Tu equipo de seguridad obtiene un registro de auditoría completo y consultable de lo que se obtuvo, con qué clave de API y cuál fue el resultado, en las herramientas que ya utiliza.
+
+La entrega se realiza del lado del servidor y fuera de banda: los eventos se agrupan en lotes y se envían desde la infraestructura de Firecrawl, por lo que tus solicitudes de API no cambian y un destino lento o no disponible nunca retrasa un scraping.
+
+<Note>
+  El registro de auditoría SIEM es una función empresarial habilitada por organización. Contacta con el equipo de cuenta de Firecrawl para habilitarla en tu cuenta.
+</Note>
+
+<div id="supported-destinations">
+  ## Destinos compatibles
+</div>
+
+El primer destino compatible es **Microsoft Sentinel** (Azure Monitor Logs). Los eventos se envían mediante la [API de ingesta de registros](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/logs-ingestion-api-overview): un punto de conexión de recopilación de datos (DCE) y una regla de recopilación de datos (DCR) que asignan los eventos a tu espacio de trabajo de Log Analytics, autenticados mediante una aplicación de Microsoft Entra con credenciales de cliente.
+
+Si necesitas otro destino, ponte en contacto con tu equipo de cuenta.
+
+<div id="what-gets-logged">
+  ## Qué se registra
+</div>
+
+Un evento por cada URL que Firecrawl recupera en su nombre. La regla de recopilación de datos que crea durante la configuración asigna los eventos normalizados a su espacio de trabajo conforme al [esquema de sesiones web ASIM](https://learn.microsoft.com/en-us/azure/sentinel/normalization-schema-web), de modo que su contenido existente de Sentinel —reglas de análisis, consultas de búsqueda y libros— funciona con las filas sin necesidad de procesamiento específico de Firecrawl.
+
+Cada fila incluye:
+
+* **La recuperación** — la URL y el dominio de destino, el estado HTTP y las horas de inicio y finalización.
+* **El resultado** — éxito, error, bloqueado (una política de seguridad rechazó la recuperación) o cancelado. `EventSeverity` distingue entre una amenaza confirmada por el proveedor y una recuperación bloqueada por una de sus propias reglas de política.
+* **Atribución** — la clave de API (ID y nombre para mostrar) que activó la recuperación, y el flujo de trabajo del que procedía: scraping, crawl, extracción por lotes, búsqueda, extracción, agente o procesamiento.
+* **Agrupación de trabajos** — un identificador de solicitud compartido por cada recuperación de una misma solicitud de API, de modo que un crawl completo se reconstruye como un único trabajo en sus consultas.
+* **Sus ID de correlación** — los metadatos que sus sistemas adjuntan a las solicitudes se reflejan en la fila para que los eventos se correspondan con sus propios identificadores de tickets o sesiones.
+
+Cuando [Protección contra amenazas](/es/features/threat-protection) está activa, las filas también incluyen el contexto de la decisión: la regla que tomó la decisión, el clasificador consultado, las categorías de amenazas implicadas y —para las URL clasificadas por Zscaler— un indicador de alerta de seguridad. Solo se exportan estos campos normalizados; las respuestas sin procesar del clasificador nunca salen de Firecrawl.
+
+<div id="setting-it-up">
+  ## Configuración
+</div>
+
+Deberá crear una aplicación de Entra, un DCE y un DCR con una tabla personalizada, y luego conectar Firecrawl a ellos. Los administradores del equipo configuran la conexión desde [Controles empresariales → SIEM](https://www.firecrawl.dev/app/enterprise-controls?tab=siem-logging) en el panel de control; la página explica cada paso de Azure con comandos que se pueden copiar.
+
+En resumen:
+
+1. **Cree una aplicación de Entra** con un secreto de cliente. Firecrawl se autentica con estas credenciales; conceda a la aplicación únicamente el rol **Monitoring Metrics Publisher** en el DCR.
+2. **Cree un DCE y un DCR** con una tabla personalizada para los eventos; el panel de control proporciona el esquema de la tabla y la transformación que normaliza los eventos según ASIM. Anote la URL de ingesta del DCE, el ID inmutable del DCR y el nombre del flujo.
+3. **Introduzca los datos en el panel de control**: ID de inquilino, ID de cliente, secreto de cliente, URL del DCE, ID inmutable del DCR y nombre del flujo.
+4. **Guarde.** Firecrawl verifica el destino enviando un evento de prueba y solo habilita la transmisión cuando el destino lo acepta. Puede enviar otro evento de prueba en cualquier momento.
+
+El secreto de cliente es de solo escritura: se cifra en reposo, no vuelve a mostrarse nunca y puede sustituirse en cualquier momento introduciendo uno nuevo. Si deja vacío el campo del secreto en guardados posteriores, se conservará el secreto almacenado.
+
+<div id="delivery-semantics">
+  ## Semántica de entrega
+</div>
+
+* **Por lotes por organización** — los eventos se agrupan y se entregan en lotes, normalmente unos segundos después de que finalice el scraping.
+* **Reintentos con backoff** — los fallos transitorios del destino se reintentan con intervalos de espera crecientes. Una interrupción en el destino no implica la pérdida inmediata del registro de auditoría, y la entrega se reanuda cuando el destino se recupera.
+* **Nunca en la ruta de la solicitud** — los problemas de entrega nunca ralentizan ni hacen que fallen tus solicitudes de API. Si el destino sigue sin estar disponible una vez agotado el límite de reintentos, los eventos afectados se descartan en lugar de bloquear los scrapes; el estado de la entrega es visible en el panel de control.
+* **Egreso estático** — el tráfico de entrega procede de una IP estática dedicada, por lo que puedes incluir Firecrawl en la lista de permitido de los controles de red delante de tu endpoint de recopilación. Solicita la dirección a tu equipo de cuenta.
+
+<div id="error-reference">
+  ## Referencia de errores
+</div>
+
+| Estado                       | Cuándo                                                                                                        |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `403`                        | Se usa la API de configuración de SIEM en un equipo que no tiene la función habilitada.                       |
+| `400`                        | Se guarda la configuración sin un secreto de cliente cuando aún no hay ninguno almacenado.                    |
+| `200` con `delivered: false` | Se intentó enviar un evento de prueba, pero el destino lo rechazó; la respuesta incluye el error del destino. |
+
+<div id="notes">
+  ## Notas
+</div>
+
+* El registro de auditoría SIEM no genera cargos de créditos.
+* Los eventos describen los metadatos y resultados de las solicitudes; el *contenido* de las páginas extraídas nunca se envía a tu SIEM.
+* Los equipos con [retención de datos cero](/es/features/scrape#zero-data-retention-zdr) pueden usar el registro de auditoría SIEM; los eventos se marcan con `zero_data_retention: true`.

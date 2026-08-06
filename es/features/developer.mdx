@@ -1,0 +1,147 @@
+---
+title: "Índice para desarrolladores"
+description: "Busca issues, pull requests fusionadas, archivos README de repositorios y sitios de documentación seleccionados"
+og:title: "Índice para desarrolladores | Firecrawl"
+og:description: "Usa el índice para desarrolladores de Firecrawl para responder preguntas de programación a partir de issues, pull requests fusionadas, archivos README y documentación."
+icon: "code"
+---
+
+Firecrawl Developer es un índice diseñado para agentes de programación. Incluye issues, pull requests fusionadas, archivos README de repositorios de código públicos, junto con sitios de documentación seleccionados, para que un agente pueda responder preguntas sobre el comportamiento del código, una biblioteca o un framework, un contrato de API, un mensaje de error o un error conocido a partir de fuentes primarias, en lugar de una página web general.
+
+* Encuentra el issue o pull request en el que se informó y corrigió un error
+* Lee los pasajes de un README o una página de documentación que respondan una pregunta concreta
+* Rastrea un contrato de API hasta el pull request que lo modificó
+* Recupera la discusión relacionada con un mensaje de error
+
+<Note>
+  Para dar a tu agente acceso al Índice para desarrolladores, recomendamos encarecidamente usar nuestra [CLI](/es/sdks/cli) o [MCP](/es/mcp-server), junto con nuestra [**skill específica para desarrolladores**](https://github.com/firecrawl/skills/blob/main/skills/firecrawl-developer-index/SKILL.md), que puedes instalar con:
+
+  ```bash
+  npx skills add firecrawl/skills@firecrawl-developer-index
+  ```
+</Note>
+
+<div id="endpoints">
+  ## Endpoints
+</div>
+
+| Tarea                                                     | Endpoint                                                                         |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Buscar en el índice para desarrolladores                  | [`GET` o `POST /search/developer`](/es/api-reference/endpoint/developer-search)     |
+| Añadir resultados para desarrolladores a una búsqueda web | [`POST /search`](/es/api-reference/endpoint/search) con `categories: ["developer"]` |
+
+<div id="search-the-developer-index">
+  ## Busca en el índice para desarrolladores
+</div>
+
+Envía una pregunta en lenguaje natural y recibe resultados para desarrolladores ordenados por relevancia, junto con los pasajes coincidentes. Usa esta ruta cuando solo quieras fuentes para desarrolladores, con filtros disponibles por tipo de resultado, repositorio y fuente de documentación.
+
+Una búsqueda para desarrolladores cuesta 2 créditos por cada 10 resultados, redondeando hacia arriba (1–10 resultados = 2 créditos, 11–20 = 4 créditos, y así sucesivamente). No necesitas una clave de API para empezar; envía una para obtener límites de tasa más altos.
+
+<CodeGroup>
+  ```bash cURL
+  # No API key needed to get started; add -H "Authorization: Bearer $FIRECRAWL_API_KEY" for higher rate limits:
+  curl -s "https://api.firecrawl.dev/v2/search/developer?query=how%20do%20I%20configure%20retries&k=10"
+  ```
+
+  ```bash CLI
+  firecrawl developer "how do I configure retries" --limit 10
+  ```
+</CodeGroup>
+
+`POST` está disponible en la misma ruta y es más práctico cuando quieres pasar filtros de array como JSON:
+
+```bash cURL
+# No hace falta una clave de API para empezar; añade -H "Authorization: Bearer $FIRECRAWL_API_KEY" para obtener límites de tasa más altos:
+curl -X POST https://api.firecrawl.dev/v2/search/developer \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "how do I configure retries",
+    "k": 10,
+    "types": ["issue", "pull_request"]
+  }'
+```
+
+Cada resultado incluye un `id` estable, como `issue:owner/repo#123`, un `type` de `doc`, `issue`, `pull_request` o `readme`, una `url` y los `passages` coincidentes en Markdown, para conservar las tablas y los bloques de código. En los resultados `doc`, `title` suele estar ausente cuando la página de origen no tiene un título utilizable; en ese caso, use `url` como alternativa en lugar de asumir que el campo está presente.
+
+Además de los resultados, `coverage` informa del estado de cada tipo de resultado y `reranked` indica si la lista ordenada pasó por la fase de reordenación. Revise `coverage` cuando falte un tipo de resultado que esperaba: `skipped` significa que el valor de `types` no solicitó ese tipo, mientras que `degraded` o `unavailable` indican que la ausencia se debe al índice o a un filtro, no a la consulta.
+
+Los filtros opcionales acotan la búsqueda:
+
+* `k` establece cuántos resultados se devuelven; el valor predeterminado es 10, y `passages` indica cuántos pasajes coincidentes incluye cada resultado
+* `types` selecciona en cuáles de `doc`, `issue`, `pull_request` y `readme` buscar
+* `repos` acota la parte de repositorios del índice y `sources` la parte de documentación
+* `skills` establecido en `only` limita la búsqueda a archivos de skills de agente indexados
+* `language`, `topic`, `license`, `min_stars`, `max_stars`, `archived` y `fork` filtran por atributos del repositorio, como `language=Rust`, `topic=async` o `license=MIT`
+
+Estos siete filtros describen un repositorio de código, por lo que enviar uno sin acotar `sources` no devuelve resultados `doc` e informa de `doc` como `unavailable` en `coverage`. Lea [cómo los filtros de repositorio acotan una búsqueda](/es/api-reference/endpoint/developer-search#how-the-repository-filters-scope-a-search) antes de enviar uno.
+
+Consulte la [referencia de búsqueda para desarrolladores](/es/api-reference/endpoint/developer-search) para conocer el tipo y los límites de cada filtro, cómo `repos` y `sources` acotan una búsqueda y el esquema completo de respuesta.
+
+<Note>
+  Los SDK de Python y Node acceden al índice para desarrolladores mediante la categoría `developer` que se muestra a continuación. No exponen un método específico para este endpoint, así que llámelo mediante HTTP, a través de la [CLI](/es/sdks/cli) o de [MCP](/es/mcp-server).
+</Note>
+
+<div id="add-developer-results-to-a-web-search">
+  ## Añade resultados para desarrolladores a una búsqueda web
+</div>
+
+Pasa `developer` en el array `categories` de `/search` cuando ya estés llamando a `/search` y quieras ponderar los resultados para desarrolladores junto con los resultados web habituales en una sola llamada. La API devuelve resultados para desarrolladores en un grupo `developer` junto a `web`, y ambos SDK exponen ese grupo como `.developer`.
+
+No se necesita una clave de API para empezar: `/search` acepta solicitudes sin clave e incluye la categoría `developer`, sujeta al [límite de uso sin clave](/es/rate-limits#keyless-no-api-key). Envía una clave para obtener límites de tasa más altos.
+
+<CodeGroup>
+  ```bash cURL
+  # No se necesita una clave de API para empezar; añade -H "Authorization: Bearer $FIRECRAWL_API_KEY" para obtener límites de tasa más altos:
+  curl -X POST https://api.firecrawl.dev/v2/search \
+    -H "Content-Type: application/json" \
+    -d '{
+      "query": "how do I configure retries",
+      "categories": ["developer"],
+      "limit": 10
+    }'
+  ```
+
+  ```bash CLI
+  firecrawl search "how do I configure retries" --categories developer --limit 10
+  ```
+
+  ```python Python
+  from firecrawl import Firecrawl
+
+  firecrawl = Firecrawl(api_key="fc-YOUR-API-KEY")
+
+  result = firecrawl.search(
+      "how do I configure retries",
+      categories=["developer"],
+      limit=10,
+  )
+  for item in result.developer or []:
+      print(item.url, item.title)
+  ```
+
+  ```js Node
+  import { Firecrawl } from "firecrawl";
+
+  const firecrawl = new Firecrawl({
+    // No se necesita una clave de API para empezar; añade una para obtener límites de tasa más altos:
+    // apiKey: "fc-YOUR-API-KEY",
+  });
+
+  const result = await firecrawl.search("how do I configure retries", {
+    categories: ["developer"],
+    limit: 10,
+  });
+  for (const item of result.developer ?? []) {
+    console.log(item.url, item.title);
+  }
+  ```
+</CodeGroup>
+
+Los resultados para desarrolladores de este grupo incluyen `url`, `title`, `description` y `position`, con la misma estructura que un resultado web, además de `category: "developer"`. Los resultados web de la misma respuesta no tienen `category`, por lo que debes usar ese campo si fusionas ambos grupos. Los resultados se incluyen en su propio grupo en lugar de en `web`, por lo que los usuarios del SDK acceden a ellos con `result.developer`.
+
+Esta interfaz devuelve la estructura de resultado web, no la estructura de resultados para desarrolladores clasificados. Para los pasajes coincidentes y los filtros de índice, usa el [endpoint de búsqueda para desarrolladores](#search-the-developer-index).
+
+<Note>
+  El [MCP Server](/es/mcp-server) alojado expone ambas interfaces y ninguna realiza escrituras. Consulta [herramientas MCP](/es/mcp-server/tools) para `firecrawl_developer_search`, para obtener resultados para desarrolladores mediante `firecrawl_search` y para saber cuál de las dos interfaces de herramientas está disponible sin clave.
+</Note>

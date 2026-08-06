@@ -1,0 +1,147 @@
+---
+title: "开发者索引"
+description: "搜索 issue、已合并的 pull request、仓库 README 和精选文档站点"
+og:title: "开发者索引 | Firecrawl"
+og:description: "使用 Firecrawl 的开发者索引，基于 issue、已合并的 pull request、README 和文档回答编程问题。"
+icon: "code"
+---
+
+Firecrawl Developer 是专为编程代理打造的索引。它涵盖公共代码仓库中的 issue、已合并的 pull request 和 README，以及精选文档站点，让代理能够基于第一手资料回答有关代码行为、库或框架、API 契约、错误消息或已知 bug 的问题，而不是依赖普通网页。
+
+* 查找报告并修复某个 bug 的 issue 或 pull request
+* 阅读 README 或文档页面中能够回答某个具体问题的相关段落
+* 追溯 API 契约至修改它的 pull request
+* 找出错误消息背后的讨论
+
+<Note>
+  要让您的代理访问开发者索引，我们强烈建议将我们的 [CLI](/zh/sdks/cli) 或 [MCP](/zh/mcp-server) 与[**专用开发者技能**](https://github.com/firecrawl/skills/blob/main/skills/firecrawl-developer-index/SKILL.md)结合使用。您可以通过以下命令安装该技能：
+
+  ```bash
+  npx skills add firecrawl/skills@firecrawl-developer-index
+  ```
+</Note>
+
+<div id="endpoints">
+  ## 端点
+</div>
+
+| 任务            | 端点                                                                                  |
+| ------------- | ----------------------------------------------------------------------------------- |
+| 搜索开发者索引       | [`GET` 或 `POST /search/developer`](/zh/api-reference/endpoint/developer-search)        |
+| 在网页搜索中添加开发者结果 | 使用 [`POST /search`](/zh/api-reference/endpoint/search)，并设置 `categories: ["developer"]` |
+
+<div id="search-the-developer-index">
+  ## 搜索开发者索引
+</div>
+
+发送自然语言问题，即可获得按排名返回的开发者结果及匹配段落。当你只想搜索开发者来源时，可使用此路径，并可按结果类型、仓库和文档来源进行筛选。
+
+开发者搜索每 10 条结果消耗 2 个额度，向上取整 (1–10 条结果 = 2 个额度，11–20 条 = 4 个额度，以此类推) 。开始使用无需 API 密钥；提供 API 密钥可获得更高的限流。
+
+<CodeGroup>
+  ```bash cURL
+  # 开始使用无需 API 密钥；如需更高的限流，请添加 -H "Authorization: Bearer $FIRECRAWL_API_KEY"：
+  curl -s "https://api.firecrawl.dev/v2/search/developer?query=how%20do%20I%20configure%20retries&k=10"
+  ```
+
+  ```bash CLI
+  firecrawl developer "how do I configure retries" --limit 10
+  ```
+</CodeGroup>
+
+同一路径也支持 `POST`；当你需要以 JSON 传递数组筛选条件时，这种形式更方便：
+
+```bash cURL
+# 无需 API 密钥即可上手；如需更高的限流额度，请添加 -H "Authorization: Bearer $FIRECRAWL_API_KEY"：
+curl -X POST https://api.firecrawl.dev/v2/search/developer \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "how do I configure retries",
+    "k": 10,
+    "types": ["issue", "pull_request"]
+  }'
+```
+
+每个结果都包含稳定的 `id`，例如 `issue:owner/repo#123`，以及 `type` (`doc`、`issue`、`pull_request` 或 `readme`) 、`url` 和 Markdown 格式的匹配 `passages`，从而保留表格和代码块。`doc` 结果通常没有 `title`，因为源页面可能没有可用标题；因此应回退到 `url`，不要假定该字段一定存在。
+
+除结果外，`coverage` 会报告每种结果类型的状态，`reranked` 则表明排序列表是否经过重排序阶段。如果缺少预期的结果类型，请检查 `coverage`：`skipped` 表示 `types` 值未请求该类型，而 `degraded` 或 `unavailable` 表示缺失是由索引或筛选条件造成的，而非查询。
+
+可选筛选条件可缩小搜索范围：
+
+* `k` 设置返回结果数量，默认值为 10；`passages` 设置每个结果包含的匹配段落数量
+* `types` 选择要搜索的 `doc`、`issue`、`pull_request` 和 `readme` 类型
+* `repos` 限定索引中仓库部分的搜索范围，`sources` 限定文档部分的搜索范围
+* 将 `skills` 设为 `only` 可将搜索限制为已建立索引的代理技能文件
+* `language`、`topic`、`license`、`min_stars`、`max_stars`、`archived` 和 `fork` 按仓库属性筛选，例如 `language=Rust`、`topic=async` 或 `license=MIT`
+
+这七个筛选条件用于描述代码仓库。因此，在未限定 `sources` 范围的情况下发送其中任一筛选条件，不会返回 `doc` 结果，并会在 `coverage` 中将 `doc` 标记为 `unavailable`。发送前请阅读[仓库筛选条件如何限定搜索范围](/zh/api-reference/endpoint/developer-search#how-the-repository-filters-scope-a-search)。
+
+请参见[开发者搜索参考](/zh/api-reference/endpoint/developer-search)，了解各筛选条件的类型和取值范围、`repos` 和 `sources` 如何限定搜索范围，以及完整的响应 schema。
+
+<Note>
+  下方所示的 Python 和 Node SDKs 通过 `developer` 类别访问开发者索引。它们未提供此端点的专用方法，因此请通过 HTTP、[CLI](/zh/sdks/cli) 或 [MCP](/zh/mcp-server) 调用。
+</Note>
+
+<div id="add-developer-results-to-a-web-search">
+  ## 在网页搜索中添加开发者结果
+</div>
+
+如果您已在调用 `/search`，并希望在单次调用中同时权衡开发者结果和普通网页结果，请在 `/search` 的 `categories` 数组中传入 `developer`。API 会在 `web` 旁以 `developer` 分组返回这些结果，两个 SDK 也都将该分组暴露为 `.developer`。
+
+无需 API 密钥即可开始使用 — `/search` 接受免密钥请求，并包含 `developer` 类别，但受[免密钥额度](/zh/rate-limits#keyless-no-api-key)限制。如需更高的限流，请提供 API 密钥。
+
+<CodeGroup>
+  ```bash cURL
+  # 无需 API 密钥即可开始使用；如需更高的限流，请添加 -H "Authorization: Bearer $FIRECRAWL_API_KEY"：
+  curl -X POST https://api.firecrawl.dev/v2/search \
+    -H "Content-Type: application/json" \
+    -d '{
+      "query": "how do I configure retries",
+      "categories": ["developer"],
+      "limit": 10
+    }'
+  ```
+
+  ```bash CLI
+  firecrawl search "how do I configure retries" --categories developer --limit 10
+  ```
+
+  ```python Python
+  from firecrawl import Firecrawl
+
+  firecrawl = Firecrawl(api_key="fc-YOUR-API-KEY")
+
+  result = firecrawl.search(
+      "how do I configure retries",
+      categories=["developer"],
+      limit=10,
+  )
+  for item in result.developer or []:
+      print(item.url, item.title)
+  ```
+
+  ```js Node
+  import { Firecrawl } from "firecrawl";
+
+  const firecrawl = new Firecrawl({
+    // 无需 API 密钥即可开始使用；如需更高的限流，请添加：
+    // apiKey: "fc-YOUR-API-KEY",
+  });
+
+  const result = await firecrawl.search("how do I configure retries", {
+    categories: ["developer"],
+    limit: 10,
+  });
+  for (const item of result.developer ?? []) {
+    console.log(item.url, item.title);
+  }
+  ```
+</CodeGroup>
+
+该分组中的开发者结果包含 `url`、`title`、`description` 和 `position`，结构与网页结果相同，并额外包含 `category: "developer"`。同一响应中的网页结果不含 `category`，因此如果合并两个分组，可通过该字段进行区分。结果会单独分组，而不包含在 `web` 中，因此 SDK 用户应通过 `result.developer` 获取。
+
+此功能返回的是网页结果结构，而非经过排序的开发者结果结构。如需匹配段落和索引筛选条件，请使用[开发者搜索端点](#search-the-developer-index)。
+
+<Note>
+  托管的 [MCP server](/zh/mcp-server) 同时提供这两种功能，且两者均不会写入任何内容。请参见 [MCP tools](/zh/mcp-server/tools)，了解 `firecrawl_developer_search`、如何通过 `firecrawl_search` 获取开发者结果，以及两者中哪个可通过免密钥工具集使用。
+</Note>

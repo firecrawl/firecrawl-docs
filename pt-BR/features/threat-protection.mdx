@@ -17,12 +17,13 @@ A política é definida uma única vez no nível da organização e se aplica au
   ## Modos
 </div>
 
-A Proteção contra ameaças tem dois modos, definidos no nível da organização:
+A Proteção contra ameaças tem três modos, definidos no nível da organização:
 
 * **Desativado** (padrão) — nenhuma verificação é realizada.
 * **Normal** — as URLs são verificadas com base no [Google Web Risk](https://cloud.google.com/web-risk), que sinaliza páginas e sites associados a malware, engenharia social (phishing) e software indesejado. **+2 créditos por URL verificada.**
+* **Zscaler** — as URLs são verificadas no tenant do [Zscaler Internet Access](https://www.zscaler.com/products-and-solutions/zscaler-internet-access) (ZIA) da sua organização: as categorias de URL definidas pela Zscaler que você optar por bloquear, além das suas categorias de URL e listas de URLs personalizadas. Consulte o [modo Zscaler](#zscaler-mode) abaixo. **Sem taxas de verificação** — a classificação é feita no seu próprio tenant.
 
-As verificações foram projetadas para proteger seus dados: na grande maioria das requisições, a verificação é resolvida localmente com base em uma lista de ameaças sincronizada regularmente, então as URLs coletadas por scraping nunca são enviadas ao classificador, e nenhum veredito sobre o seu tráfego é armazenado pelo Firecrawl.
+As verificações foram projetadas para proteger seus dados. No modo Normal, a grande maioria das requisições é resolvida localmente com base em uma lista de ameaças sincronizada regularmente, então as URLs coletadas por scraping nunca são enviadas ao classificador. No modo Zscaler, a classificação de URLs ocorre no seu próprio tenant ZIA — o mesmo sistema que já aplica a política web da sua organização. Em todos os modos, nenhum veredito sobre o seu tráfego é armazenado pelo Firecrawl.
 
 <div id="policy-controls">
   ## Controles da política
@@ -33,10 +34,44 @@ Além do classificador, uma política pode incluir:
 * **Lista de bloqueio personalizada** — domínios exatos ou globs (por exemplo, `*.example.com`) que são sempre bloqueados, sem chamar o classificador.
 * **Lista de permissões personalizada** — domínios exatos ou globs que são sempre permitidos. A lista de permissões prevalece sobre todas as outras regras, então um domínio em que você confia nunca é bloqueado.
 * **TLDs bloqueados** — domínios de nível superior bloqueados diretamente (por exemplo, `zip`), com correspondência nos limites dos rótulos.
-* **Limite de pontuação de risco** — a pontuação normalizada (0–100) a partir da qual um veredito do classificador é tratado como bloqueio. Quanto menor, mais rigoroso. O padrão é `75`.
+* **Limite de pontuação de risco** — a pontuação normalizada (0–100) a partir da qual um veredito do classificador é tratado como bloqueio. Quanto menor, mais rigoroso. O padrão é `75`. Aplica-se ao modo Normal; o modo Zscaler bloqueia por categoria.
 * **Política de falha** — o que fazer quando o classificador não puder ser acessado: **bloquear** (`closed`, o padrão e recomendado para um controle de segurança) ou **permitir** (`open`).
 
 As regras de lista de bloqueio personalizada, lista de permissões e TLDs bloqueados são de nível de domínio — elas correspondem ao host da URL verificada; apenas o classificador opera em URLs completas. Os domínios personalizados que você adiciona à lista de bloqueio ou à lista de permissões são comparados usando a mesma normalização canônica de host do classificador, portanto codificações alternativas de um endereço (por exemplo, um IP em formato inteiro) não podem ser usadas para contornar uma entrada da lista.
+
+<div id="zscaler-mode">
+  ## Modo Zscaler
+</div>
+
+O modo Zscaler permite que organizações que já mantêm políticas de URL no ZIA as apliquem ao tráfego do Firecrawl, sem precisar manter uma taxonomia paralela. Dois mecanismos trabalham em conjunto:
+
+* **Classificação em linha** — as URLs são classificadas pela API URL Lookup do seu tenant em categorias definidas pela Zscaler, e URLs em categorias que você bloqueou são bloqueadas.
+* **Regras personalizadas sincronizadas** — suas categorias de URL personalizadas (listas de URLs e palavras-chave) e suas adições a categorias definidas pela Zscaler são sincronizadas do tenant de acordo com um agendamento e avaliadas diretamente pelo Firecrawl, pois a API de consulta do ZIA não retorna classificações personalizadas. Entradas removidas no ZIA desaparecem na próxima sincronização; a opção manual **Sincronizar agora** está disponível no painel.
+
+A proposta é **suas listas personalizadas mais as categorias Zscaler selecionadas** — não &quot;idêntico à sua política do ZIA&quot;. As regras do ZIA também podem depender de usuários, grupos, locais, horário e contexto da solicitação, que o Firecrawl não reproduz. As regras de palavras-chave em categorias personalizadas são avaliadas da melhor forma possível (correspondência sem diferenciação entre maiúsculas e minúsculas com a URL); entradas exatas em listas de URLs têm correspondência exata.
+
+<div id="connecting-your-tenant">
+  ### Conecte seu tenant
+</div>
+
+Administradores da equipe conectam o tenant pelo painel (veja abaixo) usando um [cliente OAuth do Zidentity](https://help.zscaler.com/oneapi/understanding-oneapi): ID do cliente, segredo do cliente e seu domínio personalizado do Zidentity. Use uma função de API com privilégios mínimos restrita a Categorias de URL. O botão **Testar conexão** verifica separadamente três itens — as credenciais, o acesso à taxonomia e o acesso à Consulta de URL — para identificar, durante a configuração, uma função que pode ler categorias, mas não classificar URLs, em vez de apenas no primeiro scraping. O segredo do cliente é somente para gravação e é criptografado em repouso; o suporte da Zscaler a dois segredos ativos permite rotacioná-los sem tempo de inatividade.
+
+Após conectar, escolha na taxonomia do próprio tenant as categorias a bloquear — categorias definidas pela Zscaler e categorias personalizadas aparecem no seletor.
+
+O tráfego de classificação para o tenant é originado de um IP estático dedicado para inclusão na allowlist; solicite o endereço à equipe responsável pela sua conta.
+
+<div id="capacity-and-behavior">
+  ### Capacidade e comportamento
+</div>
+
+A API URL Lookup do ZIA permite 1 solicitação por segundo e 400 solicitações por hora por tenant. O Firecrawl agrupa as consultas em lotes (de até 100 URLs por solicitação) e aplica esses limites a todo o tenant, proporcionando uma capacidade sustentada de classificação de cerca de 11 URLs por segundo. O throughput do seu scraping nunca é limitado: quando a demanda excede o orçamento ou o orçamento por hora se esgota, as solicitações afetadas são resolvidas imediatamente de acordo com sua política de falha, em vez de ficarem na fila indefinidamente.
+
+Duas diferenças em relação ao modo Normal no nível do endpoint:
+
+* **Os resultados de Map são avaliados apenas com base em regras locais** (suas listas e regras personalizadas sincronizadas), em vez de serem classificados em linha — um map pode retornar milhares de URLs, e classificá-las consumiria o orçamento por hora com links que talvez nunca sejam buscados. Cada URL ainda passa pela verificação completa quando seu scraping é iniciado.
+* **Os resultados de busca são classificados em linha**, e os resultados bloqueados são removidos, como no modo Normal; cada resultado único consome o orçamento de consultas por hora.
+
+Os vereditos nunca são armazenados em cache nem salvos (como em todos os modos), portanto, uma mudança de classificação no Zscaler é aplicada já na próxima solicitação, e mudanças em listas personalizadas são aplicadas na próxima sincronização.
 
 <div id="configuring-the-policy">
   ## Configurando a política
@@ -46,8 +81,9 @@ Os administradores da equipe configuram a Proteção contra Ameaças em [Control
 
 1. Abra **Controles empresariais → Proteção contra Ameaças**.
 2. Escolha um modo, defina o limite de pontuação de risco e adicione entradas à lista de bloqueio, à lista de permissões ou TLDs bloqueados.
-3. Escolha se deseja permitir substituições por requisição e defina a política em caso de falha.
-4. Salve. As mudanças entram em vigor imediatamente — a próxima requisição será avaliada de acordo com a nova política.
+3. Para o modo Zscaler: insira a conexão do tenant, execute o teste de conexão, escolha as categorias a bloquear e defina o intervalo de sincronização.
+4. Escolha se deseja permitir substituições por requisição e defina a política de falha.
+5. Salve. As mudanças entram em vigor imediatamente — a próxima requisição será avaliada de acordo com a nova política.
 
 Somente os administradores da equipe podem ver ou alterar a política. Todos os demais veem uma visualização somente leitura.
 
@@ -69,6 +105,8 @@ Todo endpoint que aceita URLs também aceita um objeto `threatProtection` opcion
 ```
 
 As substituições são mescladas à política da organização, campo por campo. Se a sua organização tiver **desativado as substituições por requisição**, qualquer requisição que inclua um objeto `threatProtection` será rejeitada com `403` — isso permite que um administrador garanta que a política da organização seja o nível mínimo para todas as requisições.
+
+Uma substituição poderá selecionar `"mode": "zscaler"` somente quando a organização tiver uma conexão Zscaler configurada; a própria conexão e a seleção de categorias negadas são definidas no nível da organização e não podem ser configuradas por requisição.
 
 Se a Proteção contra ameaças for **obrigatória** para a sua equipe, uma substituição ainda poderá reforçar a política, mas não poderá incluir `"mode": "off"` — uma requisição que tente fazer isso será rejeitada com `403`.
 
@@ -98,25 +136,26 @@ Se uma solicitação for redirecionada para uma URL diferente — incluindo um r
   ## Cobrança
 </div>
 
-Uma varredura custa **+2 créditos por URL verificada** no modo Normal, além do custo base da requisição. Alguns detalhes:
+No modo Normal, uma verificação custa **+2 créditos por URL verificada**, além do custo base da requisição. **O modo Zscaler não tem taxas de verificação**: a classificação é executada no seu próprio tenant ZIA, com suas credenciais e sua cota de API, portanto, os detalhes sobre taxas de verificação abaixo se aplicam apenas ao modo Normal. Alguns detalhes:
 
-* Decisões tomadas inteiramente com base na sua própria política (correspondências com lista de bloqueio, lista de permissões ou TLDs bloqueados) não acionam o classificador e **não** geram cobrança de taxa de varredura.
-* Uma requisição bloqueada ainda é cobrada pela varredura que gerou o veredito.
-* As varreduras são deduplicadas dentro de um único scraping: uma reverificação de redirecionamento que resolve para a mesma URL compartilha a varredura original, enquanto um redirecionamento que chega a uma URL diferente é uma segunda varredura.
-* **Rastreamentos e extrações em lote verificam cada página de forma independente.** Os vereditos nunca são reutilizados entre páginas — nada sobre o seu tráfego é armazenado (veja acima) — portanto, no modo Normal, espere **+2 créditos por página extraída**. Um link descoberto durante o rastreamento e bloqueado tem a varredura cobrada uma vez por rastreamento, não importa quantas páginas apontem para ele.
-* **Busca e mapeamento** verificam cada URL única no conjunto de resultados uma vez por requisição, então as taxas de varredura aumentam conforme o número de resultados verificados — o que pode exceder ligeiramente o número retornado quando os resultados são limitados ao seu `limit`.
+* Decisões tomadas inteiramente com base na sua própria política (correspondências com lista de bloqueio, lista de permissões ou TLDs bloqueados) não acionam o classificador e **não** geram cobrança de taxa de verificação.
+* Uma requisição bloqueada ainda é cobrada pela verificação que gerou o veredito.
+* As verificações são deduplicadas dentro de um único scraping: uma reverificação de redirecionamento que resolve para a mesma URL compartilha a verificação original, enquanto um redirecionamento que chega a uma URL diferente é uma segunda verificação.
+* **Rastreamentos e extrações em lote verificam cada página de forma independente.** Os vereditos nunca são reutilizados entre páginas — nada sobre o seu tráfego é armazenado (veja acima) — portanto, no modo Normal, espere **+2 créditos por página extraída**. Um link descoberto durante o rastreamento e bloqueado tem a verificação cobrada uma vez por rastreamento, não importa quantas páginas apontem para ele.
+* **Busca e mapeamento** verificam cada URL única no conjunto de resultados uma vez por requisição, então as taxas de verificação aumentam conforme o número de resultados verificados — o que pode exceder ligeiramente o número retornado quando os resultados são limitados ao seu `limit`.
 
 <div id="error-reference">
   ## Referência de erros
 </div>
 
-| Status | Quando                                                                                                                                                |
-| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `403`  | Uma requisição visa uma URL bloqueada pela política (`code: unsafe_domain_blocked`).                                                                  |
-| `403`  | Uma requisição inclui uma substituição de `threatProtection` enquanto as substituições estão desabilitadas para a organização.                        |
+| Status | Quando                                                                                                                                                    |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `403`  | Uma requisição visa uma URL bloqueada pela política (`code: unsafe_domain_blocked`).                                                                      |
+| `403`  | Uma requisição inclui uma substituição de `threatProtection` enquanto as substituições estão desabilitadas para a organização.                            |
 | `403`  | Uma substituição de `threatProtection` define `mode: "off"` enquanto a Proteção contra ameaças é obrigatória para a equipe.                               |
 | `403`  | A política da organização é atualizada com `mode: "off"` enquanto a Proteção contra ameaças é obrigatória para a equipe.                                  |
-| `403`  | As opções de Proteção contra ameaças são usadas em uma equipe sem o recurso habilitado.                                                               |
+| `403`  | As opções de Proteção contra ameaças são usadas em uma equipe sem o recurso habilitado.                                                                   |
+| `403`  | Uma substituição de `threatProtection` seleciona `mode: "zscaler"` enquanto a organização não tem uma conexão Zscaler configurada.                        |
 | `403`  | Um endpoint v0 descontinuado é chamado enquanto a Proteção contra ameaças é obrigatória para a equipe (v0 não oferece suporte à Proteção contra ameaças). |
 
 <div id="notes">
@@ -127,3 +166,4 @@ Uma varredura custa **+2 créditos por URL verificada** no modo Normal, além do
 * A lista de permissões sempre prevalece, então uma URL em um domínio explicitamente confiável nunca é bloqueada pelo classificador nem por uma regra de TLD.
 * O código de erro `unsafe_domain_blocked` é mantido estável por compatibilidade, embora as verificações ocorram no nível da URL.
 * Com a política de falha definida como `closed` (o padrão), uma indisponibilidade do classificador faz com que as solicitações afetadas sejam bloqueadas, em vez de serem permitidas silenciosamente.
+* Com o [SIEM Audit Logging](/pt-BR/features/siem) configurado, cada decisão fica visível na sua trilha de auditoria: os eventos incluem a regra que determinou a decisão, o classificador consultado, as categorias de ameaça e — para URLs classificadas pelo Zscaler — uma sinalização `security_alert` quando a URL recebeu uma classificação de alerta de segurança.
