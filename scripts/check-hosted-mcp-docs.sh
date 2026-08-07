@@ -4,11 +4,11 @@
 # verification remain a release gate after this source change ships.
 set -eu
 
-main_page="mcp-server.mdx"
+agent_page="mcp-server/agent-mcp.mdx"
+human_page="mcp-server/human-mcp.mdx"
 tools_page="mcp-server/tools.mdx"
 local_page="mcp-server/local.mdx"
 rate_limits="rate-limits.mdx"
-oauth_guide="developer-guides/mcp-setup-guides/oauth.mdx"
 ai_onboarding="ai-onboarding.mdx"
 
 require() {
@@ -34,66 +34,76 @@ if [ -e "mcp-server/search-only.mdx" ]; then
   echo "mcp-server/search-only.mdx must not be published as a general setup page" >&2
   exit 1
 fi
-forbid "$main_page" "mcp-search"
-forbid "$main_page" "(/mcp-server/search-only)"
 
-# The MCP page owns the complete hosted setup journey. Retired setup routes redirect here.
-require "$main_page" "## Setup Firecrawl MCP Server"
-require "$main_page" "## Set up with an API key"
-require "$main_page" "## Try without an API key"
-require "$main_page" "sidebarTitle: 'Getting started with MCP'"
-require "$main_page" "https://mcp.firecrawl.dev/v2/mcp-oauth"
-require "$main_page" "Authorization: Bearer <FIRECRAWL_API_KEY>"
-require "$main_page" "exactly **Search, Scrape, and Parse**"
-require "$main_page" "Legacy API-key URL support"
-require "$main_page" "https://mcp.firecrawl.dev/<FIRECRAWL_API_KEY>/v2/mcp"
-legacy_url_count="$(grep -Foc "https://mcp.firecrawl.dev/<FIRECRAWL_API_KEY>/v2/mcp" "$main_page")"
-if [ "$legacy_url_count" -ne 1 ]; then
-  echo "$main_page must contain the scoped legacy URL exactly once; found $legacy_url_count" >&2
+# Retired single-page MCP setup and OAuth guide must stay deleted.
+if [ -e "mcp-server.mdx" ]; then
+  echo "mcp-server.mdx must remain split into agent-mcp and human-mcp" >&2
   exit 1
 fi
-require "$main_page" "It is not the recommended setup for new integrations."
-require "$main_page" "It does not work for the OAuth-only search resource."
-forbid "$main_page" "/v2/mcp-search"
-
-next_setup_section="$(awk '/^## Setup Firecrawl MCP Server$/{found=1; next} found && /^## /{print; exit}' "$main_page")"
-if [ "$next_setup_section" != "## Set up with an API key" ]; then
-  echo "API-key setup must be the next section after the primary client setup" >&2
+if [ -e "developer-guides/mcp-setup-guides/oauth.mdx" ]; then
+  echo "developer-guides/mcp-setup-guides/oauth.mdx must remain folded into human-mcp" >&2
   exit 1
 fi
 
 for retired_page in mcp-server/connect.mdx mcp-server/clients.mdx mcp-server/development.mdx; do
   if [ -e "$retired_page" ]; then
-    echo "$retired_page must be consolidated into $main_page" >&2
+    echo "$retired_page must stay consolidated into the Agent/Human MCP pages" >&2
     exit 1
   fi
 done
+
+# Agent MCP owns keyless + API key on /v2/mcp.
+require "$agent_page" "sidebarTitle: 'Agent MCP'"
+require "$agent_page" "https://mcp.firecrawl.dev/v2/mcp"
+require "$agent_page" "Authorization: Bearer <FIRECRAWL_API_KEY>"
+require "$agent_page" "Keyless MCP is rate limited and exposes Search, Scrape, and Parse."
+forbid "$agent_page" "mcp-search"
+forbid "$agent_page" "/v2/mcp-search"
+forbid "$agent_page" "https://mcp.firecrawl.dev/<FIRECRAWL_API_KEY>/v2/mcp"
+
+# Human MCP owns sign-in on /v2/mcp-oauth; API key fallback uses /v2/mcp + Bearer.
+require "$human_page" "sidebarTitle: 'Human MCP'"
+require "$human_page" 'variant="human"'
+require "$human_page" "Authorization: Bearer <FIRECRAWL_API_KEY>"
+require "$human_page" "URL: https://mcp.firecrawl.dev/v2/mcp"
+forbid "$human_page" "to the same endpoint"
+forbid "$human_page" "Supported standards"
+forbid "$human_page" "RFC 8414"
+
+# Selector must keep the two hosted URLs distinct by variant.
+require "snippets/shared/agent-first-onboarding.jsx" 'https://mcp.firecrawl.dev/v2/mcp-oauth'
+require "snippets/shared/agent-first-onboarding.jsx" 'https://mcp.firecrawl.dev/v2/mcp'
+require "snippets/shared/agent-first-onboarding.jsx" 'variant === "human"'
+require "snippets/shared/agent-first-onboarding.jsx" 'id: "codex"'
+
 require docs.json '"source": "/mcp-server/connect"'
 require docs.json '"source": "/mcp-server/clients"'
-development_redirect_count="$(jq '[.redirects[] | select(.source == "/mcp-server/development" and .destination == "/mcp-server" and (.permanent // true) == true)] | length' docs.json)"
-if [ "$development_redirect_count" -ne 1 ]; then
-  echo "Expected one permanent /mcp-server/development redirect to /mcp-server" >&2
-  exit 1
-fi
+require docs.json '"source": "/mcp-server"'
+require docs.json '"destination": "/mcp-server/agent-mcp"'
+require docs.json '"source": "/developer-guides/mcp-setup-guides/oauth"'
+require docs.json '"destination": "/mcp-server/human-mcp"'
 forbid docs.json '"mcp-server/connect"'
 forbid docs.json '"mcp-server/clients"'
 forbid docs.json '"mcp-server/development"'
 
-# Keep the compact core MCP journey prominent in the main Documentation sidebar,
-# as well as contextualized under Build with AI.
-expected_mcp_pages='["mcp-server","mcp-server/tools","mcp-server/local"]'
-documentation_mcp_pages="$(jq -c '.navigation.languages[] | select(.language == "en") | .versions[0].tabs[] | select(.tab == "Documentation") | .groups[] | select(.group == "Get Started") | .pages[1] | select(.group == "MCP" and (has("icon") | not)) | .pages' docs.json)"
+# Keep the compact MCP journey as Agent then Human in the main Documentation sidebar,
+# as well as under Build with AI.
+expected_mcp_pages='["mcp-server/agent-mcp","mcp-server/human-mcp"]'
+documentation_mcp_pages="$(jq -c '.navigation.languages[] | select(.language == "en") | .versions[0].tabs[] | select(.tab == "Documentation") | .groups[] | select(.group == "Get Started") | .pages[] | select(type == "object" and .group == "MCP" and (has("icon") | not)) | .pages' docs.json)"
 build_with_ai_mcp_pages="$(jq -c '.navigation.languages[] | select(.language == "en") | .versions[0].tabs[] | select(.tab == "Build with AI") | .groups[] | select(.group == "AI Tools") | .pages[] | select(type == "object" and .group == "MCP") | .pages' docs.json)"
 build_with_ai_mcp_icon_count="$(jq '[.navigation.languages[] | select(.language == "en") | .versions[0].tabs[] | select(.tab == "Build with AI") | .groups[] | select(.group == "AI Tools") | .pages[] | select(type == "object" and .group == "MCP" and has("icon"))] | length' docs.json)"
 if [ "$documentation_mcp_pages" != "$expected_mcp_pages" ] || [ "$build_with_ai_mcp_pages" != "$expected_mcp_pages" ] || [ "$build_with_ai_mcp_icon_count" -ne 0 ]; then
-  echo "Expected the icon-free three-page MCP group directly after Introduction and under Build with AI" >&2
+  echo "Expected the icon-free Agent then Human MCP group after Introduction and under Build with AI" >&2
+  echo "Documentation MCP pages: $documentation_mcp_pages" >&2
+  echo "Build with AI MCP pages: $build_with_ai_mcp_pages" >&2
   exit 1
 fi
 
-require "$tools_page" "Start with [Firecrawl MCP setup](/mcp-server)"
+require "$tools_page" "Start with [Agent MCP](/mcp-server/agent-mcp) or [Human MCP](/mcp-server/human-mcp)"
 require "$tools_page" "sidebarTitle: Firecrawl MCP Tools"
 require "$local_page" "npx -y firecrawl-mcp@3.23.4"
 require "$local_page" "sidebarTitle: Run MCP locally"
+require "$local_page" "[Agent MCP](/mcp-server/agent-mcp) or [Human MCP](/mcp-server/human-mcp)"
 
 # Keyless is the fixed three-tool hosted surface, not the former four-tool list.
 require "$rate_limits" "exactly **Search, Scrape, and Parse** without an API key"
@@ -102,25 +112,17 @@ require "$ai_onboarding" "CLI, SDKs, and REST API allow keyless search, scrape, 
 require "$ai_onboarding" "Hosted MCP exposes the narrower keyless Search, Scrape, and Parse surface"
 forbid "$ai_onboarding" "hosted MCP keyless free tier to search, scrape, and interact"
 
-# OAuth redirect guidance must remain compatible with the authorization-server policy.
-require "$oauth_guide" "Firecrawl accepts HTTPS redirect URIs and loopback redirect URIs"
-require "$oauth_guide" "Authorization: Bearer <FIRECRAWL_API_KEY>"
-require "$oauth_guide" "[Getting started with MCP](/mcp-server)"
-forbid "$oauth_guide" "](/mcp-server/connect)"
-forbid "$oauth_guide" "API-key-in-URL"
-
 # Onboarding must advertise only the client setup that is actually maintained.
 require "$ai_onboarding" "Windsurf users should follow the [Windsurf quickstart](/quickstarts/windsurf)."
 forbid "$ai_onboarding" "View installation instructions for Cursor, Claude Desktop, Windsurf, VS Code"
 
-# Only the scoped legacy fallback on the MCP setup page may emit a credential-bearing hosted MCP URL.
-# Keep the value in OAuth or an Authorization header/secret store instead.
+# English docs must not emit credential-bearing hosted MCP URLs.
 raw_key_paths="$(find . -type f -name '*.mdx' \
   ! -path './es/*' ! -path './fr/*' ! -path './ja/*' ! -path './pt-BR/*' ! -path './zh/*' \
-  ! -path "./$main_page" \
+  ! -path './.claude/*' ! -path './.firecrawl/*' ! -path './node_modules/*' \
   -exec grep -nE 'mcp\.firecrawl\.dev/(fc-|YOUR|your-|<API|\$\{|\{\{)' {} + || true)"
 if [ -n "$raw_key_paths" ]; then
-  echo "English docs must not emit credential-bearing hosted MCP URLs outside the scoped legacy fallback:" >&2
+  echo "English docs must not emit credential-bearing hosted MCP URLs:" >&2
   echo "$raw_key_paths" >&2
   exit 1
 fi
@@ -129,6 +131,7 @@ fi
 # install time. They should carry the reviewed server version explicitly.
 bare_mcp_npx="$(find . -type f -name '*.mdx' \
   ! -path './es/*' ! -path './fr/*' ! -path './ja/*' ! -path './pt-BR/*' ! -path './zh/*' \
+  ! -path './.claude/*' ! -path './.firecrawl/*' ! -path './node_modules/*' \
   -exec grep -nE 'npx[[:space:]]+-y[[:space:]]+firecrawl-mcp($|[^@])' {} + || true)"
 if [ -n "$bare_mcp_npx" ]; then
   echo "English docs must pin npx firecrawl-mcp examples:" >&2
