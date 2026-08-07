@@ -299,7 +299,7 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true } = {})
           </h3>
           <p>
             {isHuman
-              ? "OAuth first. An API key still works if your client can't complete a browser flow."
+              ? "Sign in first. An API key still works if your client can't complete a browser flow."
               : "Starts keyless. Add an API key when you need more."}
           </p>
         </div>
