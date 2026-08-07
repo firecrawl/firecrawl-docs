@@ -294,12 +294,10 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true } = {})
       {curvyCorners()}
       <div className="fc-agent-first-header">
         <div>
-          <h3 id="fc-mcp-heading">
-            {isHuman ? "Sign in to Firecrawl MCP" : "Set up Firecrawl MCP"}
-          </h3>
+          <h3 id="fc-mcp-heading">Set up Firecrawl MCP</h3>
           <p>
             {isHuman
-              ? "Choose your client and sign in."
+              ? "Sign in to connect. An API key works too."
               : "No API key required. Add an API key to unlock more usage."}
           </p>
         </div>
