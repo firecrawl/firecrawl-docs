@@ -1,4 +1,4 @@
-export const McpClientSelector = () => {
+export const McpClientSelector = ({ variant = "agent", showSeeAll = true } = {}) => {
   // Clipboard API can be unavailable or denied; fall back to execCommand.
   // Inlined per component: Mintlify compiles snippet exports in isolation.
   const writeClipboard = async (text) => {
@@ -23,10 +23,15 @@ export const McpClientSelector = () => {
       return copied;
     }
   };
-  const mcpUrl = "https://mcp.firecrawl.dev/v2/mcp";
-  // config = {"url":"https://mcp.firecrawl.dev/v2/mcp"}
-  const cursorInstallUrl =
-    "cursor://anysphere.cursor-deeplink/mcp/install?name=firecrawl&config=eyJ1cmwiOiJodHRwczovL21jcC5maXJlY3Jhd2wuZGV2L3YyL21jcCJ9";
+  const isHuman = variant === "human";
+  const mcpUrl = isHuman
+    ? "https://mcp.firecrawl.dev/v2/mcp-oauth"
+    : "https://mcp.firecrawl.dev/v2/mcp";
+  // Deep link config is always {"url": mcpUrl}; compute it instead of hardcoding
+  // so a different variant's URL can never drift out of sync with the JSON below.
+  const cursorInstallUrl = `cursor://anysphere.cursor-deeplink/mcp/install?name=firecrawl&config=${btoa(
+    JSON.stringify({ url: mcpUrl })
+  )}`;
   const cursorConfig = `{
   "mcpServers": {
     "firecrawl": {
@@ -46,6 +51,28 @@ export const McpClientSelector = () => {
 }`;
   const clients = [
     {
+      id: "codex",
+      name: "Codex",
+      detail: "Run in terminal",
+      icon: "/images/agent-clients/codex.svg",
+      iconClassName: "",
+      command: isHuman
+        ? `codex mcp add firecrawl --url ${mcpUrl} && codex mcp login firecrawl`
+        : `codex mcp add firecrawl --url ${mcpUrl}`,
+      description: "Run this in your terminal to add Firecrawl as a remote MCP server in Codex.",
+      hint: isHuman ? (
+        <>
+          Then enter <code>/mcp</code> in Codex and confirm <strong>firecrawl</strong> is
+          connected.
+        </>
+      ) : (
+        <>
+          Then run <code>codex mcp list</code> and confirm <strong>firecrawl</strong> is
+          enabled.
+        </>
+      ),
+    },
+    {
       id: "claude-code",
       name: "Claude Code",
       detail: "Run in terminal",
@@ -53,24 +80,13 @@ export const McpClientSelector = () => {
       iconClassName: "",
       command: `claude mcp add --transport http firecrawl ${mcpUrl}`,
       description: "Run this in your terminal to add Firecrawl as a remote MCP server in Claude Code.",
-      hint: (
+      hint: isHuman ? (
+        <>
+          Then enter <code>/mcp</code> in Claude Code and complete the browser sign-in.
+        </>
+      ) : (
         <>
           Then run <code>/mcp</code> and confirm <strong>firecrawl</strong> is connected.
-        </>
-      ),
-    },
-    {
-      id: "codex",
-      name: "Codex",
-      detail: "Run in terminal",
-      icon: "/images/agent-clients/codex.svg",
-      iconClassName: "",
-      command: `codex mcp add firecrawl --url ${mcpUrl}`,
-      description: "Run this in your terminal to add Firecrawl as a remote MCP server in Codex.",
-      hint: (
-        <>
-          Then run <code>codex mcp list</code> and confirm <strong>firecrawl</strong> is
-          enabled.
         </>
       ),
     },
@@ -86,7 +102,12 @@ export const McpClientSelector = () => {
       installUrl: cursorInstallUrl,
       description:
         "Install the hosted MCP server in one click, or copy the configuration below.",
-      hint: (
+      hint: isHuman ? (
+        <>
+          Open <strong>Cursor Settings</strong>, select <strong>MCP</strong>, and complete the
+          Firecrawl sign-in.
+        </>
+      ) : (
         <>
           Open <strong>Cursor Settings</strong>, select <strong>MCP</strong>, and confirm{" "}
           <strong>firecrawl</strong> is connected.
@@ -102,9 +123,14 @@ export const McpClientSelector = () => {
       code: opencodeConfig,
       codeLabel: "opencode.json",
       codeClassName: "",
-      description:
-        "Add this remote server configuration to your global or project config.",
-      hint: (
+      description: isHuman
+        ? "Add this remote server configuration to your global or project config. OpenCode opens Firecrawl in your browser on first use."
+        : "Add this remote server configuration to your global or project config.",
+      hint: isHuman ? (
+        <>
+          Sign in and approve access, then confirm <strong>firecrawl</strong> is connected.
+        </>
+      ) : (
         <>
           Then run <code>opencode mcp list</code> and confirm{" "}
           <strong>firecrawl</strong> is connected.
@@ -268,12 +294,23 @@ export const McpClientSelector = () => {
       {curvyCorners()}
       <div className="fc-agent-first-header">
         <div>
-          <h3 id="fc-mcp-heading">Setup Firecrawl MCP Server</h3>
-          <p>No API key required. Sign up only when you need more.</p>
+          <h3 id="fc-mcp-heading">
+            {isHuman ? "Sign in to Firecrawl MCP" : "Set up Firecrawl MCP"}
+          </h3>
+          <p>
+            {isHuman
+              ? "OAuth first. An API key still works if your client can't complete a browser flow."
+              : "Starts keyless. Add an API key when you need more."}
+          </p>
         </div>
-        <a className="fc-all-options-link" href="/mcp-server">
-          See all setup options {arrowIcon()}
-        </a>
+        {showSeeAll && (
+          <a
+            className="fc-all-options-link"
+            href={isHuman ? "/mcp-server/human-mcp" : "/mcp-server/agent-mcp"}
+          >
+            See all setup options {arrowIcon()}
+          </a>
+        )}
       </div>
 
       <div className="fc-client-tabs" role="tablist" aria-label="Choose an MCP client">
