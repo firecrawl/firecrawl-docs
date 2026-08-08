@@ -49,8 +49,6 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true } = {})
     }
   }
 }`;
-  const codexKeylessConfig = `[mcp_servers.firecrawl]
-url = "https://mcp.firecrawl.dev/v2/mcp"`;
   const clients = [
     {
       id: "codex",
@@ -58,15 +56,10 @@ url = "https://mcp.firecrawl.dev/v2/mcp"`;
       detail: "Run in terminal",
       icon: "/images/agent-clients/codex.svg",
       iconClassName: "",
-      command: isHuman
-        ? `codex mcp add firecrawl --url ${mcpUrl}`
-        : undefined,
-      code: isHuman ? undefined : codexKeylessConfig,
-      codeLabel: isHuman ? undefined : "~/.codex/config.toml",
-      codeClassName: "",
+      command: `codex mcp add firecrawl --url ${mcpUrl}`,
       description: isHuman
         ? "Run this in your terminal. Codex normally opens the Firecrawl sign-in automatically."
-        : "Add this entry to your Codex configuration. Direct configuration keeps the initial connection keyless. Some Codex versions start OAuth when the same URL is added with the CLI command.",
+        : "Run this in your terminal to add Firecrawl as a keyless remote MCP server. The keyless endpoint does not start account sign-in.",
       hint: isHuman ? (
         <>
           If no browser opens, run <code>codex mcp login firecrawl</code>. Then enter{" "}

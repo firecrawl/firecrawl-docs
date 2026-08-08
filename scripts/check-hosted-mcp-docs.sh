@@ -85,14 +85,14 @@ require "$oauth_page" "Access tokens expire after one hour."
 forbid "$oauth_page" "## Add an API key"
 forbid "$oauth_page" "Authorization: Bearer <FIRECRAWL_API_KEY>"
 
-# Client selector keeps endpoint behavior distinct. Codex keyless uses direct config
-# because `codex mcp add` can proactively start OAuth even for the anonymous endpoint.
+# Client selector keeps endpoint behavior distinct. Codex can use the normal add
+# command for both modes because the keyless endpoint does not advertise OAuth.
 require "$selector" 'https://mcp.firecrawl.dev/v2/mcp-oauth'
 require "$selector" 'https://mcp.firecrawl.dev/v2/mcp'
-require "$selector" 'const codexKeylessConfig = `[mcp_servers.firecrawl]'
-require "$selector" 'code: isHuman ? undefined : codexKeylessConfig'
-require "$selector" 'codex mcp add firecrawl --url ${mcpUrl}'
+require "$selector" 'command: `codex mcp add firecrawl --url ${mcpUrl}`'
+require "$selector" 'The keyless endpoint does not start account sign-in.'
 require "$selector" 'href="/mcp-server"'
+forbid "$selector" 'codexKeylessConfig'
 forbid "$selector" '&& codex mcp login firecrawl'
 
 # /mcp-server is a real page, not a redirect. Generic retired routes point to it.
@@ -134,7 +134,9 @@ require "$tools_page" "Find and extract data when the sources are unknown"
 require "$tools_page" '`firecrawl_agent` and `firecrawl_agent_status`'
 require "$tools_page" "The former Extract MCP tool is deprecated"
 require "$tools_page" "[Choosing the Data Extractor](/developer-guides/usage-guides/choosing-the-data-extractor)"
-require "$local_page" "npx -y firecrawl-mcp@3.23.4"
+require "$tools_page" 'If the configured URL is `/v2/mcp-oauth`, sign in again through the client.'
+require "$tools_page" 'If it is `/v2/mcp`, either replace the API key on that server or update the existing server URL to `/v2/mcp-oauth` and complete sign-in.'
+require "$local_page" "npx -y firecrawl-mcp@3.23.6"
 require "$local_page" "start with [MCP setup](/mcp-server)"
 
 # Keyless stays the fixed three-tool hosted surface.
