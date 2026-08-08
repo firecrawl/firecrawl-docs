@@ -49,6 +49,8 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true } = {})
     }
   }
 }`;
+  const codexKeylessConfig = `[mcp_servers.firecrawl]
+url = "https://mcp.firecrawl.dev/v2/mcp"`;
   const clients = [
     {
       id: "codex",
@@ -57,13 +59,18 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true } = {})
       icon: "/images/agent-clients/codex.svg",
       iconClassName: "",
       command: isHuman
-        ? `codex mcp add firecrawl --url ${mcpUrl} && codex mcp login firecrawl`
-        : `codex mcp add firecrawl --url ${mcpUrl}`,
-      description: "Run this in your terminal to add Firecrawl as a remote MCP server in Codex.",
+        ? `codex mcp add firecrawl --url ${mcpUrl}`
+        : undefined,
+      code: isHuman ? undefined : codexKeylessConfig,
+      codeLabel: isHuman ? undefined : "~/.codex/config.toml",
+      codeClassName: "",
+      description: isHuman
+        ? "Run this in your terminal. Codex normally opens the Firecrawl sign-in automatically."
+        : "Add this entry to your Codex configuration. Direct configuration keeps the initial connection keyless. Some Codex versions start OAuth when the same URL is added with the CLI command.",
       hint: isHuman ? (
         <>
-          Then enter <code>/mcp</code> in Codex and confirm <strong>firecrawl</strong> is
-          connected.
+          If no browser opens, run <code>codex mcp login firecrawl</code>. Then enter{" "}
+          <code>/mcp</code> in Codex and confirm <strong>firecrawl</strong> is connected.
         </>
       ) : (
         <>
@@ -297,14 +304,14 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true } = {})
           <h3 id="fc-mcp-heading">Set up Firecrawl MCP</h3>
           <p>
             {isHuman
-              ? "Sign in to connect. An API key works too."
-              : "No API key required. Add an API key to unlock more usage."}
+              ? "Sign in through your client's browser flow. No API key required."
+              : "Try keyless, or configure an API key for stable unattended access."}
           </p>
         </div>
         {showSeeAll && (
           <a
             className="fc-all-options-link"
-            href={isHuman ? "/mcp-server/human-mcp" : "/mcp-server/agent-mcp"}
+            href="/mcp-server"
           >
             See all setup options {arrowIcon()}
           </a>
