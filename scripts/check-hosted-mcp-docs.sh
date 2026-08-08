@@ -136,7 +136,7 @@ require "$tools_page" "The former Extract MCP tool is deprecated"
 require "$tools_page" "[Choosing the Data Extractor](/developer-guides/usage-guides/choosing-the-data-extractor)"
 require "$tools_page" 'If the configured URL is `/v2/mcp-oauth`, sign in again through the client.'
 require "$tools_page" 'If it is `/v2/mcp`, either replace the API key on that server or update the existing server URL to `/v2/mcp-oauth` and complete sign-in.'
-require "$local_page" "npx -y firecrawl-mcp@3.23.6"
+require "$local_page" "npx -y firecrawl-mcp@3.23.7"
 require "$local_page" "start with [MCP setup](/mcp-server)"
 
 # Keyless stays the fixed three-tool hosted surface.
