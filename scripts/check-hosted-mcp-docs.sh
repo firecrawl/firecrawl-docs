@@ -147,6 +147,32 @@ for language in es fr ja pt-BR zh; do
   fi
 done
 
+
+# Agent-readable fallbacks: the selector is progressive enhancement; every page
+# that renders it must also carry plain-markdown setup for Markdown/llms exports.
+for page in introduction.mdx mcp-server/oauth.mdx mcp-server/keyless-api-key.mdx; do
+  require "$page" '<Visibility for="agents">'
+  require "$page" '<Visibility for="humans">'
+done
+require introduction.mdx 'codex mcp add firecrawl --url https://mcp.firecrawl.dev/v2/mcp'
+require mcp-server/oauth.mdx 'codex mcp add firecrawl --url https://mcp.firecrawl.dev/v2/mcp-oauth'
+
+# The chooser is both nav-group root and first child; suppress the self-referential
+# footer pagination that duplication would otherwise produce.
+require "$chooser_page" 'hideFooterPagination: true'
+require "$chooser_page" 'KEYLESS_TOOL_NOT_AVAILABLE`):'
+
+# Client configuration fields verified against official client documentation.
+require quickstarts/gemini-cli.mdx '"httpUrl": "https://mcp.firecrawl.dev/v2/mcp"'
+forbid quickstarts/gemini-cli.mdx '"url": "https://mcp.firecrawl.dev/v2/mcp"'
+require quickstarts/antigravity.mdx '"serverUrl": "https://mcp.firecrawl.dev/v2/mcp"'
+require quickstarts/windsurf.mdx '~/.codeium/windsurf/mcp_config.json'
+
+# The Cursor deeplink must install the hosted keyless server, never a local
+# command with an API-key placeholder.
+require ai-onboarding.mdx 'config=eyJ1cmwiOiJodHRwczovL21jcC5maXJlY3Jhd2wuZGV2L3YyL21jcCJ9'
+forbid ai-onboarding.mdx 'RklSRUNSQVdMX0FQSV9LRVk'
+
 # Tool behavior and package requirements must match the implementation and npm.
 require "$tools_page" "Start with [MCP setup](/mcp-server)"
 require "$tools_page" "The former Extract MCP tool is deprecated"

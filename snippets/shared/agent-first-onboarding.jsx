@@ -325,6 +325,7 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
   const selectTab = (index) => {
     const client = clients[index];
     setActiveId(client.id);
+    track("mcp_client_tab_selected", { client: client.id, variant });
     tabRefs.current[index]?.focus();
   };
   const handleKeyDown = (event, index) => {
