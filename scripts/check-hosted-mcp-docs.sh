@@ -1,7 +1,5 @@
 #!/usr/bin/env sh
-# Static truth checks for English-source hosted-MCP docs only. Run from the repository root.
-# Locadex-managed locale files are intentionally out of scope. Retranslation and locale
-# verification remain a release gate after the English source is approved.
+# Static truth checks for hosted-MCP docs. Run from the repository root.
 set -eu
 
 chooser_page="mcp-server.mdx"
@@ -12,6 +10,7 @@ local_page="mcp-server/local.mdx"
 rate_limits="rate-limits.mdx"
 ai_onboarding="ai-onboarding.mdx"
 selector="snippets/shared/agent-first-onboarding.jsx"
+reviewed_mcp_version="3.23.6"
 
 require() {
   file="$1"
@@ -53,15 +52,19 @@ for retired_page in mcp-server/connect.mdx mcp-server/clients.mdx mcp-server/dev
   fi
 done
 
-# The entry page routes by outcome, not by the ambiguous Human/Agent labels.
+# The entry page routes by outcome and gives recovery errors a stable landing point.
 require "$chooser_page" "Choose the setup that matches how the connection will run."
-require "$chooser_page" 'title="Try instantly"'
-require "$chooser_page" 'title="Connect interactively"'
-require "$chooser_page" 'title="Agents, CI, and backend"'
-require "$chooser_page" "shared daily allowance per public IP"
-require "$chooser_page" "Never put a Firecrawl API key in an MCP URL, an agent conversation, or a committed project file."
-require "$chooser_page" "update or replace the existing"
-require "$chooser_page" "Start a new client session"
+require "$chooser_page" 'title="Try instantly with keyless MCP"'
+require "$chooser_page" 'title="Connect with OAuth"'
+require "$chooser_page" 'title="Run with an API key"'
+require "$chooser_page" "shared by users on the same public IP"
+require "$chooser_page" "https://mcp.firecrawl.dev/v2/mcp"
+require "$chooser_page" "not a page to open directly in a browser"
+require "$chooser_page" "## Fix a broken connection"
+for code in KEYLESS_QUOTA_EXHAUSTED KEYLESS_TOOL_NOT_AVAILABLE CREDENTIAL_INVALID OAUTH_CONNECTION_INVALID; do
+  require "$chooser_page" "$code"
+done
+require "$chooser_page" "start a new client session"
 
 # Keyless and API-key setup share /v2/mcp, but keep different credential contracts.
 require "$keyless_page" "sidebarTitle: 'Keyless and API key'"
@@ -70,17 +73,21 @@ require "$keyless_page" "shared by users on the same public IP address"
 require "$keyless_page" 'bearer_token_env_var = "FIRECRAWL_API_KEY"'
 require "$keyless_page" '"Authorization": "Bearer ${FIRECRAWL_API_KEY}"'
 require "$keyless_page" "Never paste the key into agent chat"
-require "$keyless_page" "https://mcp.firecrawl.dev/v2/mcp"
-forbid "$keyless_page" "https://mcp.firecrawl.dev/<FIRECRAWL_API_KEY>/v2/mcp"
+require "$keyless_page" "## Run in CI or a backend"
+require "$keyless_page" "## Legacy API-key URL support"
+require "$keyless_page" "Do not use it for a new connection."
+require "$keyless_page" 'https://mcp.firecrawl.dev/<FIRECRAWL_API_KEY>/v2/mcp'
 
-# OAuth setup is interactive, OAuth-only, and executable for existing keyless users.
-require "$oauth_page" "sidebarTitle: 'OAuth'"
+# OAuth setup is first-time-first and executable for existing keyless users.
+require "$oauth_page" "sidebarTitle: 'OAuth connection'"
 require "$oauth_page" 'variant="human"'
 require "$oauth_page" "server URL for your MCP client. It is not a page to open directly in a browser."
+require "$oauth_page" "If the client asks for an OAuth Client ID or Client Secret, leave both blank."
+require "$oauth_page" "## Switch an existing keyless connection"
 require "$oauth_page" "Do not add a second Firecrawl entry."
 require "$oauth_page" "claude mcp remove firecrawl"
-require "$oauth_page" "codex mcp add firecrawl --url https://mcp.firecrawl.dev/v2/mcp-oauth"
-require "$oauth_page" "start a new client session"
+require "$oauth_page" "codex mcp login firecrawl"
+require "$oauth_page" 'Existing OAuth tokens issued for `/v2/mcp` remain supported there.'
 require "$oauth_page" "Access tokens expire after one hour."
 forbid "$oauth_page" "## Add an API key"
 forbid "$oauth_page" "Authorization: Bearer <FIRECRAWL_API_KEY>"
@@ -114,72 +121,93 @@ if [ "$oauth_redirect" != "/mcp-server/human-mcp" ]; then
   exit 1
 fi
 
-# Keep the main English navigation compact. The chooser owns links to the leaf pages.
-expected_mcp_pages='["mcp-server"]'
-documentation_mcp_pages="$(jq -c '.navigation.languages[] | select(.language == "en") | .versions[0].tabs[] | select(.tab == "Documentation") | .groups[] | select(.group == "Get Started") | .pages[] | select(type == "object" and .group == "MCP" and (has("icon") | not)) | .pages' docs.json)"
-build_with_ai_mcp_pages="$(jq -c '.navigation.languages[] | select(.language == "en") | .versions[0].tabs[] | select(.tab == "Build with AI") | .groups[] | select(.group == "AI Tools") | .pages[] | select(type == "object" and .group == "MCP") | .pages' docs.json)"
-build_with_ai_mcp_icon_count="$(jq '[.navigation.languages[] | select(.language == "en") | .versions[0].tabs[] | select(.tab == "Build with AI") | .groups[] | select(.group == "AI Tools") | .pages[] | select(type == "object" and .group == "MCP" and has("icon"))] | length' docs.json)"
-if [ "$documentation_mcp_pages" != "$expected_mcp_pages" ] || [ "$build_with_ai_mcp_pages" != "$expected_mcp_pages" ] || [ "$build_with_ai_mcp_icon_count" -ne 0 ]; then
-  echo "Expected one icon-free /mcp-server chooser in both English MCP groups" >&2
-  echo "Documentation MCP pages: $documentation_mcp_pages" >&2
-  echo "Build with AI MCP pages: $build_with_ai_mcp_pages" >&2
-  exit 1
-fi
+# Every language exposes the chooser as the MCP group root and keeps all leaves indexed.
+for language in en es fr ja pt-BR zh; do
+  if [ "$language" = "en" ]; then
+    prefix=""
+    root="mcp-server"
+  else
+    prefix="$language/"
+    root="${language}/mcp-server"
+    if [ ! -e "${language}/mcp-server.mdx" ]; then
+      echo "missing localized MCP chooser: ${language}/mcp-server.mdx" >&2
+      exit 1
+    fi
+    require "${language}/mcp-server/local.mdx" "firecrawl-mcp@${reviewed_mcp_version}"
+    forbid "${language}/mcp-server/human-mcp.mdx" 'id="add-an-api-key"'
+  fi
+  expected="[\"${prefix}mcp-server/human-mcp\",\"${prefix}mcp-server/agent-mcp\",\"${prefix}mcp-server/tools\",\"${prefix}mcp-server/local\"]"
+  count="$(jq --arg language "$language" --arg root "$root" --argjson pages "$expected" '[.navigation.languages[] | select(.language == $language) | .. | objects | select(.group? == "MCP" and .root? == $root and .pages == $pages)] | length' docs.json)"
+  if [ "$count" -ne 2 ]; then
+    echo "expected two complete MCP nav groups for $language, found $count" >&2
+    exit 1
+  fi
+done
 
-# Tool and supporting pages must preserve the paths hidden from the primary nav.
+# Tool behavior and package requirements must match the implementation and npm.
 require "$tools_page" "Start with [MCP setup](/mcp-server)"
-require "$tools_page" "Extract structured data from a known URL"
-require "$tools_page" '`firecrawl_scrape` with JSON format'
-require "$tools_page" "Find and extract data when the sources are unknown"
-require "$tools_page" '`firecrawl_agent` and `firecrawl_agent_status`'
 require "$tools_page" "The former Extract MCP tool is deprecated"
-require "$tools_page" "[Choosing the Data Extractor](/developer-guides/usage-guides/choosing-the-data-extractor)"
+require "$tools_page" '`firecrawl_crawl` normally starts a crawl and polls it to a terminal state before returning.'
+require "$tools_page" '`firecrawl_agent` is asynchronous'
 require "$tools_page" 'If the configured URL is `/v2/mcp-oauth`, sign in again through the client.'
-require "$tools_page" 'If it is `/v2/mcp`, either replace the API key on that server or update the existing server URL to `/v2/mcp-oauth` and complete sign-in.'
-require "$local_page" "npx -y firecrawl-mcp@3.23.7"
+require "$local_page" "Node.js 22 or newer"
+require "$local_page" "npx -y firecrawl-mcp@${reviewed_mcp_version}"
 require "$local_page" "start with [MCP setup](/mcp-server)"
 
-# Keyless stays the fixed three-tool hosted surface.
+# Keyless stays the fixed three-tool hosted surface everywhere it is presented.
 require "$rate_limits" "exactly **Search, Scrape, and Parse** without an API key"
-forbid "$rate_limits" "Scrape, search, interact, and parse can be used"
 require "$ai_onboarding" "Hosted MCP exposes the narrower keyless Search, Scrape, and Parse surface"
-require "$ai_onboarding" "## CLI and agent skills"
-require "$ai_onboarding" '<span id="cli"></span>'
-require "$ai_onboarding" "structured extraction through Scrape JSON"
-require "$ai_onboarding" 'href="/mcp-server"'
-forbid "$ai_onboarding" "covers our full API surface"
+require developer-guides/llm-sdks-and-frameworks/elevenagents.mdx "Keyless MCP exposes exactly Search, Scrape, and Parse, with shared limits."
+for quickstart in amp antigravity cursor gemini-cli opencode windsurf; do
+  file="quickstarts/${quickstart}.mdx"
+  require "$file" "keyless Search, Scrape, and Parse"
+  forbid "$file" "FIRECRAWL_API_KEY"
+done
+require quickstarts/claude-code.mdx "claude mcp add --transport http firecrawl https://mcp.firecrawl.dev/v2/mcp-oauth"
+require quickstarts/codex-cli.mdx "codex mcp login firecrawl"
+forbid quickstarts/claude-code.mdx "-e FIRECRAWL_API_KEY="
+forbid quickstarts/codex-cli.mdx 'FIRECRAWL_API_KEY = "'
 
 # Generic English links enter through the chooser rather than silently choosing keyless.
 require introduction.mdx "[Model Context Protocol](/mcp-server)"
+require introduction.mdx 'title="Try instantly with keyless MCP"'
+require introduction.mdx 'title="Connect with OAuth"'
+require introduction.mdx 'title="Run with an API key"'
+require introduction.mdx "[llms-full.txt](https://docs.firecrawl.dev/llms-full.txt)"
+first_setup_line="$(grep -nF 'title="Try instantly with keyless MCP"' introduction.mdx | cut -d: -f1)"
+agent_index_line="$(grep -nF '**For AI agents:**' introduction.mdx | cut -d: -f1)"
+if [ "$first_setup_line" -ge "$agent_index_line" ]; then
+  echo "Introduction must show MCP setup choices before the AI-agent index note" >&2
+  exit 1
+fi
 require integrations.mdx "[MCP server](/mcp-server)"
 require docs.json '"href": "https://docs.firecrawl.dev/mcp-server"'
 
-# English docs must not emit credential-bearing hosted MCP URLs.
-raw_key_paths="$(find . -type f -name '*.mdx' \
-  ! -path './es/*' ! -path './fr/*' ! -path './ja/*' ! -path './pt-BR/*' ! -path './zh/*' \
-  ! -path './.claude/*' ! -path './.firecrawl/*' ! -path './node_modules/*' \
-  -exec grep -nE 'mcp\.firecrawl\.dev/(fc-|YOUR|your-|<API|\$\{|\{\{)' {} + || true)"
+# Scan tracked source files only. Untracked worktrees and experiment artifacts must not
+# affect the release gate, while JSX and docs.json remain covered.
+tracked_docs="$(git ls-files '*.mdx' '*.jsx' 'docs.json')"
+english_docs="$(printf '%s\n' "$tracked_docs" | grep -Ev '^(es|fr|ja|pt-BR|zh)/' || true)"
+
+raw_key_paths="$(printf '%s\n' "$english_docs" | xargs grep -nE 'mcp\.firecrawl\.dev/(fc-|YOUR|your-|\$\{|\{\{)' 2>/dev/null || true)"
 if [ -n "$raw_key_paths" ]; then
   echo "English docs must not emit credential-bearing hosted MCP URLs:" >&2
   echo "$raw_key_paths" >&2
   exit 1
 fi
 
-# Local MCP examples must pin the reviewed package version.
-bare_mcp_npx="$({
-  find . -type f -name '*.mdx' \
-    ! -path './es/*' ! -path './fr/*' ! -path './ja/*' ! -path './pt-BR/*' ! -path './zh/*' \
-    ! -path './.claude/*' ! -path './.firecrawl/*' ! -path './node_modules/*' \
-    -exec grep -nE 'npx[[:space:]]+-y[[:space:]]+firecrawl-mcp($|[^@])' {} +
-  find . -type f -name '*.mdx' \
-    ! -path './es/*' ! -path './fr/*' ! -path './ja/*' ! -path './pt-BR/*' ! -path './zh/*' \
-    ! -path './.claude/*' ! -path './.firecrawl/*' ! -path './node_modules/*' \
-    -exec grep -nE "['\"]firecrawl-mcp['\"]" {} +
-} 2>/dev/null || true)"
+versioned_mcp_docs="$(printf '%s\n' "$english_docs" | grep -E '^(mcp-server/local\.mdx|developer-guides/llm-sdks-and-frameworks/google-adk\.mdx|quickstarts/(amp|antigravity|claude-code|codex-cli|cursor|gemini-cli|opencode|windsurf)\.mdx)$' || true)"
+wrong_mcp_versions="$(printf '%s\n' "$versioned_mcp_docs" | xargs grep -nE 'firecrawl-mcp@[0-9]+\.[0-9]+\.[0-9]+' 2>/dev/null | grep -v "firecrawl-mcp@${reviewed_mcp_version}" || true)"
+if [ -n "$wrong_mcp_versions" ]; then
+  echo "English docs contain an unreviewed firecrawl-mcp version:" >&2
+  echo "$wrong_mcp_versions" >&2
+  exit 1
+fi
+
+bare_mcp_npx="$(printf '%s\n' "$english_docs" | xargs grep -nE 'npx[[:space:]]+-y[[:space:]]+firecrawl-mcp($|[^@])' 2>/dev/null || true)"
 if [ -n "$bare_mcp_npx" ]; then
   echo "English docs must pin npx firecrawl-mcp examples:" >&2
   echo "$bare_mcp_npx" >&2
   exit 1
 fi
 
-echo "English-source hosted MCP documentation truth checks passed (locales not validated)."
+echo "Hosted MCP documentation truth checks passed."
