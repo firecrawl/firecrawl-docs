@@ -55,7 +55,7 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
     {
       id: "chatgpt",
       name: "ChatGPT",
-      detail: "Paste URL in settings",
+      detail: "Paste URL",
       icon: "/images/agent-clients/chatgpt.svg",
       iconClassName: "fc-client-icon-mono",
       command: oauthUrl,
@@ -72,7 +72,7 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
     {
       id: "claude-ai",
       name: "Claude.ai",
-      detail: "Paste URL in settings",
+      detail: "Paste URL",
       icon: "/images/agent-clients/claude-ai.svg",
       iconClassName: "",
       command: oauthUrl,
