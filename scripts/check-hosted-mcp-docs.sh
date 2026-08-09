@@ -62,7 +62,7 @@ require "$chooser_page" "shared by users on the same public IP"
 require "$chooser_page" "https://mcp.firecrawl.dev/v2/mcp"
 require "$chooser_page" "not a page to open directly in a browser"
 require "$chooser_page" "## Fix a broken connection"
-for code in KEYLESS_QUOTA_EXHAUSTED KEYLESS_TOOL_NOT_AVAILABLE CREDENTIAL_INVALID OAUTH_CONNECTION_INVALID; do
+for code in KEYLESS_QUOTA_EXHAUSTED KEYLESS_TOOL_NOT_AVAILABLE KEYLESS_ACCESS_NOT_AVAILABLE KEYLESS_ELIGIBILITY_UNAVAILABLE CREDENTIAL_INVALID OAUTH_CONNECTION_INVALID; do
   require "$chooser_page" "$code"
 done
 require "$chooser_page" "start a new client session"
@@ -99,6 +99,7 @@ require "$selector" 'https://mcp.firecrawl.dev/v2/mcp-oauth'
 require "$selector" 'https://mcp.firecrawl.dev/v2/mcp'
 require "$selector" 'command: `codex mcp add firecrawl --url ${mcpUrl}`'
 require "$selector" 'The keyless endpoint does not start account sign-in.'
+require "$selector" 'useState("claude-code")'
 require "$selector" 'href="/mcp-server"'
 forbid "$selector" 'codexKeylessConfig'
 forbid "$selector" '&& codex mcp login firecrawl'
@@ -122,25 +123,20 @@ if [ "$oauth_redirect" != "/mcp-server/human-mcp" ]; then
   exit 1
 fi
 
-# Every language exposes the chooser as the MCP group root and keeps all leaves indexed.
-for language in en es fr ja pt-BR zh; do
-  if [ "$language" = "en" ]; then
-    prefix=""
-    root="mcp-server"
-  else
-    prefix="$language/"
-    root="${language}/mcp-server"
-    if [ ! -e "${language}/mcp-server.mdx" ]; then
-      echo "missing localized MCP chooser: ${language}/mcp-server.mdx" >&2
-      exit 1
-    fi
-    require "${language}/mcp-server/local.mdx" "firecrawl-mcp@${reviewed_mcp_version}"
-    forbid "${language}/mcp-server/human-mcp.mdx" 'id="add-an-api-key"'
-  fi
-  expected="[\"${prefix}mcp-server/human-mcp\",\"${prefix}mcp-server/agent-mcp\",\"${prefix}mcp-server/tools\",\"${prefix}mcp-server/local\"]"
-  count="$(jq --arg language "$language" --arg root "$root" --argjson pages "$expected" '[.navigation.languages[] | select(.language == $language) | .. | objects | select(.group? == "MCP" and .root? == $root and .pages == $pages)] | length' docs.json)"
+# English exposes the chooser as the MCP group root. Localized content is
+# translation-managed, so localized groups index the existing leaves without
+# directly editing or inventing translated chooser pages in this change.
+english_pages='["mcp-server/human-mcp","mcp-server/agent-mcp","mcp-server/tools","mcp-server/local"]'
+english_count="$(jq --argjson pages "$english_pages" '[.navigation.languages[] | select(.language == "en") | .. | objects | select(.group? == "MCP" and .root? == "mcp-server" and .pages == $pages)] | length' docs.json)"
+if [ "$english_count" -ne 2 ]; then
+  echo "expected two complete rooted English MCP nav groups, found $english_count" >&2
+  exit 1
+fi
+for language in es fr ja pt-BR zh; do
+  expected="[\"${language}/mcp-server/human-mcp\",\"${language}/mcp-server/agent-mcp\",\"${language}/mcp-server/tools\",\"${language}/mcp-server/local\"]"
+  count="$(jq --arg language "$language" --argjson pages "$expected" '[.navigation.languages[] | select(.language == $language) | .. | objects | select(.group? == "MCP" and (has("root") | not) and .pages == $pages)] | length' docs.json)"
   if [ "$count" -ne 2 ]; then
-    echo "expected two complete MCP nav groups for $language, found $count" >&2
+    echo "expected two translation-managed MCP nav groups for $language, found $count" >&2
     exit 1
   fi
 done

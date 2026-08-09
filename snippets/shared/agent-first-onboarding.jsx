@@ -138,7 +138,7 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true } = {})
       ),
     },
   ];
-  const [activeId, setActiveId] = useState(clients[0].id);
+  const [activeId, setActiveId] = useState("claude-code");
   const [copiedId, setCopiedId] = useState(null);
   const [status, setStatus] = useState("");
   const tabRefs = useRef([]);
