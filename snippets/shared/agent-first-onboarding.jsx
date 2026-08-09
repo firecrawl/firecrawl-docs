@@ -341,7 +341,8 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
   };
 
   return (
-    <section className="fc-agent-first not-prose" aria-labelledby="fc-mcp-heading">
+    <div className="not-prose">
+    <section className="fc-agent-first" aria-labelledby="fc-mcp-heading">
       {curvyCorners()}
       <div className="fc-agent-first-header">
         <div>
@@ -428,14 +429,15 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
           );
         })}
       </div>
-      <div className="fc-agent-first-footer">
-        <p className="fc-footer-lead">Using another MCP client? Point it at:</p>
-        {commandRow({ id: "endpoint-url", command: mcpUrl, label: "Endpoint URL" })}
-      </div>
       <span className="fc-sr-only" aria-live="polite">
         {status}
       </span>
     </section>
+    <div className="fc-agent-first-footer fc-footer-outside">
+      <p className="fc-footer-lead">Using another MCP client? Point it at:</p>
+      {commandRow({ id: "endpoint-url", command: mcpUrl, label: "Endpoint URL" })}
+    </div>
+    </div>
   );
 };
 
