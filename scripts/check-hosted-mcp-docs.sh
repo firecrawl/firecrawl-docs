@@ -69,6 +69,9 @@ require "$chooser_page" "start a new client session"
 
 # Keyless and API-key setup share /v2/mcp, but keep different credential contracts.
 require "$keyless_page" "sidebarTitle: 'Keyless and API key'"
+# ChatGPT and Claude.ai configure the OAuth endpoint, so the keyless page
+# must exclude them from its client selector.
+require "$keyless_page" 'includeManaged={false}'
 require "$keyless_page" "Keyless MCP exposes exactly Search, Scrape, and Parse."
 require "$keyless_page" "shared by users on the same public IP address"
 require "$keyless_page" 'bearer_token_env_var = "FIRECRAWL_API_KEY"'
@@ -133,8 +136,10 @@ if [ "$english_count" -ne 2 ]; then
   exit 1
 fi
 # Localized files keep the translation-managed slugs until the pipeline syncs.
+# agent-mcp stays first: Mintlify sends the page-less /{locale}/mcp-server root
+# to the group's first child, and locale roots must keep their keyless routing.
 for language in es fr ja pt-BR zh; do
-  expected="[\"${language}/mcp-server/human-mcp\",\"${language}/mcp-server/agent-mcp\",\"${language}/mcp-server/tools\",\"${language}/mcp-server/local\"]"
+  expected="[\"${language}/mcp-server/agent-mcp\",\"${language}/mcp-server/human-mcp\",\"${language}/mcp-server/tools\",\"${language}/mcp-server/local\"]"
   count="$(jq --arg language "$language" --argjson pages "$expected" '[.navigation.languages[] | select(.language == $language) | .. | objects | select(.group? == "MCP" and (has("root") | not) and .pages == $pages)] | length' docs.json)"
   if [ "$count" -ne 2 ]; then
     echo "expected two translation-managed MCP nav groups for $language, found $count" >&2

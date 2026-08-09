@@ -1,4 +1,4 @@
-export const McpClientSelector = ({ variant = "agent", showSeeAll = true } = {}) => {
+export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includeManaged = true } = {}) => {
   // Clipboard API can be unavailable or denied; fall back to execCommand.
   // Inlined per component: Mintlify compiles snippet exports in isolation.
   const writeClipboard = async (text) => {
@@ -179,9 +179,21 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true } = {})
   ];
   // Managed clients lead on the OAuth page; developer clients lead elsewhere.
   // Codex stays first among developer clients (most-used harness).
+  // ChatGPT and Claude.ai always configure the OAuth endpoint, so pages scoped
+  // to the keyless /v2/mcp surface exclude them with includeManaged={false}.
   const clients = isHuman
     ? [...managedClients, ...developerClients]
-    : [...developerClients, ...managedClients];
+    : includeManaged
+      ? [...developerClients, ...managedClients]
+      : [...developerClients];
+  // Optional GA4 events; no-op when analytics is unavailable.
+  const track = (name, params) => {
+    try {
+      window.gtag?.("event", name, params);
+    } catch {
+      /* analytics must never break setup */
+    }
+  };
   const [activeId, setActiveId] = useState(clients[0].id);
   const [copiedId, setCopiedId] = useState(null);
   const [status, setStatus] = useState("");
@@ -192,6 +204,7 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true } = {})
 
   const copy = async (id, text, label) => {
     const copied = await writeClipboard(text);
+    track("mcp_setup_copy", { item: id, variant, copied });
     if (copied) {
       window.clearTimeout(timeoutRef.current);
       setCopiedId(id);
@@ -371,7 +384,10 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true } = {})
               aria-selected={selected}
               aria-controls={`fc-panel-${client.id}`}
               tabIndex={selected ? 0 : -1}
-              onClick={() => setActiveId(client.id)}
+              onClick={() => {
+                setActiveId(client.id);
+                track("mcp_client_tab_selected", { client: client.id, variant });
+              }}
               onKeyDown={(event) => handleKeyDown(event, index)}
             >
               <span
