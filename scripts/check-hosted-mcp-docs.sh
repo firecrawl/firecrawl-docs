@@ -129,7 +129,7 @@ fi
 # English exposes the chooser as the MCP group root. Localized content is
 # translation-managed, so localized groups index the existing leaves without
 # directly editing or inventing translated chooser pages in this change.
-english_pages='["mcp-server/oauth","mcp-server/keyless-api-key","mcp-server/tools","mcp-server/local"]'
+english_pages='["mcp-server","mcp-server/oauth","mcp-server/keyless-api-key","mcp-server/tools","mcp-server/local"]'
 english_count="$(jq --argjson pages "$english_pages" '[.navigation.languages[] | select(.language == "en") | .. | objects | select(.group? == "MCP" and .root? == "mcp-server" and .pages == $pages)] | length' docs.json)"
 if [ "$english_count" -ne 2 ]; then
   echo "expected two complete rooted English MCP nav groups, found $english_count" >&2
