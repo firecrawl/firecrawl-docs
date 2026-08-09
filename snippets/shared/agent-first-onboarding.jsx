@@ -27,6 +27,8 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true } = {})
   const mcpUrl = isHuman
     ? "https://mcp.firecrawl.dev/v2/mcp-oauth"
     : "https://mcp.firecrawl.dev/v2/mcp";
+  // ChatGPT and Claude.ai always connect through account sign-in, regardless of variant.
+  const oauthUrl = "https://mcp.firecrawl.dev/v2/mcp-oauth";
   // Deep link config is always {"url": mcpUrl}; compute it instead of hardcoding
   // so a different variant's URL can never drift out of sync with the JSON below.
   const cursorInstallUrl = `cursor://anysphere.cursor-deeplink/mcp/install?name=firecrawl&config=${btoa(
@@ -49,7 +51,44 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true } = {})
     }
   }
 }`;
-  const clients = [
+  const managedClients = [
+    {
+      id: "chatgpt",
+      name: "ChatGPT",
+      detail: "Paste URL in settings",
+      icon: "/images/agent-clients/chatgpt.svg",
+      iconClassName: "fc-client-icon-mono",
+      command: oauthUrl,
+      urlOnly: true,
+      description:
+        "In ChatGPT settings, enable Developer mode, open Apps & Connectors, select Create, set Authentication to OAuth, and paste this server URL:",
+      hint: (
+        <>
+          ChatGPT opens Firecrawl in your browser: sign in, choose a team, and approve
+          access. See the <a href="/developer-guides/mcp-setup-guides/chatgpt">full ChatGPT guide</a>.
+        </>
+      ),
+    },
+    {
+      id: "claude-ai",
+      name: "Claude.ai",
+      detail: "Paste URL in settings",
+      icon: "/images/agent-clients/claude-ai.svg",
+      iconClassName: "",
+      command: oauthUrl,
+      urlOnly: true,
+      description:
+        "In Claude.ai, open Settings > Connectors, select Add custom connector, leave the OAuth Client ID and Secret blank, and paste this URL:",
+      hint: (
+        <>
+          Claude opens Firecrawl in your browser: sign in, choose a team, and approve
+          access. Then enable Firecrawl from the <strong>+</strong> menu in a conversation.
+          See the <a href="/developer-guides/mcp-setup-guides/claude-ai">full Claude.ai guide</a>.
+        </>
+      ),
+    },
+  ];
+  const developerClients = [
     {
       id: "codex",
       name: "Codex",
@@ -138,7 +177,12 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true } = {})
       ),
     },
   ];
-  const [activeId, setActiveId] = useState("claude-code");
+  // Managed clients lead on the OAuth page; developer clients lead elsewhere.
+  // Codex stays first among developer clients (most-used harness).
+  const clients = isHuman
+    ? [...managedClients, ...developerClients]
+    : [...developerClients, ...managedClients];
+  const [activeId, setActiveId] = useState(clients[0].id);
   const [copiedId, setCopiedId] = useState(null);
   const [status, setStatus] = useState("");
   const tabRefs = useRef([]);
@@ -298,7 +342,7 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true } = {})
           <p>
             {isHuman
               ? "Sign in through your client's browser flow. No API key required."
-              : "Try keyless, or configure an API key for stable unattended access."}
+              : "Pick your client and connect. No API key required to start."}
           </p>
         </div>
         {showSeeAll && (
@@ -366,8 +410,8 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true } = {})
                 ? commandRow({
                     id: `code-${client.id}`,
                     command: client.command,
-                    label: "Command",
-                    prompt: true,
+                    label: client.urlOnly ? "Server URL" : "Command",
+                    prompt: !client.urlOnly,
                   })
                 : codeBlock({ client })}
               <p className="fc-client-hint">{client.hint}</p>

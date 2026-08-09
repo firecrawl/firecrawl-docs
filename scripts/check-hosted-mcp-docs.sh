@@ -56,7 +56,7 @@ done
 require "$chooser_page" "Choose the setup that matches how the connection will run."
 require "$chooser_page" '<CardGroup cols={3}>'
 require "$chooser_page" 'title="Try instantly"'
-require "$chooser_page" 'title="Connect with OAuth"'
+require "$chooser_page" 'title="Sign in with your account"'
 require "$chooser_page" 'title="Use an API key"'
 require "$chooser_page" "shared by users on the same public IP"
 require "$chooser_page" "https://mcp.firecrawl.dev/v2/mcp"
@@ -99,7 +99,7 @@ require "$selector" 'https://mcp.firecrawl.dev/v2/mcp-oauth'
 require "$selector" 'https://mcp.firecrawl.dev/v2/mcp'
 require "$selector" 'command: `codex mcp add firecrawl --url ${mcpUrl}`'
 require "$selector" 'The keyless endpoint does not start account sign-in.'
-require "$selector" 'useState("claude-code")'
+require "$selector" 'useState(clients[0].id)'
 require "$selector" 'href="/mcp-server"'
 forbid "$selector" 'codexKeylessConfig'
 forbid "$selector" '&& codex mcp login firecrawl'
@@ -167,14 +167,21 @@ forbid quickstarts/codex-cli.mdx 'FIRECRAWL_API_KEY = "'
 
 # Generic English links enter through the chooser rather than silently choosing keyless.
 require introduction.mdx "[Model Context Protocol](/mcp-server)"
-require introduction.mdx '## Quickstart'
+require introduction.mdx '## Get started'
+require introduction.mdx '<McpClientSelector />'
 require introduction.mdx 'No account or API key is required for this request.'
 require introduction.mdx '<ScrapeCURL />'
 require introduction.mdx "[llms-full.txt](https://docs.firecrawl.dev/llms-full.txt)"
-first_setup_line="$(grep -nF '## Quickstart' introduction.mdx | cut -d: -f1)"
+# Harness-first funnel: the MCP client selector leads, the direct API example follows.
+selector_line="$(grep -nF '<McpClientSelector />' introduction.mdx | head -1 | cut -d: -f1)"
+curl_line="$(grep -nF '<ScrapeCURL />' introduction.mdx | head -1 | cut -d: -f1)"
+if [ "$selector_line" -ge "$curl_line" ]; then
+  echo "Introduction must show the MCP client selector before the direct API example" >&2
+  exit 1
+fi
 agent_index_line="$(grep -nF '**For AI agents:**' introduction.mdx | cut -d: -f1)"
-if [ "$first_setup_line" -ge "$agent_index_line" ]; then
-  echo "Introduction must show the quickstart before the AI-agent index note" >&2
+if [ "$selector_line" -ge "$agent_index_line" ]; then
+  echo "Introduction must show harness setup before the AI-agent index note" >&2
   exit 1
 fi
 require integrations.mdx "[MCP server](/mcp-server)"
