@@ -1,4 +1,4 @@
-export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includeManaged = true } = {}) => {
+export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includeManaged = true, showHeader = true } = {}) => {
   // Clipboard API can be unavailable or denied; fall back to execCommand.
   // Inlined per component: Mintlify compiles snippet exports in isolation.
   const writeClipboard = async (text) => {
@@ -342,26 +342,32 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
 
   return (
     <div className="not-prose">
-    <section className="fc-agent-first" aria-labelledby="fc-mcp-heading">
+    <section
+      className="fc-agent-first"
+      aria-labelledby={showHeader ? "fc-mcp-heading" : undefined}
+      aria-label={showHeader ? undefined : "Set up Firecrawl MCP"}
+    >
       {curvyCorners()}
-      <div className="fc-agent-first-header">
-        <div>
-          <h3 id="fc-mcp-heading">Set up Firecrawl MCP</h3>
-          <p>
-            {isHuman
-              ? "Sign in through your client's browser flow. No API key required."
-              : "Pick your client and connect. No API key required to start."}
-          </p>
+      {showHeader && (
+        <div className="fc-agent-first-header">
+          <div>
+            <h3 id="fc-mcp-heading">Set up Firecrawl MCP</h3>
+            <p>
+              {isHuman
+                ? "Sign in through your client's browser flow. No API key required."
+                : "Pick your client and connect. No API key required to start."}
+            </p>
+          </div>
+          {showSeeAll && (
+            <a
+              className="fc-all-options-link"
+              href="/mcp-server"
+            >
+              See all setup options {arrowIcon()}
+            </a>
+          )}
         </div>
-        {showSeeAll && (
-          <a
-            className="fc-all-options-link"
-            href="/mcp-server"
-          >
-            See all setup options {arrowIcon()}
-          </a>
-        )}
-      </div>
+      )}
 
       <div className="fc-client-tabs" role="tablist" aria-label="Choose an MCP client">
         {clients.map((client, index) => {
