@@ -54,9 +54,10 @@ done
 
 # The entry page routes by outcome and gives recovery errors a stable landing point.
 require "$chooser_page" "Choose the setup that matches how the connection will run."
-require "$chooser_page" 'title="Try instantly with keyless MCP"'
+require "$chooser_page" '<CardGroup cols={3}>'
+require "$chooser_page" 'title="Try instantly"'
 require "$chooser_page" 'title="Connect with OAuth"'
-require "$chooser_page" 'title="Run with an API key"'
+require "$chooser_page" 'title="Use an API key"'
 require "$chooser_page" "shared by users on the same public IP"
 require "$chooser_page" "https://mcp.firecrawl.dev/v2/mcp"
 require "$chooser_page" "not a page to open directly in a browser"
@@ -170,14 +171,14 @@ forbid quickstarts/codex-cli.mdx 'FIRECRAWL_API_KEY = "'
 
 # Generic English links enter through the chooser rather than silently choosing keyless.
 require introduction.mdx "[Model Context Protocol](/mcp-server)"
-require introduction.mdx 'title="Try instantly with keyless MCP"'
-require introduction.mdx 'title="Connect with OAuth"'
-require introduction.mdx 'title="Run with an API key"'
+require introduction.mdx '## Quickstart'
+require introduction.mdx 'No account or API key is required for this request.'
+require introduction.mdx '<ScrapeCURL />'
 require introduction.mdx "[llms-full.txt](https://docs.firecrawl.dev/llms-full.txt)"
-first_setup_line="$(grep -nF 'title="Try instantly with keyless MCP"' introduction.mdx | cut -d: -f1)"
+first_setup_line="$(grep -nF '## Quickstart' introduction.mdx | cut -d: -f1)"
 agent_index_line="$(grep -nF '**For AI agents:**' introduction.mdx | cut -d: -f1)"
 if [ "$first_setup_line" -ge "$agent_index_line" ]; then
-  echo "Introduction must show MCP setup choices before the AI-agent index note" >&2
+  echo "Introduction must show the quickstart before the AI-agent index note" >&2
   exit 1
 fi
 require integrations.mdx "[MCP server](/mcp-server)"
