@@ -3,8 +3,8 @@
 set -eu
 
 chooser_page="mcp-server.mdx"
-keyless_page="mcp-server/agent-mcp.mdx"
-oauth_page="mcp-server/human-mcp.mdx"
+keyless_page="mcp-server/keyless-api-key.mdx"
+oauth_page="mcp-server/oauth.mdx"
 tools_page="mcp-server/tools.mdx"
 local_page="mcp-server/local.mdx"
 rate_limits="rate-limits.mdx"
@@ -42,7 +42,7 @@ if [ ! -e "$chooser_page" ]; then
   exit 1
 fi
 if [ -e "developer-guides/mcp-setup-guides/oauth.mdx" ]; then
-  echo "the old OAuth guide must remain folded into mcp-server/human-mcp.mdx" >&2
+  echo "the old OAuth guide must remain folded into mcp-server/oauth.mdx" >&2
   exit 1
 fi
 for retired_page in mcp-server/connect.mdx mcp-server/clients.mdx mcp-server/development.mdx; do
@@ -118,7 +118,7 @@ for source in /mcp-server/connect /mcp-server/clients /mcp-server/development; d
   fi
 done
 oauth_redirect="$(jq -r '.redirects[] | select(.source == "/developer-guides/mcp-setup-guides/oauth") | .destination' docs.json)"
-if [ "$oauth_redirect" != "/mcp-server/human-mcp" ]; then
+if [ "$oauth_redirect" != "/mcp-server/oauth" ]; then
   echo "the retired OAuth guide must redirect to the focused OAuth page" >&2
   exit 1
 fi
@@ -126,12 +126,13 @@ fi
 # English exposes the chooser as the MCP group root. Localized content is
 # translation-managed, so localized groups index the existing leaves without
 # directly editing or inventing translated chooser pages in this change.
-english_pages='["mcp-server/human-mcp","mcp-server/agent-mcp","mcp-server/tools","mcp-server/local"]'
+english_pages='["mcp-server/oauth","mcp-server/keyless-api-key","mcp-server/tools","mcp-server/local"]'
 english_count="$(jq --argjson pages "$english_pages" '[.navigation.languages[] | select(.language == "en") | .. | objects | select(.group? == "MCP" and .root? == "mcp-server" and .pages == $pages)] | length' docs.json)"
 if [ "$english_count" -ne 2 ]; then
   echo "expected two complete rooted English MCP nav groups, found $english_count" >&2
   exit 1
 fi
+# Localized files keep the translation-managed slugs until the pipeline syncs.
 for language in es fr ja pt-BR zh; do
   expected="[\"${language}/mcp-server/human-mcp\",\"${language}/mcp-server/agent-mcp\",\"${language}/mcp-server/tools\",\"${language}/mcp-server/local\"]"
   count="$(jq --arg language "$language" --argjson pages "$expected" '[.navigation.languages[] | select(.language == $language) | .. | objects | select(.group? == "MCP" and (has("root") | not) and .pages == $pages)] | length' docs.json)"
