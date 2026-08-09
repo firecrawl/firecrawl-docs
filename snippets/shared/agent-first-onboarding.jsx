@@ -55,7 +55,6 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
     {
       id: "chatgpt",
       name: "ChatGPT",
-      detail: "Paste URL",
       icon: "/images/agent-clients/chatgpt.svg",
       iconClassName: "fc-client-icon-mono",
       command: oauthUrl,
@@ -72,7 +71,6 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
     {
       id: "claude-ai",
       name: "Claude.ai",
-      detail: "Paste URL",
       icon: "/images/agent-clients/claude-ai.svg",
       iconClassName: "",
       command: oauthUrl,
@@ -92,7 +90,6 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
     {
       id: "codex",
       name: "Codex",
-      detail: "Run in terminal",
       icon: "/images/agent-clients/codex.svg",
       iconClassName: "",
       command: `codex mcp add firecrawl --url ${mcpUrl}`,
@@ -114,7 +111,6 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
     {
       id: "claude-code",
       name: "Claude Code",
-      detail: "Run in terminal",
       icon: "/images/agent-clients/claude-code.svg",
       iconClassName: "",
       command: `claude mcp add --transport http firecrawl ${mcpUrl}`,
@@ -132,7 +128,6 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
     {
       id: "cursor",
       name: "Cursor",
-      detail: "One-click + JSON",
       icon: "/images/agent-clients/cursor.svg",
       iconClassName: "fc-client-icon-mono",
       code: cursorConfig,
@@ -156,7 +151,6 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
     {
       id: "opencode",
       name: "OpenCode",
-      detail: "Copy config",
       icon: "/images/agent-clients/opencode.svg",
       iconClassName: "fc-client-icon-mono",
       code: opencodeConfig,
@@ -397,7 +391,6 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
               />
               <span className="fc-client-tab-copy">
                 <strong>{client.name}</strong>
-                <span>{client.detail}</span>
               </span>
             </button>
           );
