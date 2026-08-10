@@ -10,7 +10,7 @@ local_page="mcp-server/local.mdx"
 rate_limits="rate-limits.mdx"
 ai_onboarding="ai-onboarding.mdx"
 selector="snippets/shared/agent-first-onboarding.jsx"
-reviewed_mcp_version="3.23.6"
+reviewed_mcp_version="3.23.7"
 
 require() {
   file="$1"
