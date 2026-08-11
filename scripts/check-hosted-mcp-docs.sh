@@ -113,6 +113,7 @@ require "$human_page" '<Visibility for="humans">'
 require "$human_page" '<Visibility for="agents">'
 require "$human_page" 'https://mcp.firecrawl.dev/v2/mcp-oauth'
 require "$human_page" 'codex mcp add firecrawl --url https://mcp.firecrawl.dev/v2/mcp-oauth'
+require "$human_page" "## Sign in"
 require "$human_page" "## Add an API key"
 require "$human_page" "URL: https://mcp.firecrawl.dev/v2/mcp"
 require "$human_page" "Authorization: Bearer <FIRECRAWL_API_KEY>"
