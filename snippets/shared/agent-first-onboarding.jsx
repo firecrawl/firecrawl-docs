@@ -297,7 +297,7 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true } = {})
           <h3 id="fc-mcp-heading">Set up Firecrawl MCP</h3>
           <p>
             {isHuman
-              ? "Sign in via browser, or add an API key."
+              ? "Sign in via browser."
               : "No API key required. Add an API key to unlock more usage."}
           </p>
         </div>

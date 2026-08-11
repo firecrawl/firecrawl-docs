@@ -61,14 +61,14 @@ done
 require "$chooser_page" "sidebarTitle: 'Get Started'"
 require "$chooser_page" "title: Get Started"
 require "$chooser_page" '<CardGroup cols={3}>'
-require "$chooser_page" 'title="Keyless"'
-require "$chooser_page" 'title="Sign in"'
-require "$chooser_page" 'title="API key"'
+require "$chooser_page" 'title="Try Instantly"'
+require "$chooser_page" 'title="Sign in with your account"'
+require "$chooser_page" 'title="Use an API key"'
 require "$chooser_page" 'href="/mcp-server/keyless#try-keyless"'
 require "$chooser_page" 'href="/mcp-server/oauth"'
 # An API key is not audience-specific: a person configuring CI and an agent in a
 # harness send the identical Bearer header. It stays on this neutral page instead
-# of being filed under either audience.
+# of being filed under For Humans.
 require "$chooser_page" 'href="/mcp-server#add-an-api-key"'
 require "$chooser_page" "## Add an API key"
 require "$chooser_page" "Authorization: Bearer <FIRECRAWL_API_KEY>"
@@ -76,6 +76,8 @@ require "$chooser_page" "Authorization: Bearer <FIRECRAWL_API_KEY>"
 require "$chooser_page" 'title="For Agents"'
 require "$chooser_page" 'title="For Humans"'
 require "$chooser_page" 'href="/mcp-server/keyless"'
+require "$chooser_page" "Sign in via browser."
+forbid "$chooser_page" "Sign in via browser or use an API key."
 forbid "$chooser_page" "## Fix a broken connection"
 # Tools and Run locally are deliberately out of the primary nav, so the chooser
 # and both audience pages have to keep them reachable.
@@ -106,7 +108,8 @@ require "$agent_page" "/mcp-server/local"
 forbid "$agent_page" "mcp-search"
 forbid "$agent_page" "/v2/mcp-search"
 
-# For Humans owns sign-in on /v2/mcp-oauth; the API-key fallback uses /v2/mcp + Bearer.
+# For Humans owns sign-in on /v2/mcp-oauth. API key setup stays on /v2/mcp
+# (chooser + For Agents); this page only hands off with a link.
 require "$human_page" "sidebarTitle: 'For Humans'"
 require "$human_page" 'variant="human"'
 require "$human_page" '<Visibility for="humans">'
@@ -115,11 +118,11 @@ require "$human_page" 'https://mcp.firecrawl.dev/v2/mcp-oauth'
 require "$human_page" 'codex mcp add firecrawl --url https://mcp.firecrawl.dev/v2/mcp-oauth'
 require "$human_page" "## Sign in"
 require "$human_page" "## Add an API key"
-require "$human_page" "URL: https://mcp.firecrawl.dev/v2/mcp"
-require "$human_page" "Authorization: Bearer <FIRECRAWL_API_KEY>"
+require "$human_page" 'href="/mcp-server/keyless#add-an-api-key"'
+forbid "$human_page" "Authorization: Bearer <FIRECRAWL_API_KEY>"
 require "$human_page" "https://www.firecrawl.dev/app/settings?tab=mcp"
 require "$human_page" "https://chatgpt.com/plugins?q=firecrawl"
-require "$human_page" "https://claude.ai/new#settings/customize-connectors/66568f32-0968-4801-94e9-d7eec28a3b2d"
+require "$human_page" "https://claude.ai/directory/connectors/firecrawl"
 require "$human_page" "## ChatGPT and Claude"
 forbid "$human_page" "Short walkthroughs"
 require "$human_page" "/mcp-server/tools"
@@ -165,9 +168,10 @@ if ! grep -q 'fc-agent-first-footer"' "$selector"; then
 fi
 forbid "$selector" 'fc-footer-outside'
 forbid style.css 'fc-footer-outside'
-# Both audience pages offer an API key, so neither subtitle may claim otherwise.
-require "$selector" 'Sign in via browser, or add an API key.'
+# For Humans is sign-in only; API key stays on the chooser and For Agents.
+require "$selector" 'Sign in via browser.'
 require "$selector" 'No API key required. Add an API key to unlock more usage.'
+forbid "$selector" 'Sign in via browser, or add an API key.'
 # See-all points at the audience page for the variant on screen.
 require "$selector" '"/mcp-server/oauth" : "/mcp-server/keyless"'
 forbid "$selector" 'codexKeylessConfig'
@@ -208,13 +212,12 @@ check_redirect /mcp-server/keyless-api-key /mcp-server/keyless
 check_redirect /mcp-server/agent-mcp /mcp-server/keyless
 check_redirect /mcp-server/human-mcp /mcp-server/oauth
 
-# English nav is Get Started, then For Agents, then For Humans. The group has no
-# root: the chooser is a normal first child, so footer pagination walks the funnel
-# in order instead of pointing the chooser at itself.
+# English nav is Get Started, then For Agents, then For Humans. The group root
+# is the chooser so clicking MCP expands and opens Get Started.
 english_pages='["mcp-server","mcp-server/keyless","mcp-server/oauth"]'
-english_count="$(jq --argjson pages "$english_pages" '[.navigation.languages[] | select(.language == "en") | .. | objects | select(.group? == "MCP" and (has("root") | not) and (has("icon") | not) and .pages == $pages)] | length' docs.json)"
+english_count="$(jq --argjson pages "$english_pages" '[.navigation.languages[] | select(.language == "en") | .. | objects | select(.group? == "MCP" and .root? == "mcp-server" and (has("icon") | not) and .pages == $pages)] | length' docs.json)"
 if [ "$english_count" -ne 2 ]; then
-  echo "expected two icon-free English MCP nav groups of Get Started, For Agents, For Humans; found $english_count" >&2
+  echo "expected two icon-free English MCP nav groups rooted at Get Started; found $english_count" >&2
   exit 1
 fi
 # Tools and Run locally stay out of the primary nav and are reached from the pages.
