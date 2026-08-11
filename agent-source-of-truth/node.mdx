@@ -3,7 +3,7 @@ title: "Node.js Source of Truth"
 description: "Canonical Firecrawl Node.js source of truth for agents using key endpoints like search, scrape, and interact."
 ---
 
-Canonical Firecrawl Node.js source of truth for agents. Aligned with `firecrawl` **v4.18.2** (`firecrawl/apps/js-sdk/firecrawl`) and the v2 OpenAPI spec. Method names, parameters, and types match the SDK public API.
+Canonical Firecrawl Node.js source of truth for agents. Aligned with `firecrawl` **v4.32.0** (`firecrawl/apps/js-sdk/firecrawl`) and the v2 OpenAPI spec. Method names, parameters, and types match the SDK public API.
 
 ## Install
 
@@ -51,12 +51,15 @@ const results = await client.search("site:docs.firecrawl.dev webhook retries");
 ```ts
 const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
   sources: ["web", "news"],
-  categories: ["research"],
+  categories: ["research", "developer"],
   limit: 10,
   tbs: "qdr:m",
   location: "San Francisco,California,United States",
+  includeDomains: ["docs.firecrawl.dev"],
   ignoreInvalidURLs: true,
+  highlights: true,
   timeout: 60000,
+  enterprise: ["default"],
   scrapeOptions: {
     formats: [
       "markdown",
@@ -78,8 +81,9 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
 - `web`: web index hits
 - `news`: news hits
 - `images`: image hits
+- `developer`: developer-focused hits
 
-**Wrong turn to avoid:** `search()` does not return `{ data: [...] }`. Do not access `result.data`. Web results are in `result.web`, news in `result.news`, images in `result.images`.
+**Wrong turn to avoid:** `search()` does not return `{ data: [...] }`. Do not access `result.data`. Web results are in `result.web`, news in `result.news`, images in `result.images`, developer results in `result.developer`.
 
 ### Parameters
 
@@ -107,7 +111,18 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
     - `"github"`: GitHub-focused results
     - `"research"`: research and academic results
     - `"pdf"`: PDF-focused results
-    - `{ type: "github" | "research" | "pdf" }`: typed category object form
+    - `"developer"`: developer-focused results
+    - `{ type: "github" | "research" | "pdf" | "developer" }`: typed category object form
+
+- `options.includeDomains`
+  - Type: array of strings
+  - Use when: you want to restrict results to specific domains.
+  - Notes: cannot be used together with `excludeDomains`.
+
+- `options.excludeDomains`
+  - Type: array of strings
+  - Use when: you want to exclude specific domains from results.
+  - Notes: cannot be used together with `includeDomains`.
 
 - `options.limit`
   - Type: number
@@ -125,9 +140,30 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
   - Type: boolean
   - Use when: you want to drop URLs that cannot be scraped by other endpoints.
 
+- `options.highlights`
+  - Type: boolean
+  - Use when: you want highlighted snippets in search results.
+  - Notes: defaults to `true`.
+
 - `options.timeout`
   - Type: number
   - Use when: you need a request timeout in milliseconds.
+
+- `options.enterprise`
+  - Type: array of strings
+  - Use when: you need enterprise-grade search capabilities.
+  - Confirmed values: `"default"`, `"anon"`, `"zdr"`
+
+- `options.threatProtection`
+  - Type: `ThreatProtectionOptions`
+  - Use when: you want threat-level filtering on search results.
+  - Fields:
+    - `mode`: `"off"` or `"normal"`
+    - `riskScoreThreshold`: number
+    - `blacklist`: array of strings
+    - `whitelist`: array of strings
+    - `blockedTlds`: array of strings
+    - `failurePolicy`: `"open"` or `"closed"`
 
 - `options.scrapeOptions`
   - Type: `ScrapeOptions`
@@ -158,6 +194,7 @@ const doc = await client.scrape("https://example.com/pricing", {
   formats: [
     "markdown",
     "links",
+    "product",
     { type: "json", prompt: "Extract plan names and prices." },
     { type: "screenshot", fullPage: true, quality: 80, viewport: { width: 1280, height: 720 } },
     { type: "changeTracking", modes: ["git-diff"], tag: "pricing" },
@@ -182,7 +219,12 @@ const doc = await client.scrape("https://example.com/pricing", {
   maxAge: 86400000,
   minAge: 1,
   storeInCache: true,
-  profile: { name: "docs-session", saveChanges: true }
+  lockdown: true,
+  redactPII: { mode: "accurate", entities: ["EMAIL", "PHONE"], replaceStyle: "tag" },
+  threatProtection: { mode: "normal", riskScoreThreshold: 50 },
+  auditMetadata: { username: "bot-user" },
+  profile: { name: "docs-session", saveChanges: true },
+  integration: "custom-integration"
 });
 ```
 
@@ -206,6 +248,8 @@ const doc = await client.scrape("https://example.com/pricing", {
     - `"changeTracking"`: change tracking output (for options like `modes`, use `{ type: "changeTracking", modes: [...] }` — `modes` is required on that object in typings)
     - `"attributes"`: attribute extraction (use `{ type: "attributes", selectors: [...] }` when passing selectors)
     - `"branding"`: branding profile output
+    - `"product"`: product data extraction
+    - `"menu"`: menu/navigation extraction
     - `"audio"`: audio extraction
     - `"video"`: video extraction
   - Object-only format types (at minimum `type` as shown):
@@ -312,9 +356,43 @@ const doc = await client.scrape("https://example.com/pricing", {
   - Type: boolean
   - Use when: you want Firecrawl to cache the result.
 
+- `options.lockdown`
+  - Type: boolean
+  - Use when: you want to restrict the scrape to the exact URL without following redirects or loading external resources.
+
+- `options.redactPII`
+  - Type: boolean or `RedactPIIOptions`
+  - Use when: you want to redact personally identifiable information from the output.
+  - Pass `true` for default redaction, or an options object for fine-grained control.
+  - `RedactPIIOptions` fields:
+    - `mode`: `"accurate"`, `"aggressive"`, or `"fast"`
+    - `entities`: array of entity types to redact — `"PERSON"`, `"EMAIL"`, `"PHONE"`, `"LOCATION"`, `"FINANCIAL"`, `"SECRET"`
+    - `replaceStyle`: `"tag"`, `"mask"`, or `"remove"`
+
+- `options.threatProtection`
+  - Type: `ThreatProtectionOptions`
+  - Use when: you want threat-level filtering before scraping a URL.
+  - Fields:
+    - `mode`: `"off"` or `"normal"`
+    - `riskScoreThreshold`: number
+    - `blacklist`: array of strings
+    - `whitelist`: array of strings
+    - `blockedTlds`: array of strings
+    - `failurePolicy`: `"open"` or `"closed"`
+
+- `options.auditMetadata`
+  - Type: `AuditMetadata`
+  - Use when: you want to attach audit information to the scrape request.
+  - Fields:
+    - `username`: string (required)
+
 - `options.profile`
   - Type: object with `name` and optional `saveChanges`
   - Use when: you want a persistent browser profile shared across scrapes and interactions.
+
+- `options.integration`
+  - Type: string
+  - Use when: you want to tag the scrape with a specific integration identifier.
 
 ## Interact
 
@@ -379,6 +457,7 @@ const result = await client.interact("<scrapeJobId>", {
 `ScrapeExecuteResponse` matches `BrowserExecuteResponse`. Confirmed fields include:
 
 - `success`: boolean
+- `cdpUrl`: string
 - `output`: string (aggregated output when present)
 - `stdout`: string
 - `result`: string (alias-style field alongside stdout in typings)
@@ -526,7 +605,7 @@ console.log(result.answer);
 
 ## Notes
 
-- Deprecated client aliases: `scrapeExecute` → `interact`; `stopInteractiveBrowser` and `deleteScrapeBrowser` → `stopInteraction`.
+- Deprecated client aliases: `scrapeExecute` → `interact`; `stopInteractiveBrowser` and `deleteScrapeBrowser` → `stopInteraction`; `scrapeUrl` → `scrape`; `crawlUrl` → `crawl`; `mapUrl` → `map`.
 - The default `Firecrawl` export is the v2 client; v1 remains under `client.v1`.
 - Zod schemas passed to `formats` (for `json` or `changeTracking`) are converted to JSON Schema by the SDK.
 - The package declares **Node.js >= 22** in `engines`.
