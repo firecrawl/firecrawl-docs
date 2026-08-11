@@ -163,7 +163,7 @@ fi
 forbid "$selector" 'fc-footer-outside'
 forbid style.css 'fc-footer-outside'
 # Both audience pages offer an API key, so neither subtitle may claim otherwise.
-require "$selector" 'Sign in to connect. An API key works too.'
+require "$selector" 'Sign in via browser, or add an API key.'
 require "$selector" 'No API key required. Add an API key to unlock more usage.'
 # See-all points at the audience page for the variant on screen.
 require "$selector" '"/mcp-server/oauth" : "/mcp-server/keyless"'
