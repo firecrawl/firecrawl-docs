@@ -62,16 +62,16 @@ require "$chooser_page" "sidebarTitle: 'Get Started'"
 require "$chooser_page" "title: Get Started"
 require "$chooser_page" '<CardGroup cols={3}>'
 require "$chooser_page" 'title="Try Instantly"'
-require "$chooser_page" 'title="Sign in with your account"'
+require "$chooser_page" 'title="Sign in"'
 require "$chooser_page" 'title="Use an API key"'
+forbid "$chooser_page" 'title="Sign in with your account"'
 require "$chooser_page" 'href="/mcp-server/keyless#try-keyless"'
 require "$chooser_page" 'href="/mcp-server/oauth"'
-# An API key is not audience-specific: a person configuring CI and an agent in a
-# harness send the identical Bearer header. It stays on this neutral page instead
-# of being filed under For Humans.
-require "$chooser_page" 'href="/mcp-server#add-an-api-key"'
+# API key setup lives on For Agents (/v2/mcp). The chooser card routes there.
+require "$chooser_page" 'href="/mcp-server/keyless#add-an-api-key"'
 require "$chooser_page" "## Add an API key"
 require "$chooser_page" "Authorization: Bearer <FIRECRAWL_API_KEY>"
+forbid "$chooser_page" 'href="/mcp-server#add-an-api-key"'
 # Both full client walkthroughs stay reachable from the entry page.
 require "$chooser_page" 'title="For Agents"'
 require "$chooser_page" 'title="For Humans"'
@@ -119,7 +119,9 @@ require "$human_page" 'codex mcp add firecrawl --url https://mcp.firecrawl.dev/v
 require "$human_page" "## Sign in"
 require "$human_page" "## Add an API key"
 require "$human_page" 'href="/mcp-server/keyless#add-an-api-key"'
+forbid "$human_page" "<Tip>"
 forbid "$human_page" "Authorization: Bearer <FIRECRAWL_API_KEY>"
+forbid "$human_page" 'cta="Go to For Agents"'
 require "$human_page" "https://www.firecrawl.dev/app/settings?tab=mcp"
 require "$human_page" "https://chatgpt.com/plugins?q=firecrawl"
 require "$human_page" "https://claude.ai/directory/connectors/firecrawl"
