@@ -1,4 +1,4 @@
-export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includeManaged = true, showHeader = true } = {}) => {
+export const McpClientSelector = ({ variant = "agent", showSeeAll = true } = {}) => {
   // Clipboard API can be unavailable or denied; fall back to execCommand.
   // Inlined per component: Mintlify compiles snippet exports in isolation.
   const writeClipboard = async (text) => {
@@ -27,8 +27,6 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
   const mcpUrl = isHuman
     ? "https://mcp.firecrawl.dev/v2/mcp-oauth"
     : "https://mcp.firecrawl.dev/v2/mcp";
-  // ChatGPT and Claude.ai always connect through account sign-in, regardless of variant.
-  const oauthUrl = "https://mcp.firecrawl.dev/v2/mcp-oauth";
   // Deep link config is always {"url": mcpUrl}; compute it instead of hardcoding
   // so a different variant's URL can never drift out of sync with the JSON below.
   const cursorInstallUrl = `cursor://anysphere.cursor-deeplink/mcp/install?name=firecrawl&config=${btoa(
@@ -51,55 +49,21 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
     }
   }
 }`;
-  const managedClients = [
-    {
-      id: "chatgpt",
-      name: "ChatGPT",
-      icon: "/images/agent-clients/chatgpt.svg",
-      iconClassName: "fc-client-icon-mono",
-      command: oauthUrl,
-      urlOnly: true,
-      description:
-        "In ChatGPT settings, enable Developer mode, open Apps & Connectors, select Create, set Authentication to OAuth, and paste this server URL:",
-      hint: (
-        <>
-          ChatGPT opens Firecrawl in your browser: sign in, choose a team, and approve
-          access. See the <a href="/developer-guides/mcp-setup-guides/chatgpt">full ChatGPT guide</a>.
-        </>
-      ),
-    },
-    {
-      id: "claude-ai",
-      name: "Claude.ai",
-      icon: "/images/agent-clients/claude-ai.svg",
-      iconClassName: "",
-      command: oauthUrl,
-      urlOnly: true,
-      description:
-        "In Claude.ai, open Settings > Connectors, select Add custom connector, leave the OAuth Client ID and Secret blank, and paste this URL:",
-      hint: (
-        <>
-          Claude opens Firecrawl in your browser: sign in, choose a team, and approve
-          access. Then enable Firecrawl from the <strong>+</strong> menu in a conversation.
-          See the <a href="/developer-guides/mcp-setup-guides/claude-ai">full Claude.ai guide</a>.
-        </>
-      ),
-    },
-  ];
-  const developerClients = [
+  const clients = [
     {
       id: "codex",
       name: "Codex",
+      detail: "Run in terminal",
       icon: "/images/agent-clients/codex.svg",
       iconClassName: "",
-      command: `codex mcp add firecrawl --url ${mcpUrl}`,
-      description: isHuman
-        ? "Run this in your terminal. Codex normally opens the Firecrawl sign-in automatically."
-        : "Run this in your terminal to add Firecrawl as a keyless remote MCP server. The keyless endpoint does not start account sign-in.",
+      command: isHuman
+        ? `codex mcp add firecrawl --url ${mcpUrl} && codex mcp login firecrawl`
+        : `codex mcp add firecrawl --url ${mcpUrl}`,
+      description: "Run this in your terminal to add Firecrawl as a remote MCP server in Codex.",
       hint: isHuman ? (
         <>
-          If no browser opens, run <code>codex mcp login firecrawl</code>. Then enter{" "}
-          <code>/mcp</code> in Codex and confirm <strong>firecrawl</strong> is connected.
+          Then enter <code>/mcp</code> in Codex and confirm <strong>firecrawl</strong> is
+          connected.
         </>
       ) : (
         <>
@@ -111,6 +75,7 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
     {
       id: "claude-code",
       name: "Claude Code",
+      detail: "Run in terminal",
       icon: "/images/agent-clients/claude-code.svg",
       iconClassName: "",
       command: `claude mcp add --transport http firecrawl ${mcpUrl}`,
@@ -128,6 +93,7 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
     {
       id: "cursor",
       name: "Cursor",
+      detail: "One-click + JSON",
       icon: "/images/agent-clients/cursor.svg",
       iconClassName: "fc-client-icon-mono",
       code: cursorConfig,
@@ -151,6 +117,7 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
     {
       id: "opencode",
       name: "OpenCode",
+      detail: "Copy config",
       icon: "/images/agent-clients/opencode.svg",
       iconClassName: "fc-client-icon-mono",
       code: opencodeConfig,
@@ -171,23 +138,6 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
       ),
     },
   ];
-  // Managed clients lead on the OAuth page; developer clients lead elsewhere.
-  // Codex stays first among developer clients (most-used harness).
-  // ChatGPT and Claude.ai always configure the OAuth endpoint, so pages scoped
-  // to the keyless /v2/mcp surface exclude them with includeManaged={false}.
-  const clients = isHuman
-    ? [...managedClients, ...developerClients]
-    : includeManaged
-      ? [...developerClients, ...managedClients]
-      : [...developerClients];
-  // Optional GA4 events; no-op when analytics is unavailable.
-  const track = (name, params) => {
-    try {
-      window.gtag?.("event", name, params);
-    } catch {
-      /* analytics must never break setup */
-    }
-  };
   const [activeId, setActiveId] = useState(clients[0].id);
   const [copiedId, setCopiedId] = useState(null);
   const [status, setStatus] = useState("");
@@ -198,7 +148,6 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
 
   const copy = async (id, text, label) => {
     const copied = await writeClipboard(text);
-    track("mcp_setup_copy", { item: id, variant, copied });
     if (copied) {
       window.clearTimeout(timeoutRef.current);
       setCopiedId(id);
@@ -325,7 +274,6 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
   const selectTab = (index) => {
     const client = clients[index];
     setActiveId(client.id);
-    track("mcp_client_tab_selected", { client: client.id, variant });
     tabRefs.current[index]?.focus();
   };
   const handleKeyDown = (event, index) => {
@@ -342,33 +290,26 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
   };
 
   return (
-    <div className="not-prose">
-    <section
-      className="fc-agent-first"
-      aria-labelledby={showHeader ? "fc-mcp-heading" : undefined}
-      aria-label={showHeader ? undefined : "Set up Firecrawl MCP"}
-    >
+    <section className="fc-agent-first not-prose" aria-labelledby="fc-mcp-heading">
       {curvyCorners()}
-      {showHeader && (
-        <div className="fc-agent-first-header">
-          <div>
-            <h3 id="fc-mcp-heading">Set up Firecrawl MCP</h3>
-            <p>
-              {isHuman
-                ? "Sign in through your client's browser flow. No API key required."
-                : "Pick your client and connect. No API key required to start."}
-            </p>
-          </div>
-          {showSeeAll && (
-            <a
-              className="fc-all-options-link"
-              href="/mcp-server"
-            >
-              See all setup options {arrowIcon()}
-            </a>
-          )}
+      <div className="fc-agent-first-header">
+        <div>
+          <h3 id="fc-mcp-heading">Set up Firecrawl MCP</h3>
+          <p>
+            {isHuman
+              ? "Sign in to connect. An API key works too."
+              : "No API key required. Add an API key to unlock more usage."}
+          </p>
         </div>
-      )}
+        {showSeeAll && (
+          <a
+            className="fc-all-options-link"
+            href={isHuman ? "/mcp-server/oauth" : "/mcp-server/keyless"}
+          >
+            See all setup options {arrowIcon()}
+          </a>
+        )}
+      </div>
 
       <div className="fc-client-tabs" role="tablist" aria-label="Choose an MCP client">
         {clients.map((client, index) => {
@@ -386,10 +327,7 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
               aria-selected={selected}
               aria-controls={`fc-panel-${client.id}`}
               tabIndex={selected ? 0 : -1}
-              onClick={() => {
-                setActiveId(client.id);
-                track("mcp_client_tab_selected", { client: client.id, variant });
-              }}
+              onClick={() => setActiveId(client.id)}
               onKeyDown={(event) => handleKeyDown(event, index)}
             >
               <span
@@ -399,6 +337,7 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
               />
               <span className="fc-client-tab-copy">
                 <strong>{client.name}</strong>
+                <span>{client.detail}</span>
               </span>
             </button>
           );
@@ -427,8 +366,8 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
                 ? commandRow({
                     id: `code-${client.id}`,
                     command: client.command,
-                    label: client.urlOnly ? "Server URL" : "Command",
-                    prompt: !client.urlOnly,
+                    label: "Command",
+                    prompt: true,
                   })
                 : codeBlock({ client })}
               <p className="fc-client-hint">{client.hint}</p>
@@ -436,15 +375,14 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true, includ
           );
         })}
       </div>
+      <div className="fc-agent-first-footer">
+        <p className="fc-footer-lead">Using another MCP client? Point it at:</p>
+        {commandRow({ id: "endpoint-url", command: mcpUrl, label: "Endpoint URL" })}
+      </div>
       <span className="fc-sr-only" aria-live="polite">
         {status}
       </span>
     </section>
-    <div className="fc-agent-first-footer fc-footer-outside">
-      <p className="fc-footer-lead">Using another MCP client? Point it at:</p>
-      {commandRow({ id: "endpoint-url", command: mcpUrl, label: "Endpoint URL" })}
-    </div>
-    </div>
   );
 };
 
