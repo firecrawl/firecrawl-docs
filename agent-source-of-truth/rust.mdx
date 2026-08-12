@@ -11,7 +11,7 @@ Canonical Firecrawl Rust source of truth for agents. Generated from SDK source a
 cargo add firecrawl
 ```
 
-Crate: **`firecrawl`** on crates.io. The current SDK version is **2.0.0** (verify the latest release on crates.io before pinning).
+Crate: **`firecrawl`** on crates.io. The current SDK version is **2.12.1** (verify the latest release on crates.io before pinning).
 
 ## Authenticate
 
@@ -64,7 +64,10 @@ let options = SearchOptions {
     limit: Some(10),
     tbs: Some("qdr:m".to_string()),
     location: Some("San Francisco,California,United States".to_string()),
+    include_domains: Some(vec!["docs.firecrawl.dev".to_string()]),
+    exclude_domains: Some(vec!["old.firecrawl.dev".to_string()]),
     ignore_invalid_urls: Some(true),
+    highlights: Some(true),
     timeout: Some(60000),
     scrape_options: Some(ScrapeOptions {
         formats: Some(vec![Format::Markdown, Format::Links, Format::Json]),
@@ -125,9 +128,21 @@ let results = client
   - Type: String
   - Use when: you want localized results.
 
+- `options.include_domains`
+  - Type: `Vec<String>`
+  - Use when: you want to restrict results to specific domains.
+
+- `options.exclude_domains`
+  - Type: `Vec<String>`
+  - Use when: you want to exclude results from specific domains.
+
 - `options.ignore_invalid_urls`
   - Type: bool
   - Use when: you want to drop URLs that cannot be scraped by other endpoints.
+
+- `options.highlights`
+  - Type: bool
+  - Use when: you want highlighted snippets in search results.
 
 - `options.timeout`
   - Type: u32
@@ -170,7 +185,8 @@ let doc = client
 ```rust
 use firecrawl::{
     Client, ScrapeOptions, Format, JsonOptions, ScreenshotOptions, ChangeTrackingOptions,
-    ChangeTrackingMode, AttributeSelector, Action, ParserConfig, ProxyType,
+    ChangeTrackingMode, AttributeSelector, Action, ParserConfig, ProxyType, AuditMetadata,
+    QuestionFormat, HighlightsFormat,
 };
 
 let doc = client
@@ -182,6 +198,14 @@ let doc = client
             Format::Screenshot,
             Format::ChangeTracking,
             Format::Attributes,
+            Format::Product,
+            Format::Menu,
+            Format::Question(QuestionFormat {
+                question: "What are the pricing tiers?".to_string(),
+            }),
+            Format::Highlights(HighlightsFormat {
+                query: "enterprise plan".to_string(),
+            }),
         ]),
         json_options: Some(JsonOptions {
             prompt: Some("Extract plan names and prices.".to_string()),
@@ -211,6 +235,11 @@ let doc = client
             Action::Scrape,
         ]),
         proxy: Some(ProxyType::Auto),
+        lockdown: Some(true),
+        redact_pii: Some(true),
+        audit_metadata: Some(AuditMetadata {
+            username: "agent-user".to_string(),
+        }),
         ..Default::default()
     })
     .await?;
@@ -225,7 +254,11 @@ let doc = client
 - `options.formats`
   - Type: `Vec<Format>`
   - Use when: you want multiple output formats.
-  - Confirmed values: `Markdown`, `Html`, `RawHtml`, `Links`, `Images`, `Screenshot`, `Summary`, `ChangeTracking`, `Json`, `Attributes`, `Branding`, `Audio`, `Video`
+  - Confirmed simple values: `Markdown`, `Html`, `RawHtml`, `Links`, `Images`, `Screenshot`, `Summary`, `ChangeTracking`, `Json`, `Attributes`, `Branding`, `Product`, `Menu`, `Audio`, `Video`
+  - Confirmed object variants:
+    - `Question(QuestionFormat)` — serialized as `{ "type": "question", "question": "..." }`
+    - `Highlights(HighlightsFormat)` — serialized as `{ "type": "highlights", "query": "..." }`
+  - Deprecated: `Query(QueryFormat)` — use `Question` or `Highlights` instead.
 
 - `options.headers`
   - Type: `HashMap<String, String>`
@@ -313,6 +346,20 @@ let doc = client
 - `options.store_in_cache`
   - Type: bool
   - Use when: you want Firecrawl to cache the result.
+
+- `options.lockdown`
+  - Type: bool
+  - Use when: you want to enable lockdown mode for the scrape.
+
+- `options.redact_pii`
+  - Type: bool
+  - Use when: you want personally identifiable information redacted from the output.
+  - Notes: serialized as `redactPII` in the JSON payload.
+
+- `options.audit_metadata`
+  - Type: `AuditMetadata`
+  - Use when: you want to attach audit metadata to the scrape request.
+  - Confirmed fields: `username`
 
 - `options.profile`
   - Type: `ProfileConfig`
@@ -421,11 +468,6 @@ let stopped = client.stop_interaction("<scrapeJobId>").await?;
   - Type: u32
   - Use when: you need an execution timeout in seconds.
 
-- `options.origin`
-  - Type: `Option<String>`
-  - Use when: you need an optional origin label for execution telemetry.
-  - Notes: omit in agent-oriented examples unless your product intentionally sets it.
-
 At least one of `options.code` or `options.prompt` must be non-empty; otherwise the SDK returns `FirecrawlError::Misuse` before calling the API.
 
 ### Response types
@@ -440,6 +482,7 @@ The v2 OpenAPI spec currently models the interact request body with `code` as re
 ## Notes
 
 - Deprecated aliases: `scrape_execute`, `stop_interactive_browser`, and `delete_scrape_browser` map to `interact` and `stop_interaction`.
+- Deprecated format: `Format::Query(QueryFormat)` — use `Format::Question(QuestionFormat)` or `Format::Highlights(HighlightsFormat)` instead.
 - `ScrapeOptions` includes dedicated `json_options`, `screenshot_options`, and `change_tracking_options` for advanced formats.
 - `search_and_scrape(query, limit)` is a convenience helper: it calls `search` with default `ScrapeOptions` and returns `Vec<Document>` built from `SearchResultOrDocument::Document` entries in `data.web` (see `search.rs`).
 - v2 SDK exports all types at the crate root: `use firecrawl::Client` (not `use firecrawl::v2::Client`).
