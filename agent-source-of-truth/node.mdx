@@ -3,7 +3,7 @@ title: "Node.js Source of Truth"
 description: "Canonical Firecrawl Node.js source of truth for agents using key endpoints like search, scrape, and interact."
 ---
 
-Canonical Firecrawl Node.js source of truth for agents. Aligned with `firecrawl` **v4.18.2** (`firecrawl/apps/js-sdk/firecrawl`) and the v2 OpenAPI spec. Method names, parameters, and types match the SDK public API.
+Canonical Firecrawl Node.js source of truth for agents. Aligned with `firecrawl` **v4.32.0** (`firecrawl/apps/js-sdk/firecrawl`) and the v2 OpenAPI spec. Method names, parameters, and types match the SDK public API.
 
 ## Install
 
@@ -55,6 +55,8 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
   limit: 10,
   tbs: "qdr:m",
   location: "San Francisco,California,United States",
+  includeDomains: ["docs.firecrawl.dev"],
+  highlights: true,
   ignoreInvalidURLs: true,
   timeout: 60000,
   scrapeOptions: {
@@ -78,6 +80,7 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
 - `web`: web index hits
 - `news`: news hits
 - `images`: image hits
+- `developer`: developer-focused hits
 
 **Wrong turn to avoid:** `search()` does not return `{ data: [...] }`. Do not access `result.data`. Web results are in `result.web`, news in `result.news`, images in `result.images`.
 
@@ -107,7 +110,18 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
     - `"github"`: GitHub-focused results
     - `"research"`: research and academic results
     - `"pdf"`: PDF-focused results
-    - `{ type: "github" | "research" | "pdf" }`: typed category object form
+    - `"developer"`: developer-focused results
+    - `{ type: "github" | "research" | "pdf" | "developer" }`: typed category object form
+
+- `options.includeDomains`
+  - Type: array of strings
+  - Use when: you want to restrict results to specific domains.
+  - Notes: cannot be combined with `excludeDomains`.
+
+- `options.excludeDomains`
+  - Type: array of strings
+  - Use when: you want to exclude results from specific domains.
+  - Notes: cannot be combined with `includeDomains`.
 
 - `options.limit`
   - Type: number
@@ -121,6 +135,11 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
   - Type: string
   - Use when: you want localized results.
 
+- `options.highlights`
+  - Type: boolean
+  - Use when: you want query-relevant highlights for search results.
+  - Notes: defaults to `true` server-side.
+
 - `options.ignoreInvalidURLs`
   - Type: boolean
   - Use when: you want to drop URLs that cannot be scraped by other endpoints.
@@ -128,6 +147,15 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
 - `options.timeout`
   - Type: number
   - Use when: you need a request timeout in milliseconds.
+
+- `options.enterprise`
+  - Type: array of `"default" | "anon" | "zdr"`
+  - Use when: you need enterprise Zero Data Retention search. Must be enabled for your team.
+
+- `options.threatProtection`
+  - Type: `ThreatProtectionOptions`
+  - Use when: you need per-request threat protection override (enterprise).
+  - Fields: `mode` (`"off"` | `"normal"`), `riskScoreThreshold` (0-100), `blacklist`, `whitelist`, `blockedTlds`, `failurePolicy` (`"open"` | `"closed"`)
 
 - `options.scrapeOptions`
   - Type: `ScrapeOptions`
@@ -161,7 +189,9 @@ const doc = await client.scrape("https://example.com/pricing", {
     { type: "json", prompt: "Extract plan names and prices." },
     { type: "screenshot", fullPage: true, quality: 80, viewport: { width: 1280, height: 720 } },
     { type: "changeTracking", modes: ["git-diff"], tag: "pricing" },
-    { type: "attributes", selectors: [{ selector: "a", attribute: "href" }] }
+    { type: "attributes", selectors: [{ selector: "a", attribute: "href" }] },
+    { type: "question", question: "What are the pricing tiers?" },
+    { type: "highlights", query: "enterprise pricing" }
   ],
   headers: {
     "User-Agent": "FirecrawlDocsBot/1.0"
@@ -206,12 +236,14 @@ const doc = await client.scrape("https://example.com/pricing", {
     - `"changeTracking"`: change tracking output (for options like `modes`, use `{ type: "changeTracking", modes: [...] }` — `modes` is required on that object in typings)
     - `"attributes"`: attribute extraction (use `{ type: "attributes", selectors: [...] }` when passing selectors)
     - `"branding"`: branding profile output
+    - `"product"`: product data extraction
+    - `"menu"`: menu extraction
     - `"audio"`: audio extraction
     - `"video"`: video extraction
   - Object-only format types (at minimum `type` as shown):
     - `{ type: "json", prompt?: string, schema?: JSON schema or Zod schema }`: at least one of `prompt` or `schema` is required (SDK validation).
-    - `{ type: "question", question: string }`: question-answer style extraction.
-    - `{ type: "highlights", query: string }`: relevant source-text extraction.
+    - `{ type: "question", question: string }`: question-answer style extraction. Answer returned in `document.answer`.
+    - `{ type: "highlights", query: string }`: relevant source-text extraction. Result returned in `document.highlights`.
     - `{ type: "screenshot", fullPage?, quality?, viewport? }`: same options as the string form but as an object.
     - `{ type: "changeTracking", modes: ("git-diff" | "json")[], schema?, prompt?, tag? }`: `modes` is required.
     - `{ type: "attributes", selectors: Array<{ selector, attribute }> }`
@@ -312,6 +344,24 @@ const doc = await client.scrape("https://example.com/pricing", {
   - Type: boolean
   - Use when: you want Firecrawl to cache the result.
 
+- `options.lockdown`
+  - Type: boolean
+  - Use when: you want to serve only previously cached results; never make outbound requests. Returns 404 on cache miss.
+
+- `options.redactPII`
+  - Type: boolean or `RedactPIIOptions`
+  - Use when: you want to redact personally identifiable information from returned content.
+  - Object fields: `mode` (`"accurate"` | `"aggressive"` | `"fast"`, default `"accurate"`), `entities` (array of `"PERSON"` | `"EMAIL"` | `"PHONE"` | `"LOCATION"` | `"FINANCIAL"` | `"SECRET"`), `replaceStyle` (`"tag"` | `"mask"` | `"remove"`, default `"tag"`)
+
+- `options.threatProtection`
+  - Type: `ThreatProtectionOptions`
+  - Use when: you need per-request threat protection override (enterprise).
+  - Fields: `mode` (`"off"` | `"normal"`), `riskScoreThreshold` (0-100), `blacklist`, `whitelist`, `blockedTlds`, `failurePolicy` (`"open"` | `"closed"`)
+
+- `options.auditMetadata`
+  - Type: `{ username: string }`
+  - Use when: you need user attribution for SIEM logging events.
+
 - `options.profile`
   - Type: object with `name` and optional `saveChanges`
   - Use when: you want a persistent browser profile shared across scrapes and interactions.
@@ -385,6 +435,7 @@ const result = await client.interact("<scrapeJobId>", {
 - `stderr`: string
 - `exitCode`: number
 - `killed`: boolean
+- `cdpUrl`: string (raw CDP WebSocket URL for direct Playwright/Puppeteer connection)
 - `liveViewUrl`: string
 - `interactiveLiveViewUrl`: string
 - `error`: string
@@ -526,7 +577,7 @@ console.log(result.answer);
 
 ## Notes
 
-- Deprecated client aliases: `scrapeExecute` → `interact`; `stopInteractiveBrowser` and `deleteScrapeBrowser` → `stopInteraction`.
+- Deprecated client aliases: `scrapeUrl` → `scrape`; `scrapeExecute` → `interact`; `stopInteractiveBrowser` and `deleteScrapeBrowser` → `stopInteraction`.
 - The default `Firecrawl` export is the v2 client; v1 remains under `client.v1`.
 - Zod schemas passed to `formats` (for `json` or `changeTracking`) are converted to JSON Schema by the SDK.
 - The package declares **Node.js >= 22** in `engines`.
@@ -537,7 +588,4 @@ console.log(result.answer);
 - `firecrawl/apps/js-sdk/firecrawl/src/index.ts`
 - `firecrawl/apps/js-sdk/firecrawl/src/v2/client.ts`
 - `firecrawl/apps/js-sdk/firecrawl/src/v2/types.ts`
-- `firecrawl/apps/js-sdk/firecrawl/src/v2/utils/validation.ts`
-- `firecrawl/apps/js-sdk/firecrawl/src/v2/methods/search.ts`
-- `firecrawl/apps/js-sdk/firecrawl/src/v2/methods/scrape.ts`
 - `firecrawl-docs/api-reference/v2-openapi.json`

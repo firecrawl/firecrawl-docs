@@ -50,6 +50,8 @@ curl -X POST "https://api.firecrawl.dev/v2/search" \
     "query": "site:docs.firecrawl.dev crawl webhooks",
     "sources": [{"type": "web"}, {"type": "news"}],
     "categories": [{"type": "research"}],
+    "includeDomains": ["docs.firecrawl.dev"],
+    "highlights": true,
     "limit": 10,
     "tbs": "qdr:m",
     "location": "San Francisco,California,United States",
@@ -105,8 +107,18 @@ Successful responses include `success`, `data`, optional `warning`, `id`, and `c
     - `{ "type": "research" }`
     - `{ "type": "pdf" }`
 
+- `includeDomains`
+  - Type: array of strings (hostnames)
+  - Use when: you want to restrict results to specific domains.
+  - Notes: cannot be combined with `excludeDomains`.
+
+- `excludeDomains`
+  - Type: array of strings (hostnames)
+  - Use when: you want to exclude results from specific domains.
+  - Notes: cannot be combined with `includeDomains`.
+
 - `limit`
-  - Type: integer (minimum 1, maximum 100, default 5)
+  - Type: integer (minimum 1, maximum 100, default 10)
   - Use when: you want to cap results.
 
 - `tbs`
@@ -120,6 +132,10 @@ Successful responses include `success`, `data`, optional `warning`, `id`, and `c
 - `country`
   - Type: string (default `"US"`)
   - Use when: you want ISO 3166-1 alpha-2 targeting (for example `"US"`).
+
+- `highlights`
+  - Type: boolean (default true)
+  - Use when: you want query-relevant highlights for search results.
 
 - `ignoreInvalidURLs`
   - Type: boolean (default false)
@@ -135,6 +151,11 @@ Successful responses include `success`, `data`, optional `warning`, `id`, and `c
   - Values:
     - `"zdr"`: end-to-end zero data retention
     - `"anon"`: anonymized zero data retention
+
+- `threatProtection`
+  - Type: object
+  - Use when: you need per-request threat protection override (enterprise).
+  - Fields: `mode` (`"off"` | `"normal"`), `riskScoreThreshold` (0-100), `blacklist` (array, max 1000), `whitelist` (array, max 1000), `blockedTlds` (array, max 1000), `failurePolicy` (`"open"` | `"closed"`)
 
 - `scrapeOptions`
   - Type: object
@@ -175,7 +196,9 @@ curl -X POST "https://api.firecrawl.dev/v2/scrape" \
       "links",
       {"type": "json", "prompt": "Extract plan names and prices."},
       {"type": "screenshot", "fullPage": true, "quality": 80, "viewport": {"width": 1280, "height": 720}},
-      {"type": "changeTracking", "modes": ["git-diff"], "tag": "pricing"}
+      {"type": "changeTracking", "modes": ["git-diff"], "tag": "pricing"},
+      {"type": "question", "question": "What are the pricing tiers?"},
+      {"type": "highlights", "query": "enterprise pricing"}
     ],
     "headers": {"User-Agent": "FirecrawlDocsBot/1.0"},
     "onlyMainContent": true,
@@ -193,8 +216,7 @@ curl -X POST "https://api.firecrawl.dev/v2/scrape" \
     "maxAge": 86400000,
     "minAge": 1,
     "storeInCache": true,
-    "profile": {"name": "docs-session", "saveChanges": true},
-    "zeroDataRetention": false
+    "profile": {"name": "docs-session", "saveChanges": true}
   }'
 ```
 
@@ -203,10 +225,15 @@ curl -X POST "https://api.firecrawl.dev/v2/scrape" \
 Successful responses include `success` and `data`. Common `data` fields (depending on `formats` and options):
 
 - `markdown`, `summary`, `html`, `rawHtml`, `screenshot`, `audio`, `video`, `links`
+- `answer`: present when the `question` format is requested
+- `highlights`: present when the `highlights` format is requested
 - `actions`: when the request included scrape-time `actions`, contains ordered results such as `screenshots`, `scrapes`, `javascriptReturns`, and `pdfs`
 - `metadata`: page metadata (`title`, `sourceURL`, `url`, `statusCode`, `error`, and other extracted fields)
 - `warning`: optional extraction or formatting notice
 - `changeTracking`: present when the `changeTracking` format is requested
+- `branding`: brand design system data when `branding` format requested
+- `product`: product data when `product` format requested
+- `menu`: menu data when `menu` format requested
 
 ### Parameters
 
@@ -228,13 +255,16 @@ Successful responses include `success` and `data`. Common `data` fields (dependi
     - `"changeTracking"`: change tracking output
     - `"json"`: JSON extraction
     - `"branding"`: branding profile output
+    - `"product"`: product data extraction
+    - `"menu"`: menu extraction
     - `"audio"`: audio extraction
     - `"video"`: video extraction
-  - Format object fields:
-    - `type`: one of the format strings above
-    - `prompt`, `schema`: JSON extraction options for `type: "json"`
-    - `modes`, `schema`, `prompt`, `tag`: change tracking options for `type: "changeTracking"`
-    - `fullPage`, `quality`, `viewport`: screenshot options for `type: "screenshot"`
+  - Object format types:
+    - `{"type": "json", "prompt": "...", "schema": {...}}`: JSON extraction
+    - `{"type": "question", "question": "..."}`: question-answer extraction. Answer in `data.answer`.
+    - `{"type": "highlights", "query": "..."}`: relevant source-text extraction. Result in `data.highlights`.
+    - `{"type": "screenshot", "fullPage": bool, "quality": int, "viewport": {...}}`: screenshot options
+    - `{"type": "changeTracking", "modes": [...], "schema": {...}, "prompt": "...", "tag": "..."}`: change tracking
 
 - `headers`
   - Type: object
@@ -316,6 +346,25 @@ Successful responses include `success` and `data`. Common `data` fields (dependi
   - Type: boolean
   - Use when: you want Firecrawl to cache the result.
 
+- `lockdown`
+  - Type: boolean
+  - Use when: you want to serve only previously cached results; never make outbound requests.
+
+- `redactPII`
+  - Type: boolean or object
+  - Use when: you want to redact personally identifiable information from returned content.
+  - Object fields: `mode` (`"accurate"` | `"aggressive"` | `"fast"`, default `"accurate"`), `entities` (array of `"PERSON"` | `"EMAIL"` | `"PHONE"` | `"LOCATION"` | `"FINANCIAL"` | `"SECRET"`), `replaceStyle` (`"tag"` | `"mask"` | `"remove"`, default `"tag"`)
+
+- `threatProtection`
+  - Type: object
+  - Use when: you need per-request threat protection override (enterprise).
+  - Fields: `mode` (`"off"` | `"normal"`), `riskScoreThreshold` (0-100), `blacklist` (array, max 1000), `whitelist` (array, max 1000), `blockedTlds` (array, max 1000), `failurePolicy` (`"open"` | `"closed"`)
+
+- `auditMetadata`
+  - Type: object
+  - Use when: you need user attribution for SIEM logging events.
+  - Fields: `username` (string, required, max 1024 chars)
+
 - `profile`
   - Type: object with `name` and optional `saveChanges`
   - Use when: you want a persistent browser profile shared across scrapes and interactions.
@@ -379,7 +428,7 @@ curl -X POST "https://api.firecrawl.dev/v2/scrape/<jobId>/interact" \
 
 ### Response
 
-Successful responses include `success` plus execution fields such as `stdout`, `result` (alias of stdout), `stderr`, `exitCode`, `killed`, and `error` (nullable).
+Successful responses include `success` plus execution fields such as `stdout`, `result` (alias of stdout), `stderr`, `exitCode`, `killed`, `cdpUrl`, `liveViewUrl`, `interactiveLiveViewUrl`, and `error` (nullable).
 
 ### DELETE /scrape/{jobId}/interact
 
@@ -489,4 +538,4 @@ curl -X POST "https://api.firecrawl.dev/v2/support/docs-search" \
 - `firecrawl-docs/api-reference/v2-openapi.json`
 - `firecrawl/apps/js-sdk/firecrawl/src/v2/types.ts`
 - `firecrawl/apps/python-sdk/firecrawl/v2/types.py`
-- `firecrawl/apps/rust-sdk/src/v2/scrape.rs`
+- `firecrawl/apps/rust-sdk/src/scrape.rs`
