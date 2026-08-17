@@ -11,7 +11,7 @@ Canonical Firecrawl Rust source of truth for agents. Generated from SDK source a
 cargo add firecrawl
 ```
 
-Crate: **`firecrawl`** on crates.io. The current SDK version is **2.0.0** (verify the latest release on crates.io before pinning).
+Crate: **`firecrawl`** on crates.io. The current SDK version is **2.12.1** (verify the latest release on crates.io before pinning).
 
 ## Authenticate
 
@@ -66,6 +66,9 @@ let options = SearchOptions {
     location: Some("San Francisco,California,United States".to_string()),
     ignore_invalid_urls: Some(true),
     timeout: Some(60000),
+    include_domains: Some(vec!["docs.firecrawl.dev".to_string()]),
+    exclude_domains: Some(vec!["old.firecrawl.dev".to_string()]),
+    highlights: Some(true),
     scrape_options: Some(ScrapeOptions {
         formats: Some(vec![Format::Markdown, Format::Links, Format::Json]),
         json_options: Some(JsonOptions {
@@ -142,6 +145,23 @@ let results = client
   - Use when: you need an integration identifier for server-side tracking.
   - Notes: omit in agent-oriented examples unless your product intentionally sets it.
 
+- `options.include_domains`
+  - Type: `Option<Vec<String>>`
+  - Use when: you want to restrict results to specific domains.
+
+- `options.exclude_domains`
+  - Type: `Option<Vec<String>>`
+  - Use when: you want to exclude specific domains.
+
+- `options.highlights`
+  - Type: `Option<bool>`
+  - Use when: you want query-relevant highlights (defaults to true).
+
+- `options.origin`
+  - Type: `Option<String>`
+  - Use when: you need an origin label.
+  - Notes: auto-set to `"rust-sdk@{version}"` if not provided. Omit in agent-oriented examples unless your product intentionally sets it.
+
 ## Scrape
 
 ### Why use it
@@ -171,6 +191,7 @@ let doc = client
 use firecrawl::{
     Client, ScrapeOptions, Format, JsonOptions, ScreenshotOptions, ChangeTrackingOptions,
     ChangeTrackingMode, AttributeSelector, Action, ParserConfig, ProxyType,
+    QuestionFormat, HighlightsFormat,
 };
 
 let doc = client
@@ -182,6 +203,14 @@ let doc = client
             Format::Screenshot,
             Format::ChangeTracking,
             Format::Attributes,
+            Format::Product,
+            Format::Menu,
+            Format::Question(QuestionFormat {
+                question: "What are the pricing tiers?".to_string(),
+            }),
+            Format::Highlights(HighlightsFormat {
+                query: "pricing plans".to_string(),
+            }),
         ]),
         json_options: Some(JsonOptions {
             prompt: Some("Extract plan names and prices.".to_string()),
@@ -225,7 +254,7 @@ let doc = client
 - `options.formats`
   - Type: `Vec<Format>`
   - Use when: you want multiple output formats.
-  - Confirmed values: `Markdown`, `Html`, `RawHtml`, `Links`, `Images`, `Screenshot`, `Summary`, `ChangeTracking`, `Json`, `Attributes`, `Branding`, `Audio`, `Video`
+  - Confirmed values: `Markdown`, `Html`, `RawHtml`, `Links`, `Images`, `Screenshot`, `Summary`, `ChangeTracking`, `Json`, `Attributes`, `Branding`, `Audio`, `Video`, `Product`, `Menu`, `Question(QuestionFormat)`, `Highlights(HighlightsFormat)`, `Query(QueryFormat)` (deprecated)
 
 - `options.headers`
   - Type: `HashMap<String, String>`
@@ -344,6 +373,46 @@ let doc = client
   - Use when: you want attribute extraction output.
   - Confirmed fields: `selector`, `attribute`
 
+- `options.lockdown`
+  - Type: `Option<bool>`
+  - Use when: you want to serve only cached results.
+
+- `options.redact_pii`
+  - Type: `Option<bool>`
+  - Use when: you want PII redaction.
+  - Notes: serialized as `"redactPII"` in the API request.
+
+- `options.audit_metadata`
+  - Type: `Option<AuditMetadata>`
+  - Use when: you need SIEM logging attribution.
+  - Notes: `AuditMetadata` has a single field `username: String`.
+
+- `options.origin`
+  - Type: `Option<String>`
+  - Use when: you need an origin label.
+  - Notes: auto-set to `"rust-sdk@{version}"` if not provided. Omit in agent-oriented examples unless your product intentionally sets it.
+
+### Format enum details
+
+- `Format::Markdown` — markdown output
+- `Format::Html` — cleaned HTML output
+- `Format::RawHtml` — raw HTML output
+- `Format::Links` — extracted links
+- `Format::Images` — extracted images
+- `Format::Screenshot` — page screenshot
+- `Format::Summary` — summarized content
+- `Format::ChangeTracking` — change tracking output
+- `Format::Json` — structured JSON extraction
+- `Format::Attributes` — attribute extraction
+- `Format::Branding` — branding extraction
+- `Format::Audio` — audio extraction
+- `Format::Video` — video extraction
+- `Format::Product` — product profile output
+- `Format::Menu` — menu extraction output
+- `Format::Question(QuestionFormat { question: String })` — question-answer output
+- `Format::Highlights(HighlightsFormat { query: String })` — relevant source-text extraction
+- `Format::Query(QueryFormat { prompt: String, mode: Option<QueryFormatMode> })` — deprecated; modes: `QueryFormatMode::Freeform`, `QueryFormatMode::DirectQuote`
+
 ## Interact
 
 ### Why use it
@@ -423,8 +492,8 @@ let stopped = client.stop_interaction("<scrapeJobId>").await?;
 
 - `options.origin`
   - Type: `Option<String>`
-  - Use when: you need an optional origin label for execution telemetry.
-  - Notes: omit in agent-oriented examples unless your product intentionally sets it.
+  - Use when: you need an origin label for execution telemetry.
+  - Notes: auto-set to SDK origin if not provided. Omit in agent-oriented examples unless your product intentionally sets it.
 
 At least one of `options.code` or `options.prompt` must be non-empty; otherwise the SDK returns `FirecrawlError::Misuse` before calling the API.
 
@@ -442,19 +511,19 @@ The v2 OpenAPI spec currently models the interact request body with `code` as re
 - Deprecated aliases: `scrape_execute`, `stop_interactive_browser`, and `delete_scrape_browser` map to `interact` and `stop_interaction`.
 - `ScrapeOptions` includes dedicated `json_options`, `screenshot_options`, and `change_tracking_options` for advanced formats.
 - `search_and_scrape(query, limit)` is a convenience helper: it calls `search` with default `ScrapeOptions` and returns `Vec<Document>` built from `SearchResultOrDocument::Document` entries in `data.web` (see `search.rs`).
-- v2 SDK exports all types at the crate root: `use firecrawl::Client` (not `use firecrawl::v2::Client`).
-- Error types simplified in v2: `CrawlJobFailed(String, CrawlStatus)` → `JobFailed(String)`, `Missuse` → `Misuse`.
+- Exports are at crate root: `use firecrawl::Client` (not `use firecrawl::v2::Client`).
+- Error types: `Misuse` (formerly `Missuse`), `JobFailed(String)` (formerly `CrawlJobFailed(String, CrawlStatus)`).
 
 ## Source Of Truth
 
 - `firecrawl/apps/rust-sdk/Cargo.toml`
 - `firecrawl/apps/rust-sdk/src/lib.rs`
 - `firecrawl/apps/rust-sdk/src/client.rs`
-- `firecrawl/apps/rust-sdk/src/scrape.rs`
+- `firecrawl/apps/rust-sdk/src/scrape.rs` (includes interact)
 - `firecrawl/apps/rust-sdk/src/search.rs`
+- `firecrawl/apps/rust-sdk/src/types.rs`
 - `firecrawl/apps/rust-sdk/src/crawl.rs`
 - `firecrawl/apps/rust-sdk/src/map.rs`
 - `firecrawl/apps/rust-sdk/src/batch_scrape.rs`
 - `firecrawl/apps/rust-sdk/src/agent.rs`
-- `firecrawl/apps/rust-sdk/src/types.rs`
 - `firecrawl-docs/api-reference/v2-openapi.json`

@@ -3,7 +3,7 @@ title: "Python Source of Truth"
 description: "Canonical Firecrawl Python source of truth for agents using key endpoints like search, scrape, and interact."
 ---
 
-Canonical Firecrawl Python source of truth for agents. Generated from SDK source (`firecrawl-py` / `firecrawl` **4.22.1**) and the v2 OpenAPI spec. Method names, parameters, and return types match the v2 client in `firecrawl/v2/client.py` unless noted.
+Canonical Firecrawl Python source of truth for agents. Generated from SDK source (`firecrawl-py` / `firecrawl` **4.35.1**) and the v2 OpenAPI spec. Method names, parameters, and return types match the v2 client in `firecrawl/v2/client.py` unless noted.
 
 ## Install
 
@@ -20,6 +20,16 @@ from firecrawl import Firecrawl
 client = Firecrawl(api_key=os.environ.get("FIRECRAWL_API_KEY"))
 # client = Firecrawl(api_key="fc-...", api_url="https://api.firecrawl.dev")
 ```
+
+### Constructor options
+
+- `api_key` — `str`. Falls back to the `FIRECRAWL_API_KEY` environment variable. `None` uses the keyless free tier.
+- `api_url` — `str`. Default `"https://api.firecrawl.dev"`.
+- `timeout` — `float`. Default request timeout in seconds for all HTTP requests.
+- `max_retries` — `int`. Maximum number of retries (default `3`).
+- `backoff_factor` — `float`. Exponential backoff factor (default `0.5`).
+
+`FirecrawlApp` is a backward-compatible alias for `Firecrawl`. For async usage, use `AsyncFirecrawl` (or its alias `AsyncFirecrawlApp`).
 
 ## When To Use What
 
@@ -46,6 +56,7 @@ Returns a `SearchData` model with optional lists:
 - `web` — web hits (`SearchResultWeb` or full `Document` when `scrape_options` hydrates content)
 - `news` — news hits (`SearchResultNews` or `Document`)
 - `images` — image hits (`SearchResultImages` or `Document`)
+- `developer` — developer hits (e.g. GitHub, Stack Overflow)
 
 Omitted buckets are `None` when the API did not return that key.
 
@@ -73,6 +84,7 @@ results = client.search(
     location="San Francisco,California,United States",
     ignore_invalid_urls=True,
     timeout=300000,
+    include_domains=["docs.firecrawl.dev"],
     scrape_options=ScrapeOptions(
         formats=[
             "markdown",
@@ -115,7 +127,8 @@ results = client.search(
     - `"github"`: GitHub-focused results
     - `"research"`: research and academic results
     - `"pdf"`: PDF-focused results
-    - `Category(type="github" | "research" | "pdf")`: typed category object form
+    - `"developer"`: developer-focused results (e.g. GitHub, Stack Overflow)
+    - `Category(type="github" | "research" | "pdf" | "developer")`: typed category object form
 
 - `limit`
   - Type: int
@@ -143,6 +156,29 @@ results = client.search(
   - Type: `ScrapeOptions`
   - Use when: you want to scrape each search result (see Scrape parameters for fields).
 
+- `include_domains`
+  - Type: list of str
+  - Use when: you want to restrict results to specific domains.
+  - Notes: mutually exclusive with `exclude_domains`.
+
+- `exclude_domains`
+  - Type: list of str
+  - Use when: you want to exclude specific domains from results.
+  - Notes: mutually exclusive with `include_domains`.
+
+- `highlights`
+  - Type: bool
+  - Use when: you want query-relevant highlights in results.
+  - Notes: default is `true` on the server.
+
+- `threat_protection`
+  - Type: `ThreatProtectionOptions`
+  - Use when: you need per-request threat protection.
+
+- `integration`
+  - Type: str
+  - Use when: you need an integration identifier.
+
 ## Scrape
 
 ### Why use it
@@ -167,10 +203,13 @@ doc = client.scrape(
     formats=[
         "markdown",
         "links",
+        "product",
         {"type": "json", "prompt": "Extract plan names and prices."},
         {"type": "screenshot", "full_page": True, "quality": 80, "viewport": {"width": 1280, "height": 720}},
         {"type": "changeTracking", "modes": ["git-diff"], "tag": "pricing"},
         {"type": "attributes", "selectors": [{"selector": "a", "attribute": "href"}]},
+        {"type": "question", "question": "What is the enterprise plan price?"},
+        {"type": "highlights", "query": "pricing tiers"},
     ],
     headers={"User-Agent": "FirecrawlDocsBot/1.0"},
     only_main_content=True,
@@ -214,15 +253,20 @@ doc = client.scrape(
     - `"branding"`: branding profile output
     - `"audio"`: audio extraction
     - `"video"`: video extraction
+    - `"product"`: structured product data extraction
+    - `"menu"`: structured menu data extraction
   - Object-only format types:
     - `{"type": "json", ...}`: JSON extraction. Use an object, not the plain string `"json"`.
-    - `{"type": "question", "question": "..."}`: question-answer output.
-    - `{"type": "highlights", "query": "..."}`: relevant source-text output.
+    - `{"type": "question", "question": "..."}`: question-answer style extraction.
+    - `{"type": "highlights", "query": "..."}`: relevant source-text extraction.
+  - Deprecated object format:
+    - `{"type": "query", "prompt": "...", "mode": "freeform" | "directQuote"}`: deprecated in favor of `"question"` and `"highlights"` formats.
   - Format object fields:
-    - `type`: one of the format strings above, or `"json"`, `"question"`, or `"highlights"` for object-only formats
+    - `type`: one of the format strings above, or `"json"`, `"question"`, `"highlights"`, or `"query"` for object-only formats
     - `question`: for `type: "question"`
     - `query`: for `type: "highlights"`
-    - `prompt`: optional for `type: "json"`
+    - `prompt`: optional for `type: "json"` or `type: "query"`
+    - `mode`: for `type: "query"` — `"freeform"` or `"directQuote"` (deprecated)
     - `schema`: JSON schema for `type: "json"` or for change tracking JSON mode
     - `modes`: array of `"git-diff"` or `"json"` for `type: "changeTracking"`
     - `tag`: change tracking tag for `type: "changeTracking"`
@@ -320,6 +364,26 @@ doc = client.scrape(
   - Type: dict with `name` and optional `save_changes` or `saveChanges`
   - Use when: you want a persistent browser profile shared across scrapes and interactions.
 
+- `lockdown`
+  - Type: bool
+  - Use when: you want to serve only cached results, never making outbound requests.
+
+- `threat_protection`
+  - Type: `ThreatProtectionOptions`
+  - Use when: you need per-request threat protection.
+
+- `audit_metadata`
+  - Type: `AuditMetadata` (has `username: str`)
+  - Use when: you need SIEM logging attribution.
+
+- `integration`
+  - Type: str
+  - Use when: you need an integration identifier.
+
+- `use_mock`
+  - Type: str
+  - Use when: you need mock data (internal/testing).
+
 ## Interact
 
 ### Why use it
@@ -381,6 +445,10 @@ result = client.interact(
 - `timeout`
   - Type: int
   - Use when: you need an execution timeout in seconds.
+
+- `origin`
+  - Type: str
+  - Use when: you need an optional origin label for telemetry.
 
 ### Return value
 
@@ -507,7 +575,10 @@ print(response.json()["answer"])
 
 ## Notes
 
-- Deprecated aliases: `scrape_execute` → `interact`; `stop_interactive_browser` and `delete_scrape_browser` → `stop_interaction`.
+- Deprecated aliases: `scrape_execute` → `interact`; `stop_interactive_browser` and `delete_scrape_browser` → `stop_interaction`; `scrape_url` → `scrape`.
+- `FirecrawlApp` is a backward-compatible alias for `Firecrawl`.
+- `AsyncFirecrawl` (and its alias `AsyncFirecrawlApp`) provide async versions of all methods.
+- The constructor accepts `timeout`, `max_retries`, and `backoff_factor` for controlling HTTP request behavior.
 - The top-level `Firecrawl` client exposes v2 methods directly; v1 remains under `client.v1`.
 - The bundled v2 OpenAPI snippet for `POST /v2/scrape/{jobId}/interact` may only document `code`; the Python SDK and server accept either `code` or `prompt` for this endpoint.
 
