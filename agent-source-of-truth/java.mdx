@@ -13,14 +13,14 @@ Maven:
 <dependency>
   <groupId>com.firecrawl</groupId>
   <artifactId>firecrawl-java</artifactId>
-  <version>1.2.0</version>
+  <version>1.12.1</version>
 </dependency>
 ```
 
 Gradle:
 
 ```gradle
-implementation("com.firecrawl:firecrawl-java:1.2.0")
+implementation("com.firecrawl:firecrawl-java:1.12.1")
 ```
 
 ## Authenticate
@@ -31,6 +31,24 @@ import com.firecrawl.client.FirecrawlClient;
 FirecrawlClient client = FirecrawlClient.builder()
     .apiKey(System.getenv("FIRECRAWL_API_KEY"))
     .build();
+```
+
+### Builder options
+
+- `apiKey(String)` — API key for authentication. Falls back to `FIRECRAWL_API_KEY` env var, then `firecrawl.apiKey` system property. Null is allowed (keyless free tier).
+- `apiUrl(String)` — Base URL for the Firecrawl API. Default `"https://api.firecrawl.dev"`, falls back to `FIRECRAWL_API_URL` env var.
+- `timeoutMs(long)` — HTTP request timeout in milliseconds (default 300000 / 5 min).
+- `maxRetries(int)` — Auto-retry count for transient failures (default 3).
+- `backoffFactor(double)` — Exponential backoff factor in seconds (default 0.5).
+- `asyncExecutor(Executor)` — Executor for async methods (default `ForkJoinPool.commonPool()`).
+- `httpClient(OkHttpClient)` — Pre-configured OkHttp client (ignores `timeoutMs` when provided).
+
+### Factory method
+
+`FirecrawlClient.fromEnv()` — Creates a client using environment-based configuration (`FIRECRAWL_API_KEY`, `FIRECRAWL_API_URL`). Equivalent to `FirecrawlClient.builder().build()` with no explicit arguments.
+
+```java
+FirecrawlClient client = FirecrawlClient.fromEnv();
 ```
 
 ## When To Use What
@@ -83,6 +101,9 @@ SearchOptions options = SearchOptions.builder()
     .location("San Francisco,California,United States")
     .ignoreInvalidURLs(true)
     .timeout(60000)
+    .includeDomains(List.of("docs.firecrawl.dev", "firecrawl.dev"))
+    .excludeDomains(List.of("example.com"))
+    .highlights(true)
     .scrapeOptions(
         ScrapeOptions.builder()
             .formats(List.of(
@@ -144,6 +165,18 @@ SearchData results = client.search("site:docs.firecrawl.dev crawl webhooks", opt
   - Type: Integer
   - Use when: you need a request timeout in milliseconds.
 
+- `options.includeDomains`
+  - Type: `List<String>`
+  - Use when: you want to restrict results to specific domains.
+
+- `options.excludeDomains`
+  - Type: `List<String>`
+  - Use when: you want to exclude specific domains.
+
+- `options.highlights`
+  - Type: Boolean
+  - Use when: you want query-relevant highlights in the results (defaults to true).
+
 - `options.scrapeOptions`
   - Type: `ScrapeOptions`
   - Use when: you want to scrape each search result (see Scrape parameters for fields).
@@ -181,6 +214,9 @@ Document doc = client.scrape(
 ```java
 import com.firecrawl.models.ScrapeOptions;
 import com.firecrawl.models.JsonFormat;
+import com.firecrawl.models.HighlightsFormat;
+import com.firecrawl.models.QuestionFormat;
+import com.firecrawl.models.AuditMetadata;
 
 List<Map<String, Object>> actions = List.of(
     Map.of("type", "click", "selector", "#accept"),
@@ -198,6 +234,8 @@ ScrapeOptions options = ScrapeOptions.builder()
         "markdown",
         "links",
         JsonFormat.builder().prompt("Extract plan names and prices.").build(),
+        QuestionFormat.builder().question("What are the pricing tiers?").build(),
+        HighlightsFormat.builder().query("pricing").build(),
         Map.of("type", "screenshot", "fullPage", true, "quality", 80)
     ))
     .onlyMainContent(true)
@@ -210,6 +248,9 @@ ScrapeOptions options = ScrapeOptions.builder()
     .proxy("auto")
     .maxAge(86400000L)
     .storeInCache(true)
+    .lockdown(true)
+    .redactPII(true)
+    .auditMetadata(AuditMetadata.builder().username("agent-user").build())
     .build();
 
 Document doc = client.scrape("https://example.com/pricing", options);
@@ -244,6 +285,9 @@ Document doc = client.scrape("https://example.com/pricing", options);
     - `modes`, `schema`, `prompt`, `tag`: change tracking options for `type: "changeTracking"`
     - `fullPage`, `quality`, `viewport`: screenshot options for `type: "screenshot"`
     - `selectors`: array of `{selector, attribute}` for `type: "attributes"`
+  - Format object types:
+    - `QuestionFormat.builder().question("...").build()` — question-answer extraction
+    - `HighlightsFormat.builder().query("...").build()` — relevant source-text extraction
 
 - `options.headers`
   - Type: `Map<String, String>`
@@ -323,6 +367,18 @@ Document doc = client.scrape("https://example.com/pricing", options);
   - Type: Boolean
   - Use when: you want Firecrawl to cache the result.
 
+- `options.lockdown`
+  - Type: Boolean
+  - Use when: you want to serve only cached results (no live fetch).
+
+- `options.redactPII`
+  - Type: Boolean
+  - Use when: you want PII redaction applied to the scraped content.
+
+- `options.auditMetadata`
+  - Type: `AuditMetadata` (has `username: String`)
+  - Use when: you need SIEM logging attribution for the scrape request.
+
 - `options.integration`
   - Type: String
   - Use when: the API expects an integration identifier on the request.
@@ -336,8 +392,10 @@ Use interact when a page requires browser actions or code execution after a scra
 ### Preferred SDK methods
 
 - `client.interact(jobId, code)` — uses default language `node` and API default execution timeout
-- `client.interact(jobId, code, language, timeout)` — `timeout` is seconds (1–300), or null to omit and use the API default (30 seconds)
+- `client.interact(jobId, code, language, timeout)` — `timeout` is seconds (1-300), or null to omit and use the API default (30 seconds)
 - `client.interact(jobId, code, language, timeout, origin)` — optional `origin` string is sent only when non-null (request attribution)
+
+Async variants: each overload has a corresponding `interactAsync(...)` that returns `CompletableFuture<BrowserExecuteResponse>`.
 
 ### Simple Example
 
@@ -369,6 +427,8 @@ End the scrape-bound browser session when finished.
 
 **Preferred SDK method:** `client.stopInteractiveBrowser(jobId)`
 
+Async variant: `client.stopInteractiveBrowserAsync(jobId)` returns `CompletableFuture<BrowserDeleteResponse>`.
+
 ```java
 import com.firecrawl.models.BrowserDeleteResponse;
 
@@ -380,7 +440,7 @@ BrowserDeleteResponse stopped = client.stopInteractiveBrowser("<scrapeJobId>");
 - `isSuccess()`: boolean
 - `getStdout()`, `getStderr()`, `getResult()`, `getError()`: String (may be null)
 - `getExitCode()`: Integer (may be null)
-- `getKilled()`: Boolean (may be null) — true when execution was stopped due to timeout
+- `getKilled()`: Boolean (may be null) -- true when execution was stopped due to timeout
 
 ### Stop response (`BrowserDeleteResponse`)
 
@@ -407,7 +467,7 @@ BrowserDeleteResponse stopped = client.stopInteractiveBrowser("<scrapeJobId>");
 
 - `timeout`
   - Type: Integer
-  - Use when: you need an execution timeout in seconds (1–300). Null omits the field and uses the API default.
+  - Use when: you need an execution timeout in seconds (1-300). Null omits the field and uses the API default.
 
 - `origin`
   - Type: String
@@ -415,8 +475,9 @@ BrowserDeleteResponse stopped = client.stopInteractiveBrowser("<scrapeJobId>");
 
 ## Notes
 
-- Deprecated aliases: `scrapeExecute` → `interact`, `deleteScrapeBrowser` → `stopInteractiveBrowser` (and the corresponding `*Async` helpers).
+- Deprecated aliases: `scrapeExecute` -> `interact`, `deleteScrapeBrowser` -> `stopInteractiveBrowser` (and the corresponding `*Async` helpers).
 - The Java SDK exposes code-based interactions only: there is no `prompt` parameter on `interact` (unlike some other language SDKs).
+- Builder supports `fromEnv()` for environment-based configuration without explicit arguments.
 
 ## Source Of Truth
 
@@ -430,4 +491,7 @@ BrowserDeleteResponse stopped = client.stopInteractiveBrowser("<scrapeJobId>");
 - `firecrawl/apps/java-sdk/src/main/java/com/firecrawl/models/Document.java`
 - `firecrawl/apps/java-sdk/src/main/java/com/firecrawl/models/BrowserExecuteResponse.java`
 - `firecrawl/apps/java-sdk/src/main/java/com/firecrawl/models/BrowserDeleteResponse.java`
+- `firecrawl/apps/java-sdk/src/main/java/com/firecrawl/models/AuditMetadata.java`
+- `firecrawl/apps/java-sdk/src/main/java/com/firecrawl/models/HighlightsFormat.java`
+- `firecrawl/apps/java-sdk/src/main/java/com/firecrawl/models/QuestionFormat.java`
 - `firecrawl-docs/api-reference/v2-openapi.json`
