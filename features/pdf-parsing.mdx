@@ -1,0 +1,168 @@
+---
+title: 'PDF Parsing'
+description: 'Turn any PDF — born-digital or scanned — into clean markdown, per-page content, and layout blocks with bounding boxes'
+og:title: "PDF Parsing | Firecrawl"
+og:description: "Parse PDFs into markdown, per-page content, and typed layout blocks with bounding boxes and grounding spans"
+icon: "file-pdf"
+version: "v2"
+sidebarTitle: "PDF Parsing"
+---
+
+Firecrawl parses PDFs with a layout-aware pipeline: every page is analyzed
+for structure (headings, paragraphs, tables, formulas, figures), text is
+extracted natively when the PDF carries it and OCR'd when it doesn't, and the
+result is assembled in reading order into clean markdown. The same engine
+runs everywhere a PDF can reach Firecrawl:
+
+| Source | Endpoint |
+|---|---|
+| Public URL to a PDF | [`POST /scrape`](/api-reference/endpoint/scrape) — detected automatically from the extension or content type |
+| Local file or non-public bytes | [`POST /parse`](/api-reference/endpoint/parse) |
+| PDFs discovered while crawling | [`POST /crawl`](/api-reference/endpoint/crawl) |
+
+## The `parsers` option
+
+All PDF behavior is controlled through the `parsers` option, available on
+`/scrape`, `/parse`, `/crawl`, and `/batch/scrape`:
+
+```json
+{
+  "parsers": [
+    {
+      "type": "pdf",
+      "mode": "auto",
+      "maxPages": 100,
+      "pages": true,
+      "blocks": true
+    }
+  ]
+}
+```
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `type` | `"pdf"` | _(required)_ | Parser type. |
+| `mode` | `"fast" \| "auto" \| "ocr"` | `"auto"` | Parsing strategy — see [modes](#parsing-modes). |
+| `maxPages` | `integer` | — | Cap the number of pages to parse. |
+| `pages` | `boolean` | `false` | Also return [physical per-page markdown](#per-page-markdown). No additional cost. |
+| `blocks` | `boolean` | `false` | Also return [typed layout blocks](#layout-blocks) with bounding boxes. No additional cost. |
+
+Passing `parsers: []` skips parsing entirely and returns the PDF as base64
+(1 credit flat).
+
+## Parsing modes
+
+| Mode | Description |
+|------|-------------|
+| `auto` | Attempts fast text-based extraction first, falls back to OCR when a page needs it. This is the default. |
+| `fast` | Text-based extraction only (embedded text). Fastest option, but fails on scanned or image-only pages rather than silently returning nothing. |
+| `ocr` | Forces OCR on every page. Use for scanned documents or when `auto` misclassifies a page. |
+
+## Per-page markdown
+
+Set `pages: true` and the document also carries a `pages` array with the
+physical per-page markdown — useful when you need to know which page content
+came from, or to process pages independently.
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/scrape \
+  -H 'Authorization: Bearer YOUR_API_KEY' \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com/report.pdf","parsers":[{"type":"pdf","pages":true}]}'
+```
+
+```json
+"pages": [
+  { "pageNumber": 1, "markdown": "# Annual Report\n\n..." },
+  { "pageNumber": 2, "markdown": "..." }
+]
+```
+
+## Layout blocks
+
+Set `blocks: true` and the document also carries a `blocks` array: for every
+page, the typed layout blocks the parsing engine detected, with geometry and
+provenance. This is the structured counterpart to the markdown — use it for
+citation grounding, highlight overlays, or auditing what a document contains.
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/scrape \
+  -H 'Authorization: Bearer YOUR_API_KEY' \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://example.com/report.pdf","parsers":[{"type":"pdf","blocks":true}]}'
+```
+
+```json
+"blocks": [
+  {
+    "pageNumber": 1,
+    "width": 1700,
+    "height": 2200,
+    "status": "ok",
+    "items": [
+      {
+        "id": "p1.b0",
+        "type": "title",
+        "label": "doc_title",
+        "bbox": [0.118, 0.054, 0.882, 0.092],
+        "content": "# Annual Report",
+        "markdownSpan": [0, 15],
+        "readingOrder": 0,
+        "source": "native_text",
+        "confidence": { "layout": 0.97, "ocr": null }
+      }
+    ]
+  }
+]
+```
+
+### Block fields
+
+| Field | Description |
+|-------|-------------|
+| `id` | Stable within a response: `p<page>.b<index in reading order>`. |
+| `type` | Block type: `title`, `section_header`, `text`, `table`, `formula`, `figure`, `caption`, `page_number`, `page_header`, `page_footer`. New types may appear over time. |
+| `label` | Raw layout-model label, passthrough for forward compatibility. |
+| `bbox` | `[x0, y0, x1, y1]` normalized 0–1 relative to the page. Multiply by `width`/`height` for pixel coordinates. `null` when the page has no known dimensions. |
+| `content` | The markdown fragment this block contributed. |
+| `markdownSpan` | `[start, end)` character offsets into the document `markdown` covering this block's fragment. `null` when post-processing rewrote the fragment. |
+| `readingOrder` | Position in the detected reading order. |
+| `source` | Pipeline path that produced the block (e.g. `native_text`, `layout_ocr`, `tsr`, `formula_model`). |
+| `confidence` | `layout` detection score (0–1) and `ocr` text confidence where the source provides one; `null` otherwise — never an invented aggregate. |
+
+### Grounding: from an answer back to the page
+
+`markdownSpan` links every block to the exact substring of the markdown it
+produced. That makes citation grounding a lookup, not an inference: find the
+quoted text in the markdown, find the block whose span covers that offset,
+and you have the page number and bounding box — without ever asking a
+language model for coordinates.
+
+```python Python
+def ground(doc, quote: str):
+    start = doc["markdown"].find(quote)
+    for page in doc["blocks"]:
+        for block in page["items"]:
+            span = block["markdownSpan"]
+            if span and span[0] <= start < span[1]:
+                return page["pageNumber"], block["bbox"]
+```
+
+## Response metadata
+
+`metadata.numPages` is the number of pages actually parsed;
+`metadata.totalPages` is the document's true page count. They match unless
+`maxPages` truncated the result — `totalPages > numPages` tells you the
+output was cut. `totalPages` is omitted when the page count can't be
+determined.
+
+## Pricing and limits
+
+- PDF parsing is billed at **1 credit per page**. The `pages` and `blocks`
+  options add no cost.
+- Maximum file size is **50 MB** (uploads via `/parse`).
+- The first parse of a document runs the full pipeline; repeat parses of the
+  same document are served from cache and return in seconds.
+- Very large or scanned documents in `ocr` mode take longer — raise
+  `timeout` or use `maxPages` to bound the work.
+- Zero Data Retention is supported end to end.
