@@ -11,6 +11,9 @@ sidebarTitle: "解析"
 import ParsePagesPython from "/snippets/zh/v2/parse/pages/python.mdx";
 import ParsePagesNode from "/snippets/zh/v2/parse/pages/js.mdx";
 import ParsePagesCURL from "/snippets/zh/v2/parse/pages/curl.mdx";
+import ParsePageMarkersPython from "/snippets/zh/v2/parse/page-markers/python.mdx";
+import ParsePageMarkersNode from "/snippets/zh/v2/parse/page-markers/js.mdx";
+import ParsePageMarkersCURL from "/snippets/zh/v2/parse/page-markers/curl.mdx";
 import ParseBlocksPython from "/snippets/zh/v2/parse/blocks/python.mdx";
 import ParseBlocksNode from "/snippets/zh/v2/parse/blocks/js.mdx";
 import ParseBlocksCURL from "/snippets/zh/v2/parse/blocks/curl.mdx";
@@ -103,9 +106,10 @@ SDK 直接返回文档对象。cURL 返回 JSON 数据。
 </Note>
 
 除文档 markdown 外，还有三种输出可满足单个
-markdown 字符串无法满足的需求：适用于 PDF 文档的[逐页 markdown](#per-page-markdown-pdf)和
+markdown 字符串无法满足的需求：适用于 PDF 文档的[按物理页划分的 Markdown](#per-page-markdown-pdf)和
 [布局块](#layout-blocks-pdf)，以及适用于所有格式的
-[结构化 JSON](#structured-json-output)。
+[结构化 JSON](#structured-json-output)。如果只需要 markdown 本身中的
+页面归属信息，[页面标记](#page-markers-pdf)会直接标注分页位置。
 
 <div id="per-page-markdown-pdf">
   ## 按物理页划分的 Markdown (PDF)
@@ -128,6 +132,38 @@ markdown 字符串无法满足的需求：适用于 PDF 文档的[逐页 markdow
   { "pageNumber": 2, "markdown": "..." }
 ]
 ```
+
+<div id="page-markers-pdf">
+  ## 页面标记 (PDF)
+</div>
+
+在 [PDF 解析器](#pdf-options) 中设置 `pageMarkers: true` 后，文档 `markdown` 中的页面会通过 HTML 注释标记连接，该标记会注明后续物理页面的页码：
+
+```markdown
+……第 1 页结尾
+
+---
+
+<!-- page 2 -->
+
+第 2 页开头……
+```
+
+不会新增响应字段——标记嵌入在 Markdown 中，因此任何只处理 Markdown 字符串的下游流水线都能保留按页归属信息。渲染 Markdown 时，这些注释不可见，并且可轻松按 (`<!-- page N -->`，从 1 开始计数) 拆分。无需额外成本。
+
+<CodeGroup>
+  <ParsePageMarkersPython />
+
+  <ParsePageMarkersNode />
+
+  <ParsePageMarkersCURL />
+</CodeGroup>
+
+<Note>
+  标记仅出现在页面**之间**——第 1 页前不会有标记。
+  当解析器合并跨页内容时，编号可能会跳过某一页
+  (延续到下一页的表格或句子没有可标记的边界) 。如果需要将每个物理页面单独处理，请使用 [`pages: true`](#per-page-markdown-pdf)；这两个选项可组合使用。
+</Note>
 
 <div id="layout-blocks-pdf">
   ## 布局块 (PDF)
@@ -231,19 +267,21 @@ markdown 字符串无法满足的需求：适用于 PDF 文档的[逐页 markdow
       "mode": "auto",
       "maxPages": 100,
       "pages": true,
-      "blocks": true
+      "blocks": true,
+      "pageMarkers": true
     }
   ]
 }
 ```
 
-| 属性         | 类型                          | 默认值      | 描述                                                   |
-| ---------- | --------------------------- | -------- | ---------------------------------------------------- |
-| `type`     | `"pdf"`                     | *(必填)*   | 解析器类型。                                               |
-| `mode`     | `"fast" \| "auto" \| "ocr"` | `"auto"` | 解析策略——详见下文。                                          |
-| `maxPages` | `integer`                   | —        | 限制解析的页数。                                             |
-| `pages`    | `boolean`                   | `false`  | 同时返回[按页划分的 Markdown](#per-page-markdown-pdf)。无需额外成本。 |
-| `blocks`   | `boolean`                   | `false`  | 同时返回带边界框的[布局块](#layout-blocks-pdf)。无需额外成本。           |
+| 属性            | 类型                          | 默认值      | 描述                                                                     |
+| ------------- | --------------------------- | -------- | ---------------------------------------------------------------------- |
+| `type`        | `"pdf"`                     | *(必填)*   | 解析器类型。                                                                 |
+| `mode`        | `"fast" \| "auto" \| "ocr"` | `"auto"` | 解析策略——详见下文。                                                            |
+| `maxPages`    | `integer`                   | —        | 限制解析的页数。                                                               |
+| `pages`       | `boolean`                   | `false`  | 同时返回[按页划分的 Markdown](#per-page-markdown-pdf)。无需额外成本。                   |
+| `blocks`      | `boolean`                   | `false`  | 同时返回带边界框的[布局块](#layout-blocks-pdf)。无需额外成本。                             |
+| `pageMarkers` | `boolean`                   | `false`  | 使用 [`<!-- page N -->` 标记](#page-markers-pdf)在文档 Markdown 中标注分页。无需额外成本。 |
 
 传入 `parsers: []` 将完全跳过解析，并以 base64 格式返回 PDF
 (固定消耗 1 个额度) 。
@@ -293,7 +331,7 @@ markdown 字符串无法满足的需求：适用于 PDF 文档的[逐页 markdow
 </div>
 
 * 每个请求的最大文件大小为 **50 MB**。
-* PDF 解析按**每页 1 个额度**计费；`pages` 和 `blocks` 选项不产生额外成本。
+* PDF 解析按**每页 1 个额度**计费；`pages`、`blocks` 和 `pageMarkers` 选项不产生额外成本。
 * 在 `ocr` 模式下解析超大 PDF 或扫描版 PDF 可能需要更长时间——请增大 `timeout`，或使用 `maxPages` 来限定处理范围。
 * 对于多份文件，请对每个文件并行调用 `/parse`；不支持批量上传。
 

@@ -11,6 +11,9 @@ sidebarTitle: "解析"
 import ParsePagesPython from "/snippets/ja/v2/parse/pages/python.mdx";
 import ParsePagesNode from "/snippets/ja/v2/parse/pages/js.mdx";
 import ParsePagesCURL from "/snippets/ja/v2/parse/pages/curl.mdx";
+import ParsePageMarkersPython from "/snippets/ja/v2/parse/page-markers/python.mdx";
+import ParsePageMarkersNode from "/snippets/ja/v2/parse/page-markers/js.mdx";
+import ParsePageMarkersCURL from "/snippets/ja/v2/parse/page-markers/curl.mdx";
 import ParseBlocksPython from "/snippets/ja/v2/parse/blocks/python.mdx";
 import ParseBlocksNode from "/snippets/ja/v2/parse/blocks/js.mdx";
 import ParseBlocksCURL from "/snippets/ja/v2/parse/blocks/curl.mdx";
@@ -105,7 +108,8 @@ SDK ではドキュメントオブジェクトが直接返されます。cURL �
 ドキュメントの Markdown に加え、単一の Markdown string では不十分なケースに対応する 3 つの出力があります。PDF ドキュメント向けの
 [ページごとの Markdown](#per-page-markdown-pdf) と
 [レイアウトブロック](#layout-blocks-pdf)、およびすべての形式向けの
-[構造化 JSON](#structured-json-output) です。
+[構造化 JSON](#structured-json-output) です。Markdown 自体の*内部*でページの帰属情報だけが
+必要な場合は、[ページマーカー](#page-markers-pdf)がページ区切りをその場で注釈付けします。
 
 <div id="per-page-markdown-pdf">
   ## ページごとのMarkdown (PDF)
@@ -128,6 +132,44 @@ SDK ではドキュメントオブジェクトが直接返されます。cURL �
   { "pageNumber": 2, "markdown": "..." }
 ]
 ```
+
+<div id="page-markers-pdf">
+  ## ページマーカー (PDF)
+</div>
+
+[PDF パーサー](#pdf-options)で `pageMarkers: true` を設定すると、ドキュメントの
+`markdown` 内の各ページが、後続する物理ページを示す HTML コメントマーカーで連結されます。
+
+```markdown
+...1ページ目の終わり
+
+---
+
+<!-- page 2 -->
+
+2ページ目の始まり...
+```
+
+新しいレスポンスフィールドはありません。マーカーは markdown 内に含まれるため、
+markdown の string のみを処理する下流のパイプラインでも、ページごとの
+帰属情報を保持できます。markdown をレンダリングするとコメントは非表示になり、
+(`<!-- page N -->`、1始まり) で簡単に分割できます。追加コストはかかりません。
+
+<CodeGroup>
+  <ParsePageMarkersPython />
+
+  <ParsePageMarkersNode />
+
+  <ParsePageMarkersCURL />
+</CodeGroup>
+
+<Note>
+  マーカーはページの**間**にのみ表示され、ページ 1 の先頭にはありません。
+  パーサーが改ページをまたぐ content を結合すると、ページ番号が飛ぶことがあります
+  (次のページにまたがる表や文には、マークする境界がありません) 。
+  物理ページごとに分ける必要がある場合は、[`pages: true`](#per-page-markdown-pdf) を使用してください。
+  2 つのオプションは併用できます。
+</Note>
 
 <div id="layout-blocks-pdf">
   ## レイアウトブロック (PDF)
@@ -234,19 +276,21 @@ PDF のすべての動作は、`/parse` と
       "mode": "auto",
       "maxPages": 100,
       "pages": true,
-      "blocks": true
+      "blocks": true,
+      "pageMarkers": true
     }
   ]
 }
 ```
 
-| プロパティ      | 型                           | デフォルト    | 説明                                                               |
-| ---------- | --------------------------- | -------- | ---------------------------------------------------------------- |
-| `type`     | `"pdf"`                     | *(必須)*   | パーサーの種類。                                                         |
-| `mode`     | `"fast" \| "auto" \| "ocr"` | `"auto"` | 解析方法。詳細は以下を参照。                                                   |
-| `maxPages` | `integer`                   | —        | 解析するページ数の上限。                                                     |
-| `pages`    | `boolean`                   | `false`  | [ページごとのMarkdown](#per-page-markdown-pdf)も返します。追加コストはかかりません。      |
-| `blocks`   | `boolean`                   | `false`  | バウンディングボックス付きの[レイアウトブロック](#layout-blocks-pdf)も返します。追加コストはかかりません。 |
+| プロパティ         | 型                           | デフォルト    | 説明                                                                                     |
+| ------------- | --------------------------- | -------- | -------------------------------------------------------------------------------------- |
+| `type`        | `"pdf"`                     | *(必須)*   | パーサーの種類。                                                                               |
+| `mode`        | `"fast" \| "auto" \| "ocr"` | `"auto"` | 解析方法。詳細は以下を参照。                                                                         |
+| `maxPages`    | `integer`                   | —        | 解析するページ数の上限。                                                                           |
+| `pages`       | `boolean`                   | `false`  | [ページごとのMarkdown](#per-page-markdown-pdf)も返します。追加コストはかかりません。                            |
+| `blocks`      | `boolean`                   | `false`  | バウンディングボックス付きの[レイアウトブロック](#layout-blocks-pdf)も返します。追加コストはかかりません。                       |
+| `pageMarkers` | `boolean`                   | `false`  | ドキュメントのMarkdown内の改ページに、[`<!-- page N -->` マーカー](#page-markers-pdf)を付加します。追加コストはかかりません。 |
 
 `parsers: []` を渡すと解析を完全にスキップし、PDFをbase64形式で返します
 (固定1クレジット) 。
@@ -296,7 +340,7 @@ PDF のすべての動作は、`/parse` と
 </div>
 
 * 1 リクエストあたりの最大ファイルサイズは **50 MB** です。
-* PDF の解析は **1 ページあたり 1 クレジット** です。`pages` と `blocks` のオプションに追加コストはかかりません。
+* PDF の解析は **1 ページあたり 1 クレジット** です。`pages`、`blocks`、`pageMarkers` のオプションに追加コストはかかりません。
 * `ocr` モードで非常に大きい PDF やスキャンされた PDF を解析する場合、時間がかかることがあります。`timeout` を長めに設定するか、`maxPages` を使って処理範囲を制限してください。
 * 複数ファイルを扱う場合は、各ファイルに対して `/parse` を並列に呼び出してください。バッチアップロード用のバリアントはありません。
 
