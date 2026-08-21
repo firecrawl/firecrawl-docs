@@ -1,6 +1,6 @@
 ---
 title: 'Parse'
-description: 'Convertissez des documents — PDF, Word, Excel, PowerPoint et bien d’autres — en markdown propre, contenu par page, blocs de mise en page et JSON structuré'
+description: 'Convertissez des documents — PDF, Word, Excel, PowerPoint et bien d’autres — en markdown propre, contenu de chaque page, blocs de mise en page et JSON structuré'
 og:title: "Parse | Firecrawl"
 og:description: "Convertissez des PDF, DOCX, XLSX, HTML et bien d’autres en Markdown, blocs de mise en page avec boîtes englobantes ou JSON structuré"
 icon: "file-magnifying-glass"
@@ -11,6 +11,9 @@ sidebarTitle: "Parse"
 import ParsePagesPython from "/snippets/fr/v2/parse/pages/python.mdx";
 import ParsePagesNode from "/snippets/fr/v2/parse/pages/js.mdx";
 import ParsePagesCURL from "/snippets/fr/v2/parse/pages/curl.mdx";
+import ParsePageMarkersPython from "/snippets/fr/v2/parse/page-markers/python.mdx";
+import ParsePageMarkersNode from "/snippets/fr/v2/parse/page-markers/js.mdx";
+import ParsePageMarkersCURL from "/snippets/fr/v2/parse/page-markers/curl.mdx";
 import ParseBlocksPython from "/snippets/fr/v2/parse/blocks/python.mdx";
 import ParseBlocksNode from "/snippets/fr/v2/parse/blocks/js.mdx";
 import ParseBlocksCURL from "/snippets/fr/v2/parse/blocks/curl.mdx";
@@ -22,7 +25,7 @@ import ParseGroundingNode from "/snippets/fr/v2/parse/grounding/js.mdx";
 
 Parse convertit les documents en données propres, prêtes pour les LLM. Importez un fichier via
 [`/parse`](/fr/api-reference/endpoint/parse) — ou utilisez [`/scrape`](/fr/features/scrape)
-avec l’URL d’un document public — et obtenez du markdown, du contenu par page, des
+avec l’URL d’un document public — et obtenez du markdown, du contenu de chaque page, des
 blocs de mise en page typés ou du JSON structuré.
 
 * **Respect de la mise en page :** titres, paragraphes, tableaux et formules assemblés dans l’ordre de lecture
@@ -104,9 +107,11 @@ Les SDK renvoient directement l’objet document. cURL renvoie le payload JSON.
 </Note>
 
 Au-delà du markdown du document, trois sorties couvrent les cas où une seule
-chaîne markdown ne suffit pas : le [markdown par page](#per-page-markdown-pdf) et les
+chaîne markdown ne suffit pas : le [markdown de chaque page](#per-page-markdown-pdf) et les
 [blocs de mise en page](#layout-blocks-pdf) pour les documents PDF, et le
-[JSON structuré](#structured-json-output) pour tous les formats.
+[JSON structuré](#structured-json-output) pour tous les formats. Et lorsque vous avez uniquement
+besoin de l’attribution des pages *dans* le markdown lui-même,
+les [marqueurs de page](#page-markers-pdf) annotent les sauts de page sur place.
 
 <div id="per-page-markdown-pdf">
   ## Markdown par page (PDF)
@@ -130,6 +135,45 @@ ou pour traiter les pages indépendamment. Sans coût supplémentaire.
   { "pageNumber": 2, "markdown": "..." }
 ]
 ```
+
+<div id="page-markers-pdf">
+  ## Marqueurs de page (PDF)
+</div>
+
+Définissez `pageMarkers: true` dans l&#39;[analyseur PDF](#pdf-options) : les pages du
+`markdown` du document sont alors séparées par un marqueur de commentaire HTML indiquant la
+page physique suivante :
+
+```markdown
+...fin de la page 1
+
+---
+
+<!-- page 2 -->
+
+début de la page 2...
+```
+
+Il n’y a pas de nouveau champ de réponse : les marqueurs sont inclus dans le markdown. Ainsi,
+tout pipeline en aval qui ne traite qu’une chaîne markdown conserve l’attribution
+de chaque page. Les commentaires sont invisibles au rendu du markdown et
+faciles à utiliser comme séparateurs (`<!-- page N -->`, numérotation à partir de 1). Aucun coût supplémentaire.
+
+<CodeGroup>
+  <ParsePageMarkersPython />
+
+  <ParsePageMarkersNode />
+
+  <ParsePageMarkersCURL />
+</CodeGroup>
+
+<Note>
+  Les marqueurs apparaissent uniquement **entre** les pages : il n’y a pas de marqueur initial pour la page 1.
+  La numérotation peut sauter une page lorsque le parseur fusionne du contenu de part et d’autre d’un saut de page
+  (un tableau ou une phrase qui se poursuit sur la page suivante ne laisse aucune limite à
+  marquer). Utilisez [`pages: true`](#per-page-markdown-pdf) lorsque vous avez besoin de chaque
+  page physique séparément ; les deux options peuvent être combinées.
+</Note>
 
 <div id="layout-blocks-pdf">
   ## Blocs de mise en page (PDF)
@@ -238,19 +282,21 @@ Le comportement des PDF est entièrement contrôlé par l’option `parsers`, au
       "mode": "auto",
       "maxPages": 100,
       "pages": true,
-      "blocks": true
+      "blocks": true,
+      "pageMarkers": true
     }
   ]
 }
 ```
 
-| Propriété  | Type                        | Par défaut      | Description                                                                                                                     |
-| ---------- | --------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `type`     | `"pdf"`                     | *(obligatoire)* | Type d’analyseur.                                                                                                               |
-| `mode`     | `"fast" \| "auto" \| "ocr"` | `"auto"`        | Stratégie d’analyse — voir ci-dessous.                                                                                          |
-| `maxPages` | `integer`                   | —               | Limite le nombre de pages à analyser.                                                                                           |
-| `pages`    | `boolean`                   | `false`         | Renvoie également le [Markdown par page](#per-page-markdown-pdf). Aucun coût supplémentaire.                                    |
-| `blocks`   | `boolean`                   | `false`         | Renvoie également les [blocs de mise en page](#layout-blocks-pdf) avec leurs boîtes englobantes. Aucun coût supplémentaire. |
+| Propriété     | Type                        | Par défaut      | Description                                                                                                                                 |
+| ------------- | --------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `type`        | `"pdf"`                     | *(obligatoire)* | Type d’analyseur.                                                                                                                           |
+| `mode`        | `"fast" \| "auto" \| "ocr"` | `"auto"`        | Stratégie d’analyse — voir ci-dessous.                                                                                                      |
+| `maxPages`    | `integer`                   | —               | Limite le nombre de pages à analyser.                                                                                                       |
+| `pages`       | `boolean`                   | `false`         | Renvoie également le [Markdown de chaque page](#per-page-markdown-pdf). Aucun coût supplémentaire.                                                |
+| `blocks`      | `boolean`                   | `false`         | Renvoie également les [blocs de mise en page](#layout-blocks-pdf) avec leurs boîtes englobantes. Aucun coût supplémentaire.                 |
+| `pageMarkers` | `boolean`                   | `false`         | Annote les sauts de page dans le Markdown du document avec des [marqueurs `<!-- page N -->`](#page-markers-pdf). Aucun coût supplémentaire. |
 
 Passer `parsers: []` désactive entièrement l’analyse et renvoie le PDF en base64
 (1 crédit forfaitaire).
@@ -301,7 +347,7 @@ partie JSON `options` facultative. `options` accepte un sous-ensemble des option
 </div>
 
 * La taille maximale de fichier est de **50 MB** par requête.
-* L’analyse de PDF est facturée à **1 crédit par page** ; les options `pages` et `blocks` n’entraînent aucun coût supplémentaire.
+* L’analyse de PDF est facturée à **1 crédit par page** ; les options `pages`, `blocks` et `pageMarkers` n’entraînent aucun coût supplémentaire.
 * L’analyse de PDF très volumineux ou numérisés en mode `ocr` peut prendre plus de temps — augmentez `timeout` ou utilisez `maxPages` pour limiter le traitement.
 * Pour des lots de fichiers, appelez `/parse` pour chaque fichier en parallèle ; il n’existe pas d’option de téléversement par lot.
 
