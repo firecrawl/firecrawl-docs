@@ -3,7 +3,7 @@ title: "Node.js Source of Truth"
 description: "Canonical Firecrawl Node.js source of truth for agents using key endpoints like search, scrape, and interact."
 ---
 
-Canonical Firecrawl Node.js source of truth for agents. Aligned with `firecrawl` **v4.18.2** (`firecrawl/apps/js-sdk/firecrawl`) and the v2 OpenAPI spec. Method names, parameters, and types match the SDK public API.
+Canonical Firecrawl Node.js source of truth for agents. Aligned with `firecrawl` **v4.32.2** (`firecrawl/apps/js-sdk/firecrawl`) and the v2 OpenAPI spec. Method names, parameters, and types match the SDK public API.
 
 ## Install
 
@@ -21,6 +21,34 @@ const client = new Firecrawl({
   // apiUrl: "https://api.firecrawl.dev" // optional; falls back to FIRECRAWL_API_URL or cloud default
 });
 ```
+
+The constructor also accepts a plain string, which is treated as the API key:
+
+```ts
+const client = new Firecrawl("fc-...");
+```
+
+### Constructor options (`FirecrawlClientOptions`)
+
+- `apiKey`
+  - Type: `string | null`
+  - Falls back to the `FIRECRAWL_API_KEY` environment variable. If no key is provided the client uses the keyless free tier (rate-limited per IP).
+
+- `apiUrl`
+  - Type: `string | null`
+  - Falls back to the `FIRECRAWL_API_URL` environment variable, then `"https://api.firecrawl.dev"`.
+
+- `timeoutMs`
+  - Type: `number`
+  - Per-request timeout in milliseconds.
+
+- `maxRetries`
+  - Type: `number`
+  - Maximum number of automatic retries for transient failures.
+
+- `backoffFactor`
+  - Type: `number`
+  - Exponential backoff factor for retries.
 
 ## When To Use What
 
@@ -57,6 +85,8 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
   location: "San Francisco,California,United States",
   ignoreInvalidURLs: true,
   timeout: 60000,
+  includeDomains: ["docs.firecrawl.dev"],
+  highlights: true,
   scrapeOptions: {
     formats: [
       "markdown",
@@ -78,8 +108,9 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
 - `web`: web index hits
 - `news`: news hits
 - `images`: image hits
+- `developer`: developer-focused results (`Array<SearchResultWeb | Document>`)
 
-**Wrong turn to avoid:** `search()` does not return `{ data: [...] }`. Do not access `result.data`. Web results are in `result.web`, news in `result.news`, images in `result.images`.
+**Wrong turn to avoid:** `search()` does not return `{ data: [...] }`. Do not access `result.data`. Web results are in `result.web`, news in `result.news`, images in `result.images`, developer results in `result.developer`.
 
 ### Parameters
 
@@ -107,7 +138,18 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
     - `"github"`: GitHub-focused results
     - `"research"`: research and academic results
     - `"pdf"`: PDF-focused results
-    - `{ type: "github" | "research" | "pdf" }`: typed category object form
+    - `"developer"`: developer-focused results (issues, pull requests, READMEs, documentation) — results appear under `.developer`
+    - `{ type: "github" | "research" | "pdf" | "developer" }`: typed category object form
+
+- `options.includeDomains`
+  - Type: string[]
+  - Use when: you want to restrict results to specific domains.
+  - Notes: cannot be used together with `excludeDomains`.
+
+- `options.excludeDomains`
+  - Type: string[]
+  - Use when: you want to exclude specific domains from results.
+  - Notes: cannot be used together with `includeDomains`.
 
 - `options.limit`
   - Type: number
@@ -128,6 +170,22 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
 - `options.timeout`
   - Type: number
   - Use when: you need a request timeout in milliseconds.
+
+- `options.highlights`
+  - Type: boolean
+  - Use when: you want query-relevant highlights for search results. Defaults to true (server-side).
+
+- `options.enterprise`
+  - Type: array of `"default" | "anon" | "zdr"`
+  - Use when: you need enterprise features. Use `["zdr"]` for end-to-end Zero Data Retention or `["anon"]` for anonymized search. Must be enabled for your team.
+
+- `options.threatProtection`
+  - Type: `ThreatProtectionOptions` (`{ mode?, riskScoreThreshold?, blacklist?, whitelist?, blockedTlds?, failurePolicy? }`)
+  - Use when: you need per-request threat protection override.
+
+- `options.integration`
+  - Type: string
+  - Use when: you need an integration identifier for server-side tracking.
 
 - `options.scrapeOptions`
   - Type: `ScrapeOptions`
@@ -158,7 +216,10 @@ const doc = await client.scrape("https://example.com/pricing", {
   formats: [
     "markdown",
     "links",
+    "product",
     { type: "json", prompt: "Extract plan names and prices." },
+    { type: "question", question: "What is the enterprise plan price?" },
+    { type: "highlights", query: "pricing tiers" },
     { type: "screenshot", fullPage: true, quality: 80, viewport: { width: 1280, height: 720 } },
     { type: "changeTracking", modes: ["git-diff"], tag: "pricing" },
     { type: "attributes", selectors: [{ selector: "a", attribute: "href" }] }
@@ -182,6 +243,7 @@ const doc = await client.scrape("https://example.com/pricing", {
   maxAge: 86400000,
   minAge: 1,
   storeInCache: true,
+  redactPII: { mode: "accurate", entities: ["EMAIL", "PHONE"], replaceStyle: "tag" },
   profile: { name: "docs-session", saveChanges: true }
 });
 ```
@@ -206,12 +268,15 @@ const doc = await client.scrape("https://example.com/pricing", {
     - `"changeTracking"`: change tracking output (for options like `modes`, use `{ type: "changeTracking", modes: [...] }` — `modes` is required on that object in typings)
     - `"attributes"`: attribute extraction (use `{ type: "attributes", selectors: [...] }` when passing selectors)
     - `"branding"`: branding profile output
+    - `"product"`: structured product data extraction (returns a `ProductProfile`)
+    - `"menu"`: structured menu data extraction (returns a `MenuProfile`)
     - `"audio"`: audio extraction
     - `"video"`: video extraction
   - Object-only format types (at minimum `type` as shown):
     - `{ type: "json", prompt?: string, schema?: JSON schema or Zod schema }`: at least one of `prompt` or `schema` is required (SDK validation).
     - `{ type: "question", question: string }`: question-answer style extraction.
     - `{ type: "highlights", query: string }`: relevant source-text extraction.
+    - `{ type: "query", prompt: string, mode?: "freeform" | "directQuote" }`: **deprecated** — prefer `json` or `highlights`.
     - `{ type: "screenshot", fullPage?, quality?, viewport? }`: same options as the string form but as an object.
     - `{ type: "changeTracking", modes: ("git-diff" | "json")[], schema?, prompt?, tag? }`: `modes` is required.
     - `{ type: "attributes", selectors: Array<{ selector, attribute }> }`
@@ -312,6 +377,34 @@ const doc = await client.scrape("https://example.com/pricing", {
   - Type: boolean
   - Use when: you want Firecrawl to cache the result.
 
+- `options.lockdown`
+  - Type: boolean
+  - Use when: you want to serve only cached results, never making outbound requests.
+
+- `options.redactPII`
+  - Type: `boolean | RedactPIIOptions`
+  - Use when: you want PII redaction on the scraped content.
+  - `RedactPIIOptions` fields:
+    - `mode`: `"accurate"` (default, model-only), `"aggressive"` (model + Presidio + spaCy), or `"fast"` (Presidio only, no model call).
+    - `entities`: array of `"PERSON" | "EMAIL" | "PHONE" | "LOCATION" | "FINANCIAL" | "SECRET"`. Unset means all entities.
+    - `replaceStyle`: `"tag"` (default, `<KIND>` placeholders), `"mask"` (`*` of equal length), or `"remove"` (drop span entirely).
+
+- `options.threatProtection`
+  - Type: `ThreatProtectionOptions` (`{ mode?, riskScoreThreshold?, blacklist?, whitelist?, blockedTlds?, failurePolicy? }`)
+  - Use when: you need per-request threat protection override. Requires threat protection to be enabled for your team.
+
+- `options.auditMetadata`
+  - Type: `{ username: string }`
+  - Use when: you need SIEM logging attribution.
+
+- `options.integration`
+  - Type: string
+  - Use when: you need an integration identifier for server-side tracking.
+
+- `options.useMock`
+  - Type: string
+  - Use when: you need mock data (internal/testing).
+
 - `options.profile`
   - Type: object with `name` and optional `saveChanges`
   - Use when: you want a persistent browser profile shared across scrapes and interactions.
@@ -373,6 +466,10 @@ const result = await client.interact("<scrapeJobId>", {
 - `args.timeout`
   - Type: number
   - Use when: you need an execution timeout in seconds.
+
+- `args.origin`
+  - Type: string
+  - Use when: you need an optional origin label for telemetry.
 
 ### Return value (`interact`)
 
@@ -527,6 +624,8 @@ console.log(result.answer);
 ## Notes
 
 - Deprecated client aliases: `scrapeExecute` → `interact`; `stopInteractiveBrowser` and `deleteScrapeBrowser` → `stopInteraction`.
+- `scrapeUrl` is a deprecated alias for `scrape`.
+- The constructor also accepts `timeoutMs`, `maxRetries`, and `backoffFactor` for transport-level control.
 - The default `Firecrawl` export is the v2 client; v1 remains under `client.v1`.
 - Zod schemas passed to `formats` (for `json` or `changeTracking`) are converted to JSON Schema by the SDK.
 - The package declares **Node.js >= 22** in `engines`.
@@ -537,7 +636,12 @@ console.log(result.answer);
 - `firecrawl/apps/js-sdk/firecrawl/src/index.ts`
 - `firecrawl/apps/js-sdk/firecrawl/src/v2/client.ts`
 - `firecrawl/apps/js-sdk/firecrawl/src/v2/types.ts`
+- `firecrawl/apps/js-sdk/firecrawl/src/v2/watcher.ts`
 - `firecrawl/apps/js-sdk/firecrawl/src/v2/utils/validation.ts`
+- `firecrawl/apps/js-sdk/firecrawl/src/v2/utils/httpClient.ts`
 - `firecrawl/apps/js-sdk/firecrawl/src/v2/methods/search.ts`
 - `firecrawl/apps/js-sdk/firecrawl/src/v2/methods/scrape.ts`
+- `firecrawl/apps/js-sdk/firecrawl/src/v2/methods/browser.ts`
+- `firecrawl/apps/js-sdk/firecrawl/src/v2/methods/research.ts`
+- `firecrawl/apps/js-sdk/firecrawl/src/v2/methods/monitor.ts`
 - `firecrawl-docs/api-reference/v2-openapi.json`
