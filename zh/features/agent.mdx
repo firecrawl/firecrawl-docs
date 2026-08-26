@@ -28,6 +28,12 @@ import AgentStatusCompleted from "/snippets/zh/v2/agent/status/completed.mdx";
 import AgentWithModelPython from "/snippets/zh/v2/agent/with-model/python.mdx";
 import AgentWithModelJS from "/snippets/zh/v2/agent/with-model/js.mdx";
 import AgentWithModelCURL from "/snippets/zh/v2/agent/with-model/curl.mdx";
+import AgentTracePython from "/snippets/zh/v2/agent/trace/python.mdx";
+import AgentTraceJS from "/snippets/zh/v2/agent/trace/js.mdx";
+import AgentTraceCURL from "/snippets/zh/v2/agent/trace/curl.mdx";
+import AgentSnapshotPython from "/snippets/zh/v2/agent/snapshot/python.mdx";
+import AgentSnapshotJS from "/snippets/zh/v2/agent/snapshot/js.mdx";
+import AgentSnapshotCURL from "/snippets/zh/v2/agent/snapshot/curl.mdx";
 import PlaygroundCTA from "/snippets/zh/shared/playground-cta-agent.mdx";
 import ChooseDataExtractor from "/snippets/zh/shared/choose-data-extractor/from-agent.mdx";
 import AgentFeedbackCTA from "/snippets/zh/agent-feedback-cta.mdx";
@@ -113,15 +119,14 @@ Agent 任务以异步方式运行。提交任务后，你会收到一个 Job ID�
   ### 可能的状态
 </div>
 
-| 状态           | 描述         |
-| ------------ | ---------- |
-| `processing` | 代理仍在处理你的请求 |
-| `completed`  | 提取已成功完成    |
-| `failed`     | 提取过程中发生错误  |
-| `cancelled`  | 用户取消了该任务   |
+| 状态           | 描述                                               |
+| ------------ | ------------------------------------------------ |
+| `processing` | 代理仍在处理你的请求                                       |
+| `completed`  | 提取已成功完成                                          |
+| `failed`     | 提取过程中发生错误，或任务被取消 (被取消的任务会报告 `failed`，并附带取消错误消息)  |
 
 <Note>
-  **取消是协作式的。** 当你调用取消端点时，请求会立即登记，但任何已经在进行中的步骤 (如 LLM 推理步骤、工具调用或浏览器操作) 都会先运行到可安全停止的节点，然后任务才会转为 `cancelled`。在这段短暂时间内，额度仍可能继续累积，因此最终的 `creditsUsed` 可能高于你点击取消时显示的数值。
+  **取消是协作式的。** 当你调用取消端点时，请求会立即登记，但任何已经在进行中的步骤 (如 LLM 推理步骤、工具调用或浏览器操作) 都会先运行到可安全停止的节点，然后任务才会停止。在这段短暂时间内，额度仍可能继续累积，因此最终的 `creditsUsed` 可能高于你点击取消时显示的数值。被取消的任务在轮询时会报告状态 `failed`，并触发 `agent.cancelled` Webhook 事件。
 </Note>
 
 <div id="pending-example">
@@ -136,6 +141,32 @@ Agent 任务以异步方式运行。提交任务后，你会收到一个 Job ID�
 
 <AgentStatusCompleted />
 
+<div id="execution-traces-and-snapshots">
+  ## 执行追踪和快照
+</div>
+
+每次运行都会记录一份规范的执行追踪，其中按顺序包含工具调用、推理摘要、进度更新、浏览器会话和输出工件变更等事件。可获取该追踪以调试运行，或为实时进度 UI 提供数据：
+
+<CodeGroup>
+  <AgentTracePython />
+
+  <AgentTraceJS />
+
+  <AgentTraceCURL />
+</CodeGroup>
+
+`artifact.updated` 追踪事件通过 `snapshotId` 引用代理的工作输出。使用快照端点可获取快照的完整内容：
+
+<CodeGroup>
+  <AgentSnapshotPython />
+
+  <AgentSnapshotJS />
+
+  <AgentSnapshotCURL />
+</CodeGroup>
+
+<Note>Spark 2 运行会记录追踪和快照，也就是说所有新运行都会记录；在 Spark 1 模型退役前启动的任务则不包含这些记录。有关完整的事件 schema，请参见[追踪](/zh/api-reference/endpoint/agent-trace)和[快照](/zh/api-reference/endpoint/agent-snapshot) API 参考。</Note>
+
 <div id="share-agent-runs">
   ## 分享代理运行记录
 </div>
@@ -146,61 +177,30 @@ Agent 任务以异步方式运行。提交任务后，你会收到一个 Job ID�
   ## 模型选择
 </div>
 
-Firecrawl 代理 提供三种模型。**Spark 1 Pro** 是默认值。**Spark 2** 在准确率相当的前提下，比任一 Spark 1 模型都更便宜、更快——将 `model` 设置为 `spark-2` 即可使用它。
+Firecrawl 代理使用 **Spark 2**，相比早期的 Spark 1 模型成本更低、速度更快，准确率相当。它是默认值：无论是否设置 `model` 参数，每次运行都会使用 `spark-2`。
 
-| 模型             | 成本              | 准确率      | 最适合                 |
-| -------------- | --------------- | -------- | ------------------- |
-| `spark-2`      | 最低              | 与 Pro 相当 | 低成本、运行时间短           |
-| `spark-1-mini` | 比 Pro **低 60%** | 标准       | 对成本敏感的 Spark 1 工作负载 |
-| `spark-1-pro`  | 标准              | 更高       | 复杂研究、关键提取 (默认值)     |
-
-<Tip>
-  **Spark 1 Pro 是默认值**，因此未指定 `model` 参数的请求会使用 `spark-1-pro`。将 `model` 设置为 `spark-2`，即可在准确率相当的情况下获得更低成本和更短运行时间。对于简单的 Spark 1 任务，将 `model` 设置为 `spark-1-mini` 可降低 60% 成本。
-</Tip>
+<Note>
+  **Spark 1 模型已弃用。** 为保持向后兼容，仍接受 Spark 1 模型名称，但使用这些名称的请求会被路由到 `spark-2`。
+</Note>
 
 <div id="spark-2">
   ### Spark 2
 </div>
 
-`spark-2` 是我们最新的代理模型。它覆盖了此前需要在 Mini 和 Pro 之间取舍的全部任务，因此无需再权衡准确率与成本。将 `model` 设置为 `spark-2` 即可使用它。
+`spark-2` 覆盖了此前需要在 Mini 和 Pro 之间取舍的全部任务，因此无需再权衡准确率与成本。
 
-**以下情况请选择 Spark 2：**
+**亮点：**
 
-* 希望将单次运行成本降至最低
-* 重视运行时间
-* 原本会因准确率而选择 Spark 1 Pro
-
-<div id="spark-1-mini">
-  ### Spark 1 Mini
-</div>
-
-`spark-1-mini` 是我们的高效模型，非常适合简单直接的数据提取任务。
-
-**在以下情况下使用 Mini：**
-
-* 提取简单数据点 (联系方式、价格信息等)
-* 处理结构清晰的网站
-* 需要优先考虑成本效率
-* 运行大批量提取任务时
-
-<div id="spark-1-pro-default">
-  ### Spark 1 Pro (默认值)
-</div>
-
-`spark-1-pro` 是我们的旗舰模型，专为在复杂数据提取任务中实现最高准确率而设计。它是默认值：未设置 `model` 的请求会使用 `spark-1-pro`。
-
-**在以下场景使用 Pro：**
-
-* 进行复杂的竞品分析
-* 提取需要深入推理的数据
-* 你的用例对准确率要求极高
-* 处理模糊或难以获取的数据
+* 单次运行成本最低
+* 运行时间最快
+* 准确率可媲美之前的 Spark 1 旗舰模型
+* 唯一支持推理预算的模型：传入 `effort` (`low`、`medium` 或 `high`) 以控制其思考深度
 
 <div id="specifying-a-model">
   ### 指定模型
 </div>
 
-`spark-1-pro` 是默认值，因此 `model` 参数可选。通过传入该参数可选择其他模型：
+`model` 参数可选——每个请求都会运行 `spark-2`：
 
 <CodeGroup>
   <AgentWithModelPython />
@@ -214,13 +214,16 @@ Firecrawl 代理 提供三种模型。**Spark 1 Pro** 是默认值。**Spark 2**
   ## 参数
 </div>
 
-| 参数           | 类型     | 必填    | 描述                                                                                                                                                                                                                                                         |
-| ------------ | ------ | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `prompt`     | string | **是** | 用自然语言描述你想要提取的数据 (最多 10,000 个字符)                                                                                                                                                                                                                            |
-| `model`      | string | 否     | 要使用的模型：`spark-1-pro` (默认)、`spark-1-mini` 或 `spark-2`                                                                                                                                                                                                       |
-| `urls`       | array  | 否     | 可选的 URL 列表，用于聚焦提取                                                                                                                                                                                                                                          |
-| `schema`     | object | 否     | 用于结构化输出的可选 JSON schema                                                                                                                                                                                                                                     |
-| `maxCredits` | number | 否     | 此代理任务中可花费的最大额度数。如果未设置，默认值为 **2,500**。Dashboard 最高支持 **2,500**；如需更高上限，请通过 API 设置 `maxCredits` (高于 2,500 的值始终按付费请求处理) 。如果达到上限，任务会失败，并且**不会返回任何数据**。失败的运行不会计费：用于 AI 推理的额度在失败时绝不会收费，运行期间任何用于工具调用的额度 (scraping、search、mapping 等) 都会退还，并且响应会返回 `creditsUsed: 0`。 |
+| 参数                      | 类型      | 必填    | 描述                                                                                                                                                                                                                                                         |
+| ----------------------- | ------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prompt`                | string  | **是** | 用自然语言描述你想要提取的数据 (最多 10,000 个字符)                                                                                                                                                                                                                            |
+| `model`                 | string  | 否     | 默认使用 `spark-2`，所有运行均使用该模型。Spark 1 模型已弃用，并会路由至 `spark-2`                                                                                                                                                                                                    |
+| `effort`                | string  | 否     | 推理预算：`low`、`medium` 或 `high`。所有运行均使用 `spark-2`，因此无论是否指定 `model`，都可以传入 `effort`                                                                                                                                                                             |
+| `urls`                  | array   | 否     | 可选的 URL 列表，用于聚焦提取                                                                                                                                                                                                                                          |
+| `schema`                | object  | 否     | 用于结构化输出的可选 JSON schema                                                                                                                                                                                                                                     |
+| `strictConstrainToURLs` | boolean | 否     | 如果为 `true`，代理仅访问 `urls` array 中提供的 URL                                                                                                                                                                                                                     |
+| `webhook`               | object  | 否     | 用于接收代理生命周期事件 (`agent.started`、`agent.action`、`agent.completed`、`agent.failed`、`agent.cancelled`) 的 Webhook。请参见 [webhook payloads](/zh/api-reference/endpoint/webhook-agent-started)                                                                           |
+| `maxCredits`            | number  | 否     | 此代理任务中可花费的最大额度数。如果未设置，默认值为 **2,500**。Dashboard 最高支持 **2,500**；如需更高上限，请通过 API 设置 `maxCredits` (高于 2,500 的值始终按付费请求处理) 。如果达到上限，任务会失败，并且**不会返回任何数据**。失败的运行不会计费：用于 AI 推理的额度在失败时绝不会收费，运行期间任何用于工具调用的额度 (scraping、search、mapping 等) 都会退还，并且响应会返回 `creditsUsed: 0`。 |
 
 <div id="agent-vs-extract-whats-improved">
   ## Agent 与 Extract：有哪些改进
