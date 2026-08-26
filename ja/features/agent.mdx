@@ -28,6 +28,12 @@ import AgentStatusCompleted from "/snippets/ja/v2/agent/status/completed.mdx";
 import AgentWithModelPython from "/snippets/ja/v2/agent/with-model/python.mdx";
 import AgentWithModelJS from "/snippets/ja/v2/agent/with-model/js.mdx";
 import AgentWithModelCURL from "/snippets/ja/v2/agent/with-model/curl.mdx";
+import AgentTracePython from "/snippets/ja/v2/agent/trace/python.mdx";
+import AgentTraceJS from "/snippets/ja/v2/agent/trace/js.mdx";
+import AgentTraceCURL from "/snippets/ja/v2/agent/trace/curl.mdx";
+import AgentSnapshotPython from "/snippets/ja/v2/agent/snapshot/python.mdx";
+import AgentSnapshotJS from "/snippets/ja/v2/agent/snapshot/js.mdx";
+import AgentSnapshotCURL from "/snippets/ja/v2/agent/snapshot/curl.mdx";
 import PlaygroundCTA from "/snippets/ja/shared/playground-cta-agent.mdx";
 import ChooseDataExtractor from "/snippets/ja/shared/choose-data-extractor/from-agent.mdx";
 import AgentFeedbackCTA from "/snippets/ja/agent-feedback-cta.mdx";
@@ -113,15 +119,14 @@ Agent ジョブは非同期で実行されます。ジョブの実行を開始�
   ### 考えられるステータス
 </div>
 
-| ステータス        | 説明                     |
-| ------------ | ---------------------- |
-| `processing` | エージェントがリクエストを処理中です     |
-| `completed`  | 抽出が正常に完了しました           |
-| `failed`     | 抽出中にエラーが発生しました         |
-| `cancelled`  | ジョブはユーザーによってキャンセルされました |
+| ステータス        | 説明                                                                             |
+| ------------ | ------------------------------------------------------------------------------ |
+| `processing` | エージェントがリクエストを処理中です                                                             |
+| `completed`  | 抽出が正常に完了しました                                                                   |
+| `failed`     | 抽出中にエラーが発生したか、ジョブがキャンセルされました (キャンセルされたジョブは、キャンセルのエラーメッセージとともに `failed` を報告します) |
 
 <Note>
-  **キャンセルは協調的に処理されます。** cancel エンドポイントを呼び出すと、リクエストはただちに受け付けられますが、すでに進行中のステップ (LLM の推論ステップ、ツール呼び出し、またはブラウザ操作) は、ジョブが `cancelled` に移行する前に、正常に停止できる区切りまで実行されます。その短い間もクレジットが引き続き加算される可能性があるため、最終的な `creditsUsed` は、キャンセルをクリックした時点で表示されていた値より大きくなる場合があります。
+  **キャンセルは協調的に処理されます。** cancel エンドポイントを呼び出すと、リクエストはただちに受け付けられますが、すでに進行中のステップ (LLM の推論ステップ、ツール呼び出し、またはブラウザ操作) は、ジョブが停止する前に、正常に停止できる区切りまで実行されます。その短い間もクレジットが引き続き加算される可能性があるため、最終的な `creditsUsed` は、キャンセルをクリックした時点で表示されていた値より大きくなる場合があります。キャンセルされたジョブは、ポーリング時にステータス `failed` を報告し、`agent.cancelled` webhook イベントを発行します。
 </Note>
 
 <div id="pending-example">
@@ -136,6 +141,32 @@ Agent ジョブは非同期で実行されます。ジョブの実行を開始�
 
 <AgentStatusCompleted />
 
+<div id="execution-traces-and-snapshots">
+  ## 実行トレースとスナップショット
+</div>
+
+各実行では、ツール呼び出し、推論の要約、進行状況のアップデート、ブラウザセッション、出力アーティファクトの変更を含む、時系列順の正規実行トレースが記録されます。実行のデバッグや、ライブ進行状況UIの構築に利用できます。
+
+<CodeGroup>
+  <AgentTracePython />
+
+  <AgentTraceJS />
+
+  <AgentTraceCURL />
+</CodeGroup>
+
+`artifact.updated` トレースイベントは、`snapshotId` を通じてエージェントの作業中の出力を参照します。スナップショットの完全な内容は、snapshotsエンドポイントで取得できます。
+
+<CodeGroup>
+  <AgentSnapshotPython />
+
+  <AgentSnapshotJS />
+
+  <AgentSnapshotCURL />
+</CodeGroup>
+
+<Note>トレースとスナップショットは、すべての新規実行で使用されるSpark 2で記録されます。廃止前にSpark 1モデルで開始されたジョブには、これらはありません。完全なイベントスキーマについては、[trace](/ja/api-reference/endpoint/agent-trace) および [snapshot](/ja/api-reference/endpoint/agent-snapshot) のAPIリファレンスを参照してください。</Note>
+
 <div id="share-agent-runs">
   ## エージェントの実行を共有する
 </div>
@@ -146,61 +177,30 @@ Agent playground から、エージェントの実行を直接共有できます
   ## モデルの選択
 </div>
 
-Firecrawl Agent には 3 つのモデルがあります。**Spark 1 Pro** がデフォルトです。**Spark 2** は Spark 1 のいずれのモデルよりも低コストかつ高速で、精度も同等です。使用するには、`model` を `spark-2` に設定します。
+Firecrawl Agent は **Spark 2** で動作します。Spark 2 は、同等の精度を保ちながら、従来の Spark 1 モデルよりも低コストで高速です。これがデフォルトのモデルであり、`model` パラメータを設定したかどうかにかかわらず、すべての実行で `spark-2` が使用されます。
 
-| モデル            | コスト                 | 精度     | 最適な用途                 |
-| -------------- | ------------------- | ------ | --------------------- |
-| `spark-2`      | 最低                  | Pro 相当 | 低コストで短い実行時間           |
-| `spark-1-mini` | Pro より **60% 低コスト** | 標準     | コスト重視の Spark 1 ワークロード |
-| `spark-1-pro`  | 標準                  | 高い     | 複雑な調査、重要な抽出 (デフォルト)   |
-
-<Tip>
-  **Spark 1 Pro がデフォルト**のため、`model` パラメータを指定しないリクエストでは `spark-1-pro` が使用されます。同等の精度で低コストかつ短い実行時間にするには、`model` を `spark-2` に設定します。単純な Spark 1 タスクのコストを 60% 削減するには、`model` を `spark-1-mini` に設定します。
-</Tip>
+<Note>
+  **Spark 1 モデルは非推奨です。** Spark 1 のモデル名は後方互換性のため引き続き使用できますが、これらを指定したリクエストは `spark-2` にルーティングされます。
+</Note>
 
 <div id="spark-2">
   ### Spark 2
 </div>
 
-`spark-2` は最新のエージェントモデルです。従来は Mini と Pro の選択が必要だった幅広いタスクに対応するため、精度とコストのトレードオフを考える必要はありません。使用するには `model` を `spark-2` に設定してください。
+`spark-2` は、従来は Mini と Pro の選択が必要だった幅広いタスクに対応するため、精度とコストのトレードオフを考える必要はありません。
 
-**次の場合は Spark 2 を使用してください。**
+**ハイライト:**
 
-* 実行あたりのコストを最小限に抑えたい
-* 実行時間が重要
-* Spark 1 Pro の精度が必要になる場合
-
-<div id="spark-1-mini">
-  ### Spark 1 Mini
-</div>
-
-`spark-1-mini` は効率的なモデルで、シンプルなデータ抽出タスクに最適です。
-
-**Mini を使うのに適したケース:**
-
-* 単純なデータポイント (連絡先情報、価格情報など) を抽出するとき
-* 構造が整理された Web サイトを扱うとき
-* コスト効率を重視するとき
-* 大量の抽出ジョブを実行するとき
-
-<div id="spark-1-pro-default">
-  ### Spark 1 Pro (デフォルト)
-</div>
-
-`spark-1-pro` は、複雑な抽出タスクで最大限の精度を発揮するよう設計された、当社のフラッグシップモデルです。デフォルトモデルのため、`model` を設定しないリクエストでは `spark-1-pro` が使用されます。
-
-**次のような場合は Pro を使用してください:**
-
-* 複雑な競合分析を行う場合
-* 深い推論が必要なデータを抽出する場合
-* 精度がユースケースにおいて極めて重要な場合
-* あいまい、または取得が難しいデータを扱う場合
+* 実行あたりのコストを最小限に抑える
+* 最速の実行時間
+* 旧 Spark 1 フラッグシップに匹敵する精度
+* 推論予算を備えた唯一のモデル: `effort` (`low`、`medium`、または `high`) を渡して、どの程度深く考えるかを制御できます
 
 <div id="specifying-a-model">
   ### モデルの指定
 </div>
 
-`spark-1-pro` がデフォルトのため、`model` パラメータは任意です。別のモデルを使用する場合は、`model` パラメータで指定します。
+`model` パラメータは任意です。すべてのリクエストで `spark-2` が実行されます。
 
 <CodeGroup>
   <AgentWithModelPython />
@@ -214,13 +214,16 @@ Firecrawl Agent には 3 つのモデルがあります。**Spark 1 Pro** がデ
   ## パラメータ
 </div>
 
-| パラメータ    | Type   | Required | Description                                                                                                                                                                                                                                                                                                                                            |
-| ------------ | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `prompt`     | string | **Yes**  | 抽出したいデータを自然言語で記述した文字列 (最大 10,000 文字)                                                                                                                                                                                                                                                                                                                   |
-| `model`      | string | No       | 使用するモデル: `spark-1-pro` (デフォルト)、`spark-1-mini`、または `spark-2`                                                                                                                                                                                                                                                                                            |
-| `urls`       | array  | No       | 抽出対象を絞り込むための任意の URL リスト                                                                                                                                                                                                                                                                                                                                |
-| `schema`     | object | No       | 構造化された出力のための任意の JSON スキーマ                                                                                                                                                                                                                                                                                                                              |
-| `maxCredits` | number | No       | このエージェントタスクで使用するクレジットの最大数。設定しない場合、デフォルトは **2,500** です。ダッシュボードでは **2,500** までの値をサポートしています。これを超える上限を設定するには、API 経由で `maxCredits` を指定してください (2,500 を超える値は常に有料リクエストとして扱われます)。上限に達するとジョブは失敗し、**データは一切返されません**。失敗した実行には課金されません。AI の推論に使用されたクレジットは失敗時には請求されず、実行中のツール呼び出し (`scraping`、`search`、`mapping` など) に使用されたクレジットは返還され、レスポンスには `creditsUsed: 0` が記録されます。 |
+| パラメータ                   | Type    | Required | Description                                                                                                                                                                                                                                                                                                                                            |
+| ----------------------- | ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `prompt`                | string  | **Yes**  | 抽出したいデータを自然言語で記述した文字列 (最大 10,000 文字)                                                                                                                                                                                                                                                                                                                   |
+| `model`                 | string  | No       | すべての実行で使用されるモデル `spark-2` がデフォルトです。Spark 1 モデルは非推奨であり、`spark-2` にルーティングされます                                                                                                                                                                                                                                                                            |
+| `effort`                | string  | No       | 推論予算: `low`、`medium`、または `high`。すべての実行は `spark-2` で行われるため、`effort` は `model` の有無にかかわらず送信できます                                                                                                                                                                                                                                                        |
+| `urls`                  | array   | No       | 抽出対象を絞り込むための任意の URL リスト                                                                                                                                                                                                                                                                                                                                |
+| `schema`                | object  | No       | 構造化された出力のための任意の JSON スキーマ                                                                                                                                                                                                                                                                                                                              |
+| `strictConstrainToURLs` | boolean | No       | `true` の場合、エージェントは `urls` 配列で指定された URL のみを訪問します                                                                                                                                                                                                                                                                                                        |
+| `webhook`               | object  | No       | エージェントのライフサイクルイベント (`agent.started`、`agent.action`、`agent.completed`、`agent.failed`、`agent.cancelled`) を受信する webhook。[webhook ペイロード](/ja/api-reference/endpoint/webhook-agent-started)を参照してください                                                                                                                                                           |
+| `maxCredits`            | number  | No       | このエージェントタスクで使用するクレジットの最大数。設定しない場合、デフォルトは **2,500** です。ダッシュボードでは **2,500** までの値をサポートしています。これを超える上限を設定するには、API 経由で `maxCredits` を指定してください (2,500 を超える値は常に有料リクエストとして扱われます)。上限に達するとジョブは失敗し、**データは一切返されません**。失敗した実行には課金されません。AI の推論に使用されたクレジットは失敗時には請求されず、実行中のツール呼び出し (`scraping`、`search`、`mapping` など) に使用されたクレジットは返還され、レスポンスには `creditsUsed: 0` が記録されます。 |
 
 <div id="agent-vs-extract-whats-improved">
   ## Agent と Extract：何が改善されたか
