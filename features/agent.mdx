@@ -34,6 +34,12 @@ import AgentTraceCURL from "/snippets/v2/agent/trace/curl.mdx";
 import AgentSnapshotPython from "/snippets/v2/agent/snapshot/python.mdx";
 import AgentSnapshotJS from "/snippets/v2/agent/snapshot/js.mdx";
 import AgentSnapshotCURL from "/snippets/v2/agent/snapshot/curl.mdx";
+import AgentTracePollPython from "/snippets/v2/agent/trace/poll/python.mdx";
+import AgentTracePollJS from "/snippets/v2/agent/trace/poll/js.mdx";
+import AgentTracePollCURL from "/snippets/v2/agent/trace/poll/curl.mdx";
+import AgentArtifactsPython from "/snippets/v2/agent/artifacts/python.mdx";
+import AgentArtifactsJS from "/snippets/v2/agent/artifacts/js.mdx";
+import AgentArtifactsCURL from "/snippets/v2/agent/artifacts/curl.mdx";
 import PlaygroundCTA from "/snippets/shared/playground-cta-agent.mdx";
 import ChooseDataExtractor from "/snippets/shared/choose-data-extractor/from-agent.mdx";
 import AgentFeedbackCTA from "/snippets/agent-feedback-cta.mdx";
@@ -130,6 +136,26 @@ Agent jobs run asynchronously. When you submit a job, you'll receive a Job ID th
 
 <AgentStatusCompleted />
 
+## Following a run in progress
+
+Agent doesn't hold a streamed connection open — there's no server-sent event stream and no websocket — so you follow a run either by polling its trace or by receiving webhooks.
+
+| Surface | What you get | Best for |
+|---------|--------------|----------|
+| Trace polling | Full detail — every event the run has emitted so far, including tool calls, reasoning summaries, progress phases, and artifact changes | Building your own progress UI, or debugging what a run actually did |
+| Webhooks | Push delivery, coarse-grained — the five agent lifecycle events (`agent.started`, `agent.action`, `agent.completed`, `agent.failed`, `agent.cancelled`). See [webhook events](/webhooks/events) | Reacting to a run finishing without holding a poll loop open |
+| Live view | A human-watchable view of the agent's browser — request the trace with `?liveView=true` and each entry in `activeBrowserSessions` carries a `liveViewUrl` | Watching a run navigate in real time |
+
+When you order trace events yourself, group them by `agent.id` first: `producerSequence` is monotonic per emitting agent, so a single global sort interleaves an orchestrator's events with its subagents' incorrectly.
+
+<CodeGroup>
+
+<AgentTracePollPython />
+<AgentTracePollJS />
+<AgentTracePollCURL />
+
+</CodeGroup>
+
 ## Execution Traces and Snapshots
 
 Every run records a canonical execution trace — ordered events covering tool calls, reasoning summaries, progress updates, browser sessions, and output artifact changes. Fetch it to debug a run or power a live progress UI:
@@ -152,7 +178,26 @@ Every run records a canonical execution trace — ordered events covering tool c
 
 </CodeGroup>
 
-<Note>Traces and snapshots are recorded on Spark 2 runs, which is every new run — jobs started on Spark 1 models before their retirement do not have them. See the [trace](/api-reference/endpoint/agent-trace) and [snapshot](/api-reference/endpoint/agent-snapshot) API references for the full event schema.</Note>
+<Note>Traces and snapshots are recorded on Spark 2 runs, which is every new run — jobs started on Spark 1 models before their retirement do not have them. See the [trace](/api-reference/endpoint/agent-trace) and [snapshot](/api-reference/endpoint/agent-snapshot) API references for the full event schema, and the [Agent errors](/api-reference/errors#agent) catalog for the failures these endpoints return.</Note>
+
+## Getting the agent's source data
+
+A run writes its working output to artifacts as it goes, and you can retrieve them once you have the run's trace. Every `artifact.updated` event describes one change to one artifact: `artifact.kind` is `json`, `markdown`, `html`, `screenshot`, or `text`, `artifact.path` is where the run put it, and `artifact.snapshotId` is the handle you exchange for its content at `GET /agent/{jobId}/snapshots/{snapshotId}`. The snapshot endpoint returns that content in a `snapshot` field as a JSON-encoded string — parse it before use.
+
+To pull the page content a run produced, fetch the trace, keep the `artifact.updated` events whose `kind` you want, then fetch each snapshot:
+
+<CodeGroup>
+
+<AgentArtifactsPython />
+<AgentArtifactsJS />
+<AgentArtifactsCURL />
+
+</CodeGroup>
+
+Two things worth knowing before you build on this:
+
+- **Artifacts are the run's output, not a page-by-page archive** — what a run writes to an artifact depends on how it works through your prompt, so treat the artifact set as what that particular run produced rather than a guaranteed record of every page it opened.
+- **Tool results carry the rest** — each `tool_call.finished` event includes a `result` field holding what that tool returned, which is where content that never became an artifact shows up.
 
 ## Share agent runs
 
@@ -281,7 +326,7 @@ Agent can be expensive, but there are some ways to decrease the cost:
 * **Start with free runs**: Use your 5 daily free requests to understand pricing
 * **Set a `maxCredits` parameter**: Limit your spending by setting a maximum number of credits you're willing to spend. The dashboard caps this at 2,500 credits; to set a higher limit, use the `maxCredits` parameter directly via the API (note: values above 2,500 are always billed as paid requests)
 * **Optimize prompts**: More specific prompts often use fewer credits
-* **Break large tasks into smaller runs**: A single agent run has an output ceiling based on the underlying model's generation capacity (~150-200 rows of structured data). For large extraction jobs, split by category, region, or URL batch (3-5 URLs per run) and merge the results. This also keeps each run well under the `maxCredits` limit.
+* **Break large tasks into smaller runs**: A single agent run returns roughly 150-200 rows of structured data. For large extraction jobs, split by category, region, or URL batch (3-5 URLs per run) and merge the results. This also keeps each run well under the `maxCredits` limit.
 * **Monitor usage**: Track your consumption through the dashboard
 * **Set expectations**: Complex multi-domain research will use more credits than simple single-page extractions
 
