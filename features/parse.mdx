@@ -304,6 +304,62 @@ Passing `parsers: []` skips parsing entirely and returns the PDF as base64
 | `fast` | Text-based extraction only (embedded text). Fastest option, but fails on scanned or image-only pages rather than silently returning nothing. |
 | `ocr` | Forces OCR on every page. Use for scanned documents or when `auto` misclassifies a page. |
 
+## Large PDFs
+
+A long PDF can take longer than the request `timeout` to finish. Firecrawl
+does not cancel that work. The request returns HTTP `408` with
+`code: "SCRAPE_TIMEOUT"`, and the document keeps processing server-side.
+
+On [`/scrape`](/features/scrape), the response includes structured retry
+guidance and a `Retry-After` header:
+
+```json
+{
+  "success": false,
+  "code": "SCRAPE_TIMEOUT",
+  "error": "Request timed out, but this 700-page PDF is still being processed on our side. Retrying the same URL in ~5 minutes returns the completed result without re-processing. To avoid the retry entirely, pass a `timeout` that covers the estimate.",
+  "details": {
+    "state": "processing_continues",
+    "documentPages": 700,
+    "jobStatus": "running",
+    "estimatedRemainingSeconds": 300,
+    "retryAfterSeconds": 300
+  }
+}
+```
+
+`Retry-After` matches `details.retryAfterSeconds` (capped at 10 minutes).
+Retrying the **same URL** after that delay attaches to the in-flight job and
+returns the finished result — the document is not re-processed.
+
+`jobStatus` is `"running"` while pages are being parsed, or `"queued"` if the
+job is waiting for a worker (it keeps its place). If
+`details.mayExceedProcessingWindow` is `true`, the document may be larger than
+the server-side processing ceiling; keep retrying to pick up a result if it
+completes, or raise `timeout` / contact support.
+
+**What to do**
+
+1. **Retry the same request** after `Retry-After`. Do not change the URL or
+   start a different document.
+2. **Raise `timeout`** (up to `300000` ms) if you want the first call to wait.
+   Very large documents can still outlive the maximum request window — that is
+   expected; retry.
+3. **Cap the work** with [`maxPages`](#pdf-options) when you do not need every
+   page.
+4. **JS and Python SDKs auto-resume** on this signal: `firecrawl` ≥ 4.37 and
+   `firecrawl-py` ≥ 4.40 sleep the advertised delay and re-issue `scrape()`.
+   Opt out with `autoResume: false` (JS) or `auto_resume=False` (Python). Other
+   SDKs and raw HTTP clients should retry only when
+   `details.state === "processing_continues"` — not on every 408.
+
+`/parse` can return the same `SCRAPE_TIMEOUT` / 408 when an uploaded PDF
+outlives the request. Retry the same file. The JS/Python auto-resume loop
+applies to `scrape()` only.
+
+See [Errors](/api-reference/errors#large-pdf-timeouts) for the full error
+shape and a retry snippet.
+
 ## Supported formats
 
 **Extensions:** `.html`, `.htm`, `.xhtml`, `.pdf`, `.docx`, `.doc`, `.docm`, `.odt`, `.ods`, `.odp`, `.rtf`, `.xlsx`, `.xls`, `.xlsm`, `.xlsb`, `.pptx`, `.ppt`, `.pptm`, `.epub`, `.csv`.
@@ -320,7 +376,7 @@ optional `options` JSON part. `options` accepts a subset of scrape options:
 - `onlyMainContent`: Only return the main content of the document. Defaults to `true`.
 - `includeTags` / `excludeTags`: Tag-level inclusion or exclusion (HTML inputs).
 - `redactPII`: Redact personally identifiable information from returned markdown.
-- `timeout`: Request timeout in milliseconds. Defaults to `30000`, max `300000`.
+- `timeout`: Request timeout in milliseconds. Defaults to `30000`, max `300000`. Long PDFs that outlive this window keep processing — see [Large PDFs](#large-pdfs).
 - `parsers`: File-parser controls — see [PDF options](#pdf-options).
 
 <Note>
@@ -335,7 +391,7 @@ optional `options` JSON part. `options` accepts a subset of scrape options:
 
 - Maximum file size is **50 MB** per request.
 - PDF parsing is billed at **1 credit per page**; the `pages`, `blocks`, and `pageMarkers` options add no cost.
-- Parsing very large or scanned PDFs in `ocr` mode may take longer — increase `timeout` or use `maxPages` to bound the work.
+- Long or scanned PDFs can outlive the request `timeout`. Firecrawl keeps processing them and returns a retryable `408` — see [Large PDFs](#large-pdfs). Use `maxPages` when you want to bound the work.
 - For batches of files, call `/parse` per file in parallel; there is no batch upload variant.
 
 > Are you an AI agent that needs a Firecrawl API key? See [firecrawl.dev/agent-onboarding/SKILL.md](https://www.firecrawl.dev/agent-onboarding/SKILL.md) for automated onboarding instructions.

@@ -36,7 +36,8 @@ All non-2xx responses return JSON with a top-level `success: false` and a string
 | 403  | `Forbidden`                                        | Key lacks permission for this endpoint or feature.                 | Use a key with the required scope, or upgrade the plan that gates this feature.     | No               |
 | 403  | `SCRAPE_PROMPT_INJECTION_DETECTED`                 | JSON mode with `checkPromptInjection: true` detected a prompt injection attempt in the scraped page content, so extraction was aborted. | Inspect the page content manually. If it is a false positive, retry without `checkPromptInjection`. See [Prompt injection detection](/features/llm-extract#prompt-injection-detection). | No               |
 | 404  | `Not Found`                                        | The job ID, resource, or endpoint path does not exist.             | Verify the resource ID and endpoint URL.                                            | No               |
-| 408  | `Request Timeout`                                  | The page took longer than the request `timeout` to load.           | Increase `timeout`, simplify actions, or use `fastMode`.                            | Yes, with backoff |
+| 408  | `Request Timeout` / `SCRAPE_TIMEOUT`               | The page took longer than the request `timeout` to load, render, or process. | Increase `timeout` (up to `300000` ms), simplify actions, or use `fastMode`. | Yes, with backoff |
+| 408  | `SCRAPE_TIMEOUT` with `details.state: "processing_continues"` | A large PDF is still being processed server-side after the request window expired. The job is **not** cancelled. | Wait `Retry-After` (or `details.retryAfterSeconds`), then retry the **same URL**. The retry attaches to the in-flight job and returns the finished result without re-processing. JS and Python `scrape()` do this automatically. See [Large PDF timeouts](#large-pdf-timeouts). | Yes — wait, then retry the same request |
 | 409  | `Conflict`                                         | Resource is in a state that prevents the operation (e.g. already deleted). | Re-fetch state and reconcile before retrying.                                       | No               |
 | 413  | `Payload Too Large`                                | Request body exceeded the maximum allowed size.                    | Reduce the payload (e.g. shorter schema, fewer URLs per batch).                     | No               |
 | 422  | `Unprocessable Entity` / extraction schema error   | Schema is invalid JSON Schema, or the model could not produce a conforming result. | Validate the schema; loosen required fields; try a different `model`.                | Sometimes        |
@@ -47,11 +48,44 @@ All non-2xx responses return JSON with a top-level `success: false` and a string
 | 503  | `Service Unavailable`                              | Service temporarily unable to handle the request.                  | Retry with backoff.                                                                 | Yes, with backoff |
 | 504  | `Gateway Timeout`                                  | Request exceeded the gateway's timeout (typically long crawls).    | Use the async crawl/batch endpoints and poll status instead.                         | Yes, with backoff |
 
-For 429 responses, Firecrawl includes a `Retry-After` header (in seconds) when available — wait at least that long before retrying.
+For 429 responses, Firecrawl includes a `Retry-After` header (in seconds) when available — wait at least that long before retrying. Large-PDF `processing_continues` timeouts also send `Retry-After`; honor it the same way.
+
+## Large PDF timeouts
+
+When a PDF outlives the request `timeout`, `/scrape` returns HTTP `408` with
+`code: "SCRAPE_TIMEOUT"` and `details.state: "processing_continues"`. This is
+not a failed parse — the document keeps processing, and a later request for
+the same URL returns the completed result.
+
+```json
+{
+  "success": false,
+  "code": "SCRAPE_TIMEOUT",
+  "error": "Request timed out, but this 700-page PDF is still being processed on our side. Retrying the same URL in ~5 minutes returns the completed result without re-processing. To avoid the retry entirely, pass a `timeout` that covers the estimate.",
+  "details": {
+    "state": "processing_continues",
+    "documentPages": 700,
+    "jobStatus": "running",
+    "estimatedRemainingSeconds": 300,
+    "retryAfterSeconds": 300
+  }
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `details.state` | Always `"processing_continues"` for this case. Resume **only** on this signal — other 408s are ordinary timeouts. |
+| `details.jobStatus` | `"running"` while pages are parsed, or `"queued"` if the job is waiting for a worker (it keeps its place). |
+| `details.documentPages` | Page count when known. |
+| `details.estimatedRemainingSeconds` | Conservative remaining-time estimate, floored at one minute. |
+| `details.retryAfterSeconds` | How long to wait before retrying. Also sent as the `Retry-After` header, capped at 600 seconds. |
+| `details.mayExceedProcessingWindow` | Present and `true` when the document may be larger than the server-side processing ceiling. |
+
+**Do not** start a different document or change the URL. The JS SDK (`firecrawl` ≥ 4.37) and Python SDK (`firecrawl-py` ≥ 4.40) auto-resume `scrape()` on this signal (at most 5 resumes / 20 minutes). Opt out with `autoResume: false` / `auto_resume=False`. See [Large PDFs](/features/parse#large-pdfs).
 
 ## Retry guidance
 
-Treat the **Retryable** column as authoritative; do not infer from the HTTP status alone. The pattern below uses exponential backoff with jitter and respects `Retry-After` on 429.
+Treat the **Retryable** column as authoritative; do not infer from the HTTP status alone. The pattern below uses exponential backoff with jitter and respects `Retry-After` on 429 and on large-PDF `processing_continues` timeouts.
 
 <CodeGroup>
 
