@@ -34,6 +34,12 @@ import AgentTraceCURL from "/snippets/zh/v2/agent/trace/curl.mdx";
 import AgentSnapshotPython from "/snippets/zh/v2/agent/snapshot/python.mdx";
 import AgentSnapshotJS from "/snippets/zh/v2/agent/snapshot/js.mdx";
 import AgentSnapshotCURL from "/snippets/zh/v2/agent/snapshot/curl.mdx";
+import AgentTracePollPython from "/snippets/zh/v2/agent/trace/poll/python.mdx";
+import AgentTracePollJS from "/snippets/zh/v2/agent/trace/poll/js.mdx";
+import AgentTracePollCURL from "/snippets/zh/v2/agent/trace/poll/curl.mdx";
+import AgentArtifactsPython from "/snippets/zh/v2/agent/artifacts/python.mdx";
+import AgentArtifactsJS from "/snippets/zh/v2/agent/artifacts/js.mdx";
+import AgentArtifactsCURL from "/snippets/zh/v2/agent/artifacts/curl.mdx";
 import PlaygroundCTA from "/snippets/zh/shared/playground-cta-agent.mdx";
 import ChooseDataExtractor from "/snippets/zh/shared/choose-data-extractor/from-agent.mdx";
 import AgentFeedbackCTA from "/snippets/zh/agent-feedback-cta.mdx";
@@ -100,12 +106,13 @@ Firecrawl `/agent` 是一个魔法般的 API，它可以在最广泛的网站范
   ## 任务状态与完成
 </div>
 
-Agent 任务以异步方式运行。提交任务后，你会收到一个 Job ID，用于检查任务状态：
+代理任务以异步方式运行。提交任务后，你会收到一个 Job ID，用于检查任务状态：
 
 * **默认方式**：`agent()` 会阻塞等待，并返回最终结果
 * **先启动再轮询**：使用 `start_agent` (Python) 或 `startAgent` (Node) 立即获取 Job ID，然后通过 `get_agent_status` / `getAgentStatus` 进行轮询
+* **推送而非轮询**：启动任务时传入 `webhook`，即可在运行过程中及完成时接收[代理事件](/zh/webhooks/events#agent-events)
 
-<Note>任务结果在完成后可通过 API 获取，保留 24 小时。在此之后，你仍然可以在 [activity logs](https://www.firecrawl.dev/app/logs) 中查看你的 Agent 历史记录和结果。</Note>
+<Note>任务结果在完成后可通过 API 获取，保留 24 小时。在此之后，你仍然可以在 [activity logs](https://www.firecrawl.dev/app/logs) 中查看你的代理历史记录和结果。</Note>
 
 <CodeGroup>
   <AgentStatusPython />
@@ -141,11 +148,33 @@ Agent 任务以异步方式运行。提交任务后，你会收到一个 Job ID�
 
 <AgentStatusCompleted />
 
+<div id="following-a-run-in-progress">
+  ## 跟踪正在进行的运行
+</div>
+
+代理不会维持流式连接。既没有服务器发送事件流，也没有 WebSocket，因此你可以通过轮询执行追踪或接收 Webhook 来跟踪运行。
+
+| 工具集     | 可获取内容                                                                                                                                            | 最适合                       |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------- |
+| 执行追踪轮询  | 完整详情：截至目前运行发出的所有事件，包括工具调用、推理摘要、进度阶段和工件变更                                                                                                         | 构建自定义进度 UI，或调试运行实际执行了什么操作 |
+| Webhook | 推送交付，粒度较粗：五个代理生命周期事件 (`agent.started`、`agent.action`、`agent.completed`、`agent.failed`、`agent.cancelled`) 。请参见 [webhook events](/zh/webhooks/events) | 无需持续运行轮询循环即可响应运行完成        |
+| 实时视图    | 可供人工查看的代理浏览器视图。请求执行追踪时添加 `?liveView=true`，`activeBrowserSessions` 中的每个条目都会包含 `liveViewUrl`                                                       | 实时观察运行的导航过程               |
+
+如果要自行排序执行追踪事件，请先按 `agent.id` 分组：`producerSequence` 对每个发出事件的代理而言都是单调递增的，因此全局排序会错误地交错编排器及其子代理的事件。终止事件 `run.finished` 发出后，事件仍可能在短时间内到达，因此在渲染最终状态前，请在短暂的尾部窗口内继续轮询。
+
+<CodeGroup>
+  <AgentTracePollPython />
+
+  <AgentTracePollJS />
+
+  <AgentTracePollCURL />
+</CodeGroup>
+
 <div id="execution-traces-and-snapshots">
   ## 执行追踪和快照
 </div>
 
-每次运行都会记录一份规范的执行追踪，其中按顺序包含工具调用、推理摘要、进度更新、浏览器会话和输出工件变更等事件。可获取该追踪以调试运行，或为实时进度 UI 提供数据：
+每次运行都会记录一份规范的执行追踪，其中按顺序包含工具调用、推理摘要、进度更新、浏览器会话和输出工件变更等事件。可获取该执行追踪以调试运行，或为实时进度 UI 提供数据：
 
 <CodeGroup>
   <AgentTracePython />
@@ -155,7 +184,7 @@ Agent 任务以异步方式运行。提交任务后，你会收到一个 Job ID�
   <AgentTraceCURL />
 </CodeGroup>
 
-`artifact.updated` 追踪事件通过 `snapshotId` 引用代理的工作输出。使用快照端点可获取快照的完整内容：
+`artifact.updated` 执行追踪事件通过 `snapshotId` 引用代理的工作输出。使用快照端点可获取快照的完整内容：
 
 <CodeGroup>
   <AgentSnapshotPython />
@@ -165,7 +194,28 @@ Agent 任务以异步方式运行。提交任务后，你会收到一个 Job ID�
   <AgentSnapshotCURL />
 </CodeGroup>
 
-<Note>Spark 2 运行会记录追踪和快照，也就是说所有新运行都会记录；在 Spark 1 模型退役前启动的任务则不包含这些记录。有关完整的事件 schema，请参见[追踪](/zh/api-reference/endpoint/agent-trace)和[快照](/zh/api-reference/endpoint/agent-snapshot) API 参考。</Note>
+<Note>Spark 2 运行会记录执行追踪和快照，也就是说所有新运行都会记录；在 Spark 1 模型退役前启动的任务则不包含这些记录。有关完整的事件 schema，请参见[执行追踪](/zh/api-reference/endpoint/agent-trace)和[快照](/zh/api-reference/endpoint/agent-snapshot) API 参考；有关这些端点返回的失败情况，请参见 [代理错误](/zh/api-reference/errors#agent)目录。</Note>
+
+<div id="getting-the-agents-source-data">
+  ## 获取代理的源数据
+</div>
+
+运行会在执行过程中持续将工作输出写入工件。获取该运行的执行追踪后，即可检索这些工件。每个 `artifact.updated` 事件描述某个工件的一次变更：`artifact.kind` 可以是 `json`、`markdown`、`html`、`screenshot` 或 `text`，`artifact.path` 表示运行将其写入的位置，而 `artifact.snapshotId` 则是用于通过 `GET /agent/{jobId}/snapshots/{snapshotId}` 获取其内容的句柄。快照端点会在 `snapshot` 字段中以字符串形式返回该内容：对于 `json` 工件，该字符串经过 JSON 编码，需要解码；而 `markdown`、`html` 和 `text` 工件则直接返回内容本身。
+
+要获取运行生成的页面内容，请先获取执行追踪，保留所需 `kind` 的 `artifact.updated` 事件，然后获取每个快照：
+
+<CodeGroup>
+  <AgentArtifactsPython />
+
+  <AgentArtifactsJS />
+
+  <AgentArtifactsCURL />
+</CodeGroup>
+
+在此基础上进行开发前，有两点需要了解：
+
+* **工件是运行的输出，并非逐页存档。** 运行写入工件的内容取决于它如何处理你的 prompt，因此应将工件集视为该次运行生成的内容，而不是其打开的每个页面的完整记录。
+* **其余内容位于工具结果中。** 每个 `tool_call.finished` 事件都包含一个 `result` 字段，其中保存该工具返回的内容；未成为工件的内容会出现在这里。
 
 <div id="share-agent-runs">
   ## 分享代理运行记录
@@ -323,7 +373,7 @@ Firecrawl Agent 使用 **动态计费** 模式，费用会随你的数据提取�
 * **从免费运行开始**：利用你每天 5 次免费请求来了解定价
 * **设置 `maxCredits` 参数**：通过设置你愿意花费的最大额度数来限制支出。Dashboard 将此上限设为 2,500 额度；若要设置更高的上限，请直接通过 API 使用 `maxCredits` 参数 (注意：高于 2,500 的值始终按付费请求计费)
 * **优化 prompt**：更具体的 prompt 通常会消耗更少的额度
-* **将大型任务拆分为更小的运行**：单次代理运行的输出上限取决于底层模型的生成能力 (约 150-200 行结构化数据) 。对于大型提取任务，可按类别、地区或 URL 批次 (每次运行 3-5 个 URL) 进行拆分，再合并结果。这也能让每次运行都保持在 `maxCredits` 限制之下。
+* **将大型任务拆分为更小的运行**：单次代理运行大约会返回 150-200 行结构化数据。对于大型提取任务，可按类别、地区或 URL 批次 (每次运行 3-5 个 URL) 进行拆分，再合并结果。这也能让每次运行都保持在 `maxCredits` 限制之下。
 * **监控用量**：通过 Dashboard 追踪你的使用情况
 * **设定预期**：跨多个站点/领域的复杂研究会比简单的单页提取消耗更多额度
 

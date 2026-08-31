@@ -34,6 +34,12 @@ import AgentTraceCURL from "/snippets/ja/v2/agent/trace/curl.mdx";
 import AgentSnapshotPython from "/snippets/ja/v2/agent/snapshot/python.mdx";
 import AgentSnapshotJS from "/snippets/ja/v2/agent/snapshot/js.mdx";
 import AgentSnapshotCURL from "/snippets/ja/v2/agent/snapshot/curl.mdx";
+import AgentTracePollPython from "/snippets/ja/v2/agent/trace/poll/python.mdx";
+import AgentTracePollJS from "/snippets/ja/v2/agent/trace/poll/js.mdx";
+import AgentTracePollCURL from "/snippets/ja/v2/agent/trace/poll/curl.mdx";
+import AgentArtifactsPython from "/snippets/ja/v2/agent/artifacts/python.mdx";
+import AgentArtifactsJS from "/snippets/ja/v2/agent/artifacts/js.mdx";
+import AgentArtifactsCURL from "/snippets/ja/v2/agent/artifacts/curl.mdx";
 import PlaygroundCTA from "/snippets/ja/shared/playground-cta-agent.mdx";
 import ChooseDataExtractor from "/snippets/ja/shared/choose-data-extractor/from-agent.mdx";
 import AgentFeedbackCTA from "/snippets/ja/agent-feedback-cta.mdx";
@@ -104,6 +110,7 @@ Agent ジョブは非同期で実行されます。ジョブの実行を開始�
 
 * **デフォルトの方法**: `agent()` が完了まで待機し、最終結果を返します
 * **開始してポーリング**: `start_agent` (Python) または `startAgent` (Node) で即座に Job ID を取得し、その後 `get_agent_status` / `getAgentStatus` でポーリングします
+* **ポーリングの代わりにプッシュ**: ジョブの開始時に `webhook` を渡すと、実行の進行中から完了まで [agent events](/ja/webhooks/events#agent-events) を受信できます
 
 <Note>ジョブ結果は完了後 24 時間のあいだ API 経由で取得できます。この期間を過ぎても、[activity logs](https://www.firecrawl.dev/app/logs) から Agent の履歴と結果を参照できます。</Note>
 
@@ -141,6 +148,28 @@ Agent ジョブは非同期で実行されます。ジョブの実行を開始�
 
 <AgentStatusCompleted />
 
+<div id="following-a-run-in-progress">
+  ## 実行中の 実行 を追跡する
+</div>
+
+Agent はストリーミング接続を維持しません。Server-Sent Events のストリームも WebSocket もないため、トレースをポーリングするか、webhook を受信して 実行 を追跡します。
+
+| サーフェス      | 得られるもの                                                                                                                                                            | 最適な用途                              |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| トレースのポーリング | 詳細情報: ツール呼び出し、推論の要約、進行フェーズ、artifact の変更など、実行 がこれまでに出力したすべてのイベント                                                                                                  | 独自の進行状況 UI の構築や、実行 が実際に何をしたかのデバッグ |
+| webhook    | プッシュ配信 (大まかな粒度) : 5 種類のエージェントライフサイクルイベント (`agent.started`、`agent.action`、`agent.completed`、`agent.failed`、`agent.cancelled`) 。[webhook イベント](/ja/webhooks/events)を参照 | ポーリングループを維持せずに、実行 の完了に対応する        |
+| ライブビュー     | 人間が確認できるエージェントのブラウザビュー。`?liveView=true` を指定してトレースをリクエストすると、`activeBrowserSessions` の各エントリに `liveViewUrl` が含まれます                                                   | 実行 のナビゲーションをリアルタイムで確認する           |
+
+トレースイベントを独自に並べ替える場合は、まず `agent.id` ごとにグループ化してください。`producerSequence` はイベントを出力するエージェントごとに単調増加するため、単一のグローバルソートではオーケストレーターのイベントとサブエージェントのイベントが誤って交互に並びます。また、終了イベント `run.finished` の後もしばらくイベントが到着することがあるため、最終状態を表示する前に短いテールウィンドウの間はポーリングを続けてください。
+
+<CodeGroup>
+  <AgentTracePollPython />
+
+  <AgentTracePollJS />
+
+  <AgentTracePollCURL />
+</CodeGroup>
+
 <div id="execution-traces-and-snapshots">
   ## 実行トレースとスナップショット
 </div>
@@ -165,7 +194,28 @@ Agent ジョブは非同期で実行されます。ジョブの実行を開始�
   <AgentSnapshotCURL />
 </CodeGroup>
 
-<Note>トレースとスナップショットは、すべての新規実行で使用されるSpark 2で記録されます。廃止前にSpark 1モデルで開始されたジョブには、これらはありません。完全なイベントスキーマについては、[trace](/ja/api-reference/endpoint/agent-trace) および [snapshot](/ja/api-reference/endpoint/agent-snapshot) のAPIリファレンスを参照してください。</Note>
+<Note>トレースとスナップショットは、すべての新規実行で使用されるSpark 2で記録されます。廃止前にSpark 1モデルで開始されたジョブには、これらはありません。完全なイベントスキーマについては、[trace](/ja/api-reference/endpoint/agent-trace) および [snapshot](/ja/api-reference/endpoint/agent-snapshot) のAPIリファレンスを参照し、これらのエンドポイントが返す失敗については [Agent errors](/ja/api-reference/errors#agent) カタログを参照してください。</Note>
+
+<div id="getting-the-agents-source-data">
+  ## agent のソースデータを取得する
+</div>
+
+実行 は処理の進行に応じて作業中の出力を アーティファクト に書き込みます。実行 の トレース を取得すれば、これらを取得できます。各 `artifact.updated` イベントは、1 つの アーティファクト に対する 1 つの変更を表します。`artifact.kind` は `json`、`markdown`、`html`、`screenshot`、または `text`、`artifact.path` は 実行 が保存した場所、`artifact.snapshotId` は `GET /agent/{jobId}/snapshots/{snapshotId}` でコンテンツを取得する際に使用するハンドルです。スナップショット endpoint は、そのコンテンツを string 型の `snapshot` フィールドで返します。`json` アーティファクト の場合、この string は JSON エンコードされているためデコードが必要です。一方、`markdown`、`html`、`text` アーティファクト の場合はコンテンツそのものです。
+
+実行 が生成したページコンテンツを取得するには、トレース を取得し、必要な `kind` の `artifact.updated` イベントを抽出してから、各 スナップショット を取得します。
+
+<CodeGroup>
+  <AgentArtifactsPython />
+
+  <AgentArtifactsJS />
+
+  <AgentArtifactsCURL />
+</CodeGroup>
+
+これを基に構築する前に、次の 2 点を押さえておいてください。
+
+* **アーティファクト は 実行 の出力であり、ページごとのアーカイブではありません。** 実行 が アーティファクト に書き込む内容は、prompt をどのように処理するかによって異なります。そのため、アーティファクト セットは、開いたすべてのページの記録として保証されるものではなく、その特定の 実行 が生成した出力として扱ってください。
+* **残りの情報は tool result に含まれます。** 各 `tool_call.finished` イベントには、その tool が返した内容を保持する `result` フィールドが含まれます。アーティファクト にならなかったコンテンツはここに含まれます。
 
 <div id="share-agent-runs">
   ## エージェントの実行を共有する
@@ -323,7 +373,7 @@ Spark-1 Fast で複数のエージェントを並列実行する場合、料金�
 * **無料実行から始める**: 毎日 5 回の無料リクエストを使って料金感をつかむ
 * **`maxCredits` パラメータを設定する**: 消費してもよいクレジットの最大数を設定して支出を制限します。ダッシュボードでは上限は 2,500 クレジットです。より高い上限を設定するには、API 経由で `maxCredits` パラメータを直接使用してください (注: 2,500 を超える値は常に有料リクエストとして課金されます)
 * **プロンプトを最適化する**: より具体的なプロンプトほど、使用するクレジットが少なくなることが多い
-* **大きなタスクを小さな実行に分割する**: 1 回の エージェント 実行には、基盤となるモデルの生成能力に基づく出力上限があります (構造化データで約 150〜200 行)。大規模な抽出ジョブでは、カテゴリ、地域、または URL バッチ (1 回の実行あたり 3〜5 URL) ごとに分割し、結果を結合してください。これにより、各実行を `maxCredits` の上限より十分低く保つこともできます。
+* **大きなタスクを小さな実行に分割する**: 1 回の エージェント 実行では、構造化データが約 150〜200 行返されます。大規模な抽出ジョブでは、カテゴリ、地域、または URL バッチ (1 回の実行あたり 3〜5 URL) ごとに分割し、結果を結合してください。これにより、各実行を `maxCredits` の上限より十分低く保つこともできます。
 * **利用状況を監視する**: ダッシュボードを通じて消費量を追跡する
 * **期待値を設定する**: 複数ドメインにわたる複雑なリサーチは、単純な単一ページの抽出よりも多くのクレジットを使用します
 

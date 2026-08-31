@@ -34,6 +34,12 @@ import AgentTraceCURL from "/snippets/pt-BR/v2/agent/trace/curl.mdx";
 import AgentSnapshotPython from "/snippets/pt-BR/v2/agent/snapshot/python.mdx";
 import AgentSnapshotJS from "/snippets/pt-BR/v2/agent/snapshot/js.mdx";
 import AgentSnapshotCURL from "/snippets/pt-BR/v2/agent/snapshot/curl.mdx";
+import AgentTracePollPython from "/snippets/pt-BR/v2/agent/trace/poll/python.mdx";
+import AgentTracePollJS from "/snippets/pt-BR/v2/agent/trace/poll/js.mdx";
+import AgentTracePollCURL from "/snippets/pt-BR/v2/agent/trace/poll/curl.mdx";
+import AgentArtifactsPython from "/snippets/pt-BR/v2/agent/artifacts/python.mdx";
+import AgentArtifactsJS from "/snippets/pt-BR/v2/agent/artifacts/js.mdx";
+import AgentArtifactsCURL from "/snippets/pt-BR/v2/agent/artifacts/curl.mdx";
 import PlaygroundCTA from "/snippets/pt-BR/shared/playground-cta-agent.mdx";
 import ChooseDataExtractor from "/snippets/pt-BR/shared/choose-data-extractor/from-agent.mdx";
 import AgentFeedbackCTA from "/snippets/pt-BR/agent-feedback-cta.mdx";
@@ -104,6 +110,7 @@ Jobs de agente são executados de forma assíncrona. Ao enviar um job, você rec
 
 * **Método padrão**: `agent()` aguarda e retorna os resultados finais
 * **Iniciar e depois consultar**: use `start_agent` (Python) ou `startAgent` (Node) para obter um Job ID imediatamente e depois verificar o status com `get_agent_status` / `getAgentStatus`
+* **Notificação em vez de consulta**: passe um `webhook` ao iniciar o job para receber [eventos do agente](/pt-BR/webhooks/events#agent-events) conforme a execução avança e é concluída
 
 <Note>Os resultados do job ficam disponíveis via API por 24 horas após a conclusão. Após esse período, você ainda pode ver o histórico do seu agente e os resultados nos [logs de atividade](https://www.firecrawl.dev/app/logs).</Note>
 
@@ -141,6 +148,28 @@ Jobs de agente são executados de forma assíncrona. Ao enviar um job, você rec
 
 <AgentStatusCompleted />
 
+<div id="following-a-run-in-progress">
+  ## Acompanhando uma execução em andamento
+</div>
+
+O agente não mantém uma conexão de streaming aberta. Não há stream de eventos enviados pelo servidor nem websocket, então acompanhe uma execução consultando seu rastro ou recebendo webhooks.
+
+| Superfície                 | O que você recebe                                                                                                                                                                                                           | Ideal para                                                                    |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Consulta do rastro         | Detalhes completos: todos os eventos emitidos pela execução até o momento, incluindo chamadas de ferramenta, resumos de raciocínio, fases de progresso e mudanças nos artefatos                                             | Criar sua própria UI de progresso ou depurar o que uma execução realmente fez |
+| Webhooks                   | Entrega por push, em nível mais amplo: os cinco eventos do ciclo de vida do agente (`agent.started`, `agent.action`, `agent.completed`, `agent.failed`, `agent.cancelled`). Consulte [eventos de webhook](/pt-BR/webhooks/events) | Reagir ao término de uma execução sem manter um loop de consulta aberto       |
+| Visualização em tempo real | Uma visualização do navegador do agente que pode ser acompanhada por humanos. Solicite o rastro com `?liveView=true`, e cada entrada em `activeBrowserSessions` inclui uma `liveViewUrl`                                    | Acompanhar uma execução navegando em tempo real                               |
+
+Ao ordenar eventos de rastro manualmente, primeiro agrupe-os por `agent.id`: `producerSequence` é monotônica para cada agente emissor, portanto uma única ordenação global intercala incorretamente os eventos de um orquestrador com os de seus subagentes. Os eventos também podem chegar por um breve período após o evento terminal `run.finished`; portanto, continue consultando durante uma curta janela adicional antes de renderizar o estado final.
+
+<CodeGroup>
+  <AgentTracePollPython />
+
+  <AgentTracePollJS />
+
+  <AgentTracePollCURL />
+</CodeGroup>
+
 <div id="execution-traces-and-snapshots">
   ## Rastros de execução e snapshots
 </div>
@@ -165,7 +194,28 @@ Os eventos de rastro `artifact.updated` fazem referência ao resultado de trabal
   <AgentSnapshotCURL />
 </CodeGroup>
 
-<Note>Rastros e snapshots são registrados em execuções do Spark 2, ou seja, em todas as novas execuções — jobs iniciados em modelos Spark 1 antes de serem descontinuados não os incluem. Consulte as referências da API de [rastro](/pt-BR/api-reference/endpoint/agent-trace) e [snapshot](/pt-BR/api-reference/endpoint/agent-snapshot) para conferir o esquema completo de eventos.</Note>
+<Note>Rastros e snapshots são registrados em execuções do Spark 2, ou seja, em todas as novas execuções; jobs iniciados em modelos Spark 1 antes de serem descontinuados não os incluem. Consulte as referências da API de [rastro](/pt-BR/api-reference/endpoint/agent-trace) e [snapshot](/pt-BR/api-reference/endpoint/agent-snapshot) para conferir o esquema completo de eventos e o catálogo de [erros do agente](/pt-BR/api-reference/errors#agent) para as falhas retornadas por esses endpoints.</Note>
+
+<div id="getting-the-agents-source-data">
+  ## Obtendo os dados de origem do agente
+</div>
+
+Uma execução grava seus resultados parciais em artefatos à medida que avança, e você pode recuperá-los depois de obter o rastro da execução. Cada evento `artifact.updated` descreve uma alteração em um artefato: `artifact.kind` pode ser `json`, `markdown`, `html`, `screenshot` ou `text`; `artifact.path` indica onde a execução o salvou; e `artifact.snapshotId` é o identificador que você usa para obter seu conteúdo em `GET /agent/{jobId}/snapshots/{snapshotId}`. O endpoint de snapshots retorna esse conteúdo em um campo `snapshot` como uma string: para artefatos `json`, essa string é codificada em JSON e precisa ser decodificada, enquanto, para artefatos `markdown`, `html` e `text`, ela é o próprio conteúdo.
+
+Para obter o conteúdo de página produzido por uma execução, busque o rastro, filtre os eventos `artifact.updated` pelo `kind` desejado e, em seguida, busque cada snapshot:
+
+<CodeGroup>
+  <AgentArtifactsPython />
+
+  <AgentArtifactsJS />
+
+  <AgentArtifactsCURL />
+</CodeGroup>
+
+Duas coisas importantes antes de usar isso como base:
+
+* **Os artefatos são o resultado da execução, não um arquivo de cada página.** O que uma execução grava em um artefato depende de como ela processa seu prompt. Portanto, trate o conjunto de artefatos como o que aquela execução específica produziu, e não como um registro garantido de todas as páginas que ela abriu.
+* **Os resultados das ferramentas contêm o restante.** Cada evento `tool_call.finished` inclui um campo `result` com o que a ferramenta retornou. É nele que aparece o conteúdo que nunca se tornou um artefato.
 
 <div id="share-agent-runs">
   ## Compartilhar execuções de agentes
@@ -323,7 +373,7 @@ agente pode ser caro, mas há algumas maneiras de reduzir o custo:
 * **Comece com execuções gratuitas**: Use suas 5 requisições gratuitas diárias para entender os preços
 * **Defina o parâmetro `maxCredits`**: Limite seus gastos definindo um número máximo de créditos que você está disposto a usar. O painel limita isso a 2.500 créditos; para definir um limite maior, use o parâmetro `maxCredits` diretamente via API (observação: valores acima de 2.500 são sempre cobrados como requisições pagas)
 * **Otimize os prompts**: Prompts mais específicos geralmente usam menos créditos
-* **Divida tarefas grandes em execuções menores**: Uma única execução do agente tem um limite de resultado com base na capacidade de geração do modelo subjacente (~150-200 linhas de dados estruturados). Para jobs grandes de extração, divida por categoria, região ou lote de URLs (3-5 URLs por execução) e mescle os resultados. Isso também mantém cada execução bem abaixo do limite de `maxCredits`.
+* **Divida tarefas grandes em execuções menores**: Uma única execução do agente retorna aproximadamente 150-200 linhas de dados estruturados. Para jobs grandes de extração, divida por categoria, região ou lote de URLs (3-5 URLs por execução) e mescle os resultados. Isso também mantém cada execução bem abaixo do limite de `maxCredits`.
 * **Monitore o uso**: Acompanhe seu consumo pelo painel
 * **Ajuste expectativas**: Pesquisas complexas em múltiplos domínios vão consumir mais créditos do que extrações simples de uma única página
 
