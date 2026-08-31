@@ -53,6 +53,41 @@ Todas as respostas com status diferente de 2xx retornam JSON com `success: false
 
 Para respostas 429, o Firecrawl inclui um cabeçalho `Retry-After` (em segundos) quando disponível — aguarde pelo menos esse tempo antes de tentar novamente.
 
+<div id="agent">
+  ## Agente
+</div>
+
+Erros específicos de [`/agent`](/pt-BR/features/agent) e de seus endpoints de status, rastro, snapshot e cancelamento. Os endpoints de rastro e snapshot retransmitem o corpo de erro upstream sem alterações; por isso, esses dois podem responder com um corpo que omite o campo `success` descrito acima. Use o status HTTP e a string `error` para a correspondência.
+
+| HTTP | `error` (mensagem típica)                                                      | Causa                                                                                     | Solução                                                                                                                                 | Repetível        |
+| ---- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| 400  | `Invalid job ID format. Job ID must be a valid UUID.`                          | O segmento de caminho `jobId` não é um UUID.                                              | Use o `id` retornado por `POST /v2/agent`.                                                                                              | Não              |
+| 400  | `Invalid snapshot ID`                                                          | O segmento de caminho `snapshotId` está malformado.                                       | Use um `snapshotId` de um evento `artifact.updated` do [rastro](/pt-BR/api-reference/endpoint/agent-trace).                                   | Não              |
+| 400  | `Trace is only available for Spark 2 extracts`                                 | O job é anterior ao Spark 2, que registra rastros.                                        | Não há nada a fazer nesse job. Toda nova execução roda no `spark-2` e tem um rastro.                                                    | Não              |
+| 400  | `Snapshots are only available for Spark 2 extracts`                            | O job é anterior ao Spark 2, que registra snapshots.                                      | Não há nada a fazer nesse job. Toda nova execução roda no `spark-2` e tem snapshots.                                                    | Não              |
+| 400  | `Your team has zero data retention enabled. This is not supported on extract.` | Não é possível executar o agente para uma equipe com retenção zero de dados obrigatória.  | Entre em contato com [support@firecrawl.com](mailto:support@firecrawl.com) para habilitar o recurso para sua equipe.                    | Não              |
+| 404  | `Agent job not found`                                                          | O ID do job não existe ou pertence a outra equipe.                                        | Verifique o ID do job e use uma chave da equipe que iniciou a execução.                                                                 | Não              |
+| 404  | `Snapshot not found`                                                           | Nenhum snapshot com esse ID pertence a este job.                                          | Busque o rastro novamente e use um `snapshotId` atual de um evento `artifact.updated` do [rastro](/pt-BR/api-reference/endpoint/agent-trace). | Não              |
+| 409  | `Agent already finished`                                                       | O cancelamento foi solicitado para uma execução que já havia atingido um estado terminal. | Consulte `GET /v2/agent/{jobId}` para obter o resultado.                                                                                | Não              |
+| 409  | `Agent is already cancelled`                                                   | O cancelamento foi solicitado para uma execução que já estava sendo cancelada.            | Consulte `GET /v2/agent/{jobId}`. Uma execução cancelada informa `failed` com uma mensagem de cancelamento.                             | Não              |
+| 500  | `Failed to passthrough agent request.`                                         | O serviço do agente rejeitou o job no envio.                                              | Tente novamente com backoff. Se o problema persistir, entre em contato com o suporte e informe o ID da solicitação.                     | Sim, com backoff |
+
+Uma execução que atinge o limite de `maxCredits` não retorna um erro HTTP. Ela termina como um job com falha. Consulte o endpoint de status para receber `status: "failed"` com uma mensagem de erro de limite de crédito, sem `data` e com `creditsUsed: 0`, pois execuções com falha não são cobradas. No rastro, o mesmo resultado aparece como um evento `run.finished` com `outcome: "credit_limit_reached"`.
+
+<div id="trace-error-codes">
+  ### Códigos de erro de rastro
+</div>
+
+Eventos de rastro terminal e `error.occurred` contêm um objeto `error` estruturado cujo `code` é um dentre cinco valores. Cada um também contém um booleano `retryable`, que deve ser tratado da mesma forma que a coluna **Repetível** acima.
+
+| `code`                 | Significado e solução                                                                                                                                  |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `cancelled`            | Você cancelou a execução. Inicie uma nova quando quiser refazer o trabalho.                                                                            |
+| `credit_limit_reached` | A execução atingiu o limite de `maxCredits`. Aumente `maxCredits` ou restrinja o prompt para que a execução exija menos trabalho.                      |
+| `parent_finished`      | Um subagente foi interrompido porque o agente que o iniciou terminou primeiro. Consulte o evento terminal do agente pai para identificar a causa real. |
+| `refused`              | O agente recusou a tarefa. Reformule o prompt ou restrinja-o a URLs das quais você tem autorização para coletar dados.                                 |
+| `internal`             | Ocorreu uma falha inesperada durante a execução. Tente executar novamente; se persistir, entre em contato com o suporte usando o ID do job.            |
+
 <div id="retry-guidance">
   ## Orientações sobre novas tentativas
 </div>

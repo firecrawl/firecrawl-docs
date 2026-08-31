@@ -53,6 +53,41 @@ Toutes les réponses non-2xx renvoient du JSON avec `success: false` à la racin
 
 Pour les réponses 429, Firecrawl inclut un en-tête `Retry-After` (en secondes) lorsqu’il est disponible — attendez au moins ce délai avant de réessayer.
 
+<div id="agent">
+  ## Agent
+</div>
+
+Erreurs spécifiques à [`/agent`](/fr/features/agent) et à ses points de terminaison d’état, de trace, d’instantané et d’annulation. Les points de terminaison de trace et d’instantané relaient tels quels les corps d’erreur en amont. Ces deux points de terminaison peuvent donc répondre avec un corps qui omet le champ `success` décrit ci-dessus ; basez-vous sur l’état HTTP et la chaîne `error`.
+
+| HTTP | `error` (message typique)                                                      | Cause                                                                                                   | Solution                                                                                                                                                                    | Réessayable                   |
+| ---- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| 400  | `Invalid job ID format. Job ID must be a valid UUID.`                          | Le segment de chemin `jobId` n’est pas un UUID.                                                         | Transmettez l’`id` renvoyé par `POST /v2/agent`.                                                                                                                            | Non                           |
+| 400  | `Invalid snapshot ID`                                                          | Le segment de chemin `snapshotId` est mal formé.                                                        | Utilisez un `snapshotId` issu d’un événement de trace `artifact.updated` [événement de trace](/fr/api-reference/endpoint/agent-trace).                                         | Non                           |
+| 400  | `Trace is only available for Spark 2 extracts`                                 | La tâche est antérieure à Spark 2, qui enregistre les traces.                                           | Il n’y a rien à faire pour cette tâche. Chaque nouvelle exécution s’effectue sur `spark-2` et comporte une trace.                                                           | Non                           |
+| 400  | `Snapshots are only available for Spark 2 extracts`                            | La tâche est antérieure à Spark 2, qui enregistre les instantanés.                                      | Il n’y a rien à faire pour cette tâche. Chaque nouvelle exécution s’effectue sur `spark-2` et comporte des instantanés.                                                     | Non                           |
+| 400  | `Your team has zero data retention enabled. This is not supported on extract.` | Les exécutions d’agent ne sont pas disponibles pour une équipe soumise à la rétention zéro des données. | Contactez [support@firecrawl.com](mailto:support@firecrawl.com) pour activer cette fonctionnalité pour votre équipe.                                                        | Non                           |
+| 404  | `Agent job not found`                                                          | L’ID de tâche n’existe pas ou appartient à une autre équipe.                                            | Vérifiez l’ID de tâche et utilisez une clé de l’équipe ayant démarré l’exécution.                                                                                           | Non                           |
+| 404  | `Snapshot not found`                                                           | Aucun instantané avec cet ID n’appartient à cette tâche.                                                | Récupérez de nouveau la trace et utilisez un `snapshotId` actuel issu d’un événement de trace `artifact.updated` [événement de trace](/fr/api-reference/endpoint/agent-trace). | Non                           |
+| 409  | `Agent already finished`                                                       | L’annulation a été demandée pour une exécution ayant déjà atteint un état terminal.                     | Interrogez plutôt `GET /v2/agent/{jobId}` pour obtenir le résultat.                                                                                                         | Non                           |
+| 409  | `Agent is already cancelled`                                                   | L’annulation a été demandée pour une exécution déjà en cours d’annulation.                              | Interrogez `GET /v2/agent/{jobId}`. Une exécution annulée renvoie `failed` avec un message d’annulation.                                                                    | Non                           |
+| 500  | `Failed to passthrough agent request.`                                         | Le service d’agent a rejeté la tâche lors de sa soumission.                                             | Réessayez avec un backoff exponentiel. Si le problème persiste, contactez le support en indiquant l’ID de requête.                                                          | Oui, avec backoff exponentiel |
+
+Une exécution qui atteint sa limite `maxCredits` ne renvoie pas d’erreur HTTP. Elle se termine avec une tâche en échec. Interrogez le point de terminaison d’état : vous obtenez `status: "failed"`, avec un message d’erreur indiquant la limite de crédits, aucune `data` et `creditsUsed: 0`, car les exécutions en échec ne sont pas facturées. Dans la trace, le même résultat apparaît sous la forme d’un événement `run.finished` avec `outcome: "credit_limit_reached"`.
+
+<div id="trace-error-codes">
+  ### Codes d’erreur de trace
+</div>
+
+Les événements de trace Terminal et `error.occurred` contiennent un objet `error` structuré dont le `code` correspond à l’une des cinq valeurs suivantes. Ils contiennent également un booléen `retryable`, à traiter de la même manière que la colonne **Réessayable** ci-dessus.
+
+| `code`                 | Signification et solution                                                                                                                                               |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cancelled`            | Vous avez annulé l’exécution. Démarrez-en une nouvelle si vous souhaitez recommencer.                                                                                   |
+| `credit_limit_reached` | L’exécution a atteint son plafond `maxCredits`. Augmentez `maxCredits` ou affinez le prompt afin que l’exécution nécessite moins de travail.                            |
+| `parent_finished`      | Un sous-agent s’est arrêté parce que l’agent qui l’a lancé s’est terminé avant lui. Consultez l’événement terminal de l’agent parent pour connaître la véritable cause. |
+| `refused`              | L’agent a refusé la tâche. Reformulez le prompt ou limitez-le aux URL pour lesquelles vous êtes autorisé à collecter des données.                                       |
+| `internal`             | Une erreur inattendue s’est produite lors de l’exécution. Réessayez l’exécution ; si le problème persiste, contactez le support en indiquant l’ID de tâche.             |
+
 <div id="retry-guidance">
   ## Conseils de réessai
 </div>
