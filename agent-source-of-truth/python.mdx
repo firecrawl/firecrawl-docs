@@ -3,7 +3,7 @@ title: "Python Source of Truth"
 description: "Canonical Firecrawl Python source of truth for agents using key endpoints like search, scrape, and interact."
 ---
 
-Canonical Firecrawl Python source of truth for agents. Generated from SDK source (`firecrawl-py` / `firecrawl` **4.22.1**) and the v2 OpenAPI spec. Method names, parameters, and return types match the v2 client in `firecrawl/v2/client.py` unless noted.
+Canonical Firecrawl Python source of truth for agents. Generated from SDK source (`firecrawl-py` **4.41.0**) and the v2 OpenAPI spec. Method names, parameters, and return types match the v2 client in `firecrawl/v2/client.py` unless noted.
 
 ## Install
 
@@ -26,8 +26,6 @@ client = Firecrawl(api_key=os.environ.get("FIRECRAWL_API_KEY"))
 - `search`: use when you start with a query and need discovery.
 - `scrape`: use when you already have a URL and want page content.
 - `interact`: use when the page needs clicks, forms, or post-scrape browser actions.
-- `support/ask`: use when a Firecrawl API call fails or returns unexpected results and you need a diagnosis.
-- `support/docs-search`: use when you need to look up Firecrawl documentation.
 
 ## Search
 
@@ -113,9 +111,18 @@ results = client.search(
   - Use when: you want to filter results by category.
   - Confirmed values:
     - `"developer"`: Developer Index results
+    - `"github"`: site:github.com filter
     - `"research"`: research and academic results
     - `"pdf"`: PDF-focused results
-    - `Category(type="developer" | "research" | "pdf")`: typed category object form
+    - `Category(type="developer" | "github" | "research" | "pdf")`: typed category object form
+
+- `include_domains`
+  - Type: list of str
+  - Use when: you want to restrict results to specific domains. Cannot be combined with `exclude_domains`.
+
+- `exclude_domains`
+  - Type: list of str
+  - Use when: you want to exclude results from specific domains. Cannot be combined with `include_domains`.
 
 - `limit`
   - Type: int
@@ -134,6 +141,10 @@ results = client.search(
   - Type: bool
   - Use when: you want to drop URLs that cannot be scraped by other endpoints.
 
+- `highlights`
+  - Type: bool
+  - Use when: you want query-relevant highlights for search results. Defaults to true.
+
 - `timeout`
   - Type: int
   - Use when: you need a request timeout in milliseconds.
@@ -142,6 +153,14 @@ results = client.search(
 - `scrape_options`
   - Type: `ScrapeOptions`
   - Use when: you want to scrape each search result (see Scrape parameters for fields).
+
+- `enterprise`
+  - Type: list of str
+  - Use when: you need enterprise search controls. `"zdr"` for end-to-end Zero Data Retention, `"anon"` for anonymized search. Must be enabled for your team.
+
+- `threat_protection`
+  - Type: `ThreatProtectionOptions`
+  - Use when: you need enterprise per-request threat protection overrides.
 
 ## Scrape
 
@@ -212,6 +231,8 @@ doc = client.scrape(
     - `"changeTracking"` or `"change_tracking"`: change tracking output
     - `"attributes"`: attribute extraction
     - `"branding"`: branding profile output
+    - `"product"`: product data extraction
+    - `"menu"`: menu extraction
     - `"audio"`: audio extraction
     - `"video"`: video extraction
   - Object-only format types:
@@ -224,6 +245,7 @@ doc = client.scrape(
     - `query`: for `type: "highlights"`
     - `prompt`: optional for `type: "json"`
     - `schema`: JSON schema for `type: "json"` or for change tracking JSON mode
+    - `check_prompt_injection`: boolean for `type: "json"` to enable prompt-injection safety check
     - `modes`: array of `"git-diff"` or `"json"` for `type: "changeTracking"`
     - `tag`: change tracking tag for `type: "changeTracking"`
     - `full_page`, `quality`, `viewport`: screenshot options for `type: "screenshot"`
@@ -262,7 +284,7 @@ doc = client.scrape(
   - Use when: you need file parsing controls (for example PDF parsing).
   - Confirmed values:
     - `"pdf"`: enable PDF parsing
-    - `{ "type": "pdf", "mode": "fast" | "auto" | "ocr", "max_pages": int }`: PDF parser options
+    - `{ "type": "pdf", "mode": "fast" | "auto" | "ocr", "max_pages": int, "pages": bool, "blocks": bool, "page_markers": bool }`: PDF parser options
 
 - `actions`
   - Type: list of action objects
@@ -307,14 +329,21 @@ doc = client.scrape(
   - Type: int
   - Use when: you want cached data up to a maximum age (milliseconds).
 
-- `min_age`
-  - Type: int
-  - Use when: you want cached data only if it is at least this old (milliseconds).
-  - Notes: only on `ScrapeOptions` passed as `scrape_options` to `client.search`. The `client.scrape` method does not accept `min_age`.
-
 - `store_in_cache`
   - Type: bool
   - Use when: you want Firecrawl to cache the result.
+
+- `lockdown`
+  - Type: bool
+  - Use when: you want to serve only previously cached results with no outbound requests. Returns 404 on cache miss.
+
+- `threat_protection`
+  - Type: `ThreatProtectionOptions`
+  - Use when: you need enterprise per-request threat protection overrides.
+
+- `audit_metadata`
+  - Type: `AuditMetadata` with field `username: str`
+  - Use when: you need user attribution for SIEM logging events.
 
 - `profile`
   - Type: dict with `name` and optional `save_changes` or `saveChanges`
@@ -384,131 +413,13 @@ result = client.interact(
 
 ### Return value
 
-Returns `BrowserExecuteResponse`: `success`, optional `live_view_url`, `interactive_live_view_url`, `output`, `stdout`, `result`, `stderr`, `exit_code`, `killed`, `error` (API camelCase is normalized to snake_case on the model).
-
-## Ask (Agentic Debugging)
-
-### Why use it
-
-Use ask when a Firecrawl API call fails or returns unexpected results. The AI support agent diagnoses the issue, proposes fix parameters, and optionally validates the fix against the live API. Typical latency: 15-30 seconds.
-
-### Preferred SDK method
-
-Not yet available in the Python SDK. Use `requests` or `httpx` directly.
-
-### Simple Example
-
-```py
-import requests
-
-response = requests.post(
-    "https://api.firecrawl.dev/v2/support/ask",
-    headers={
-        "Authorization": f"Bearer {os.environ['FIRECRAWL_API_KEY']}",
-        "Content-Type": "application/json",
-    },
-    json={"question": "my scrape returned empty markdown for https://example.com"},
-)
-result = response.json()
-print(result["answer"])
-print(result["fixParameters"])
-```
-
-### Complex Example
-
-```py
-import requests
-
-response = requests.post(
-    "https://api.firecrawl.dev/v2/support/ask",
-    headers={
-        "Authorization": f"Bearer {os.environ['FIRECRAWL_API_KEY']}",
-        "Content-Type": "application/json",
-    },
-    json={
-        "question": "crawl returned 3 pages but I expected 50",
-        "rationale": "user is on their third failed crawl attempt today",
-        "context": {"userPlan": "standard", "retryCount": 3},
-    },
-)
-result = response.json()
-```
-
-### Agent retry pattern
-
-```py
-from firecrawl import Firecrawl
-import requests, os
-
-client = Firecrawl(api_key=os.environ["FIRECRAWL_API_KEY"])
-
-doc = client.scrape("https://example.com/pricing", formats=["markdown"])
-
-if not doc.markdown or len(doc.markdown) < 100:
-    diagnosis = requests.post(
-        "https://api.firecrawl.dev/v2/support/ask",
-        headers={
-            "Authorization": f"Bearer {os.environ['FIRECRAWL_API_KEY']}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "question": f"scrape returned only {len(doc.markdown or '')} chars for https://example.com/pricing",
-        },
-    ).json()
-
-    if diagnosis.get("fixParameters"):
-        doc = client.scrape(
-            "https://example.com/pricing",
-            formats=["markdown"],
-            **diagnosis["fixParameters"],
-        )
-```
-
-### Parameters
-
-- `question`
-  - Type: str (required, 1-8000 chars)
-  - Use when: you need to describe the issue.
-
-- `rationale`
-  - Type: str (1-2000 chars)
-  - Use when: you are an AI agent calling on behalf of a user.
-
-- `context`
-  - Type: dict (free-form)
-  - Use when: you want to pass metadata into the debugging prompt.
-
-## Docs Search
-
-### Why use it
-
-Use docs-search to look up Firecrawl documentation.
-
-### Simple Example
-
-```py
-import requests
-
-FIRECRAWL_API_KEY = "fc-YOUR_API_KEY"
-
-response = requests.post(
-    "https://api.firecrawl.dev/v2/support/docs-search",
-    headers={"Authorization": f"Bearer {FIRECRAWL_API_KEY}"},
-    json={"question": "how do I verify webhook signatures?"},
-)
-print(response.json()["answer"])
-```
-
-### Parameters
-
-- `question`
-  - Type: str (required, 1-8000 chars)
-  - Use when: you need a docs-grounded answer.
+Returns `BrowserExecuteResponse`: `success`, optional `cdp_url`, `live_view_url`, `interactive_live_view_url`, `output`, `stdout`, `result`, `stderr`, `exit_code`, `killed`, `error` (API camelCase is normalized to snake_case on the model).
 
 ## Notes
 
-- Deprecated aliases: `scrape_execute` → `interact`; `stop_interactive_browser` and `delete_scrape_browser` → `stop_interaction`.
+- Deprecated aliases: `scrape_execute` → `interact`; `stop_interactive_browser` and `delete_scrape_browser` → `stop_interaction`; `scrape_url` → `scrape` (V1 compatibility).
 - The top-level `Firecrawl` client exposes v2 methods directly; v1 remains under `client.v1`.
+- `FirecrawlApp` is an alias for `Firecrawl`; `AsyncFirecrawlApp` is an alias for `AsyncFirecrawl`.
 - The bundled v2 OpenAPI snippet for `POST /v2/scrape/{jobId}/interact` may only document `code`; the Python SDK and server accept either `code` or `prompt` for this endpoint.
 
 ## Source Of Truth
