@@ -566,8 +566,7 @@
               }
             }
           }
-        },
-        "description": "Eligible keyless responses may include an optional feedback invitation in data.metadata. Submit feedback for this job through POST /v2/feedback using the returned jobId."
+        }
       }
     },
     "/scrape/{jobId}/interact": {
@@ -1076,8 +1075,7 @@
               }
             }
           }
-        },
-        "description": "Eligible keyless responses may include an optional feedback invitation in data.metadata. Submit feedback for this job through POST /v2/feedback using the returned jobId."
+        }
       }
     },
     "/batch/scrape": {
@@ -4510,8 +4508,7 @@
               }
             }
           }
-        },
-        "description": "Eligible keyless responses may include an optional feedback invitation in top-level metadata. Submit feedback for this job through POST /v2/feedback using the returned id."
+        }
       }
     },
     "/interact": {
@@ -6011,7 +6008,7 @@
         "security": [
           {},
           {
-            "feedbackBearerAuth": []
+            "bearerAuth": []
           }
         ],
         "requestBody": {
@@ -6021,15 +6018,15 @@
               "schema": {
                 "anyOf": [
                   {
-                    "$ref": "#/components/schemas/KeylessFeedbackRequest"
-                  },
-                  {
                     "title": "Authenticated",
                     "allOf": [
                       {
                         "$ref": "#/components/schemas/EndpointFeedbackRequest"
                       }
                     ]
+                  },
+                  {
+                    "$ref": "#/components/schemas/KeylessFeedbackRequest"
                   }
                 ]
               }
@@ -6068,7 +6065,7 @@
             }
           },
           "404": {
-            "description": "No eligible job found for this caller and endpoint",
+            "description": "Job not found for this caller",
             "content": {
               "application/json": {
                 "schema": {
@@ -6097,6 +6094,16 @@
               }
             }
           },
+          "401": {
+            "description": "Authentication failed or keyless access is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackErrorResponse"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Too many feedback requests",
             "content": {
@@ -6116,19 +6123,9 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": "Authentication failed or keyless access is unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FeedbackErrorResponse"
-                }
-              }
-            }
           }
         },
-        "description": "Submit optional feedback for a job. Keyless requests support Search, Scrape, and Parse. Authenticated requests also support Map."
+        "description": "Submit feedback for a job. Keyless feedback supports Search, Scrape, and Parse. One accepted submission per keyless identity per UTC day, shared across these endpoints and clients."
       }
     },
     "/team/threat-protection": {
@@ -6434,11 +6431,6 @@
       "bearerAuth": {
         "type": "http",
         "scheme": "bearer"
-      },
-      "feedbackBearerAuth": {
-        "type": "http",
-        "scheme": "bearer",
-        "description": "For authenticated jobs, send `Bearer <token>`. Omit this header for keyless jobs."
       }
     },
     "parameters": {
@@ -11821,16 +11813,58 @@
           }
         }
       },
+      "FeedbackComparison": {
+        "type": "object",
+        "properties": {
+          "reference": {
+            "type": "string",
+            "description": "URL or location of the source you compared.",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "detail": {
+            "type": "string",
+            "description": "How the source differs from the output.",
+            "minLength": 10,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "reference",
+          "detail"
+        ],
+        "additionalProperties": false
+      },
+      "FeedbackDetail": {
+        "type": "string",
+        "description": "Describe what you observed.",
+        "minLength": 10,
+        "maxLength": 2000
+      },
+      "FeedbackBasis": {
+        "type": "string",
+        "enum": [
+          "output",
+          "source_comparison",
+          "expectation"
+        ],
+        "description": "What supports the observation. Use source_comparison only with a source you already inspected; include comparison. Use expectation for an unmet need."
+      },
       "KeylessFeedbackRequest": {
         "anyOf": [
           {
             "type": "object",
             "properties": {
+              "endpoint": {
+                "type": "string",
+                "enum": [
+                  "search"
+                ]
+              },
               "jobId": {
                 "type": "string",
                 "format": "uuid",
-                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-                "description": "Job reference returned for the same caller and endpoint."
+                "description": "Job ID returned by /search."
               },
               "rating": {
                 "type": "string",
@@ -11838,121 +11872,36 @@
                   "good",
                   "partial",
                   "bad"
-                ]
+                ],
+                "description": "Overall quality of the result."
               },
               "task": {
-                "$ref": "#/components/schemas/KeylessFeedbackDetail"
+                "type": "string",
+                "description": "What you were trying to accomplish.",
+                "minLength": 10,
+                "maxLength": 2000
               },
               "assessment": {
-                "$ref": "#/components/schemas/KeylessFeedbackDetail"
-              },
-              "origin": {
-                "default": "api",
                 "type": "string",
-                "maxLength": 100
-              },
-              "integration": {
-                "nullable": true,
-                "type": "string",
-                "maxLength": 100
-              },
-              "endpoint": {
-                "type": "string",
-                "enum": [
-                  "search"
-                ]
+                "description": "How well the result met your needs.",
+                "minLength": 10,
+                "maxLength": 2000
               },
               "observations": {
+                "type": "array",
+                "description": "Specific results or content you want to give feedback on. Text is trimmed before length validation.",
                 "minItems": 1,
                 "maxItems": 20,
-                "type": "array",
                 "items": {
                   "anyOf": [
                     {
                       "type": "object",
                       "properties": {
-                        "detail": {
-                          "$ref": "#/components/schemas/KeylessFeedbackDetail"
-                        },
-                        "basis": {
-                          "$ref": "#/components/schemas/KeylessFeedbackBasis"
-                        },
-                        "comparison": {
-                          "$ref": "#/components/schemas/KeylessFeedbackComparison"
-                        },
-                        "source": {
-                          "type": "string",
-                          "enum": [
-                            "web",
-                            "images",
-                            "news"
-                          ],
-                          "description": "Response group the position refers to. Required when the job requested multiple sources; otherwise defaults to web. The source and position must exist in the requested, delivered results."
-                        },
-                        "position": {
-                          "type": "integer",
-                          "maximum": 9007199254740991,
-                          "description": "One-based position within the delivered response group.",
-                          "minimum": 1
-                        },
-                        "vertical": {
-                          "type": "string",
-                          "enum": [
-                            "web_general",
-                            "social",
-                            "business",
-                            "research",
-                            "developer",
-                            "news",
-                            "government",
-                            "finance",
-                            "other"
-                          ]
-                        },
                         "kind": {
                           "type": "string",
                           "enum": [
                             "useful"
                           ]
-                        }
-                      },
-                      "required": [
-                        "detail",
-                        "basis",
-                        "position",
-                        "kind"
-                      ],
-                      "additionalProperties": false,
-                      "title": "useful",
-                      "anyOf": [
-                        {
-                          "properties": {
-                            "basis": {
-                              "enum": [
-                                "output",
-                                "expectation"
-                              ]
-                            }
-                          }
-                        },
-                        {
-                          "required": [
-                            "comparison"
-                          ]
-                        }
-                      ]
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "detail": {
-                          "$ref": "#/components/schemas/KeylessFeedbackDetail"
-                        },
-                        "basis": {
-                          "$ref": "#/components/schemas/KeylessFeedbackBasis"
-                        },
-                        "comparison": {
-                          "$ref": "#/components/schemas/KeylessFeedbackComparison"
                         },
                         "source": {
                           "type": "string",
@@ -11961,13 +11910,13 @@
                             "images",
                             "news"
                           ],
-                          "description": "Response group the position refers to. Required when the job requested multiple sources; otherwise defaults to web. The source and position must exist in the requested, delivered results."
+                          "description": "Result group containing the position. Required when the search requested multiple sources; otherwise defaults to web."
                         },
                         "position": {
                           "type": "integer",
-                          "maximum": 9007199254740991,
-                          "description": "One-based position within the delivered response group.",
-                          "minimum": 1
+                          "minimum": 1,
+                          "description": "Position in the returned result group, starting at 1.",
+                          "example": 1
                         },
                         "vertical": {
                           "type": "string",
@@ -11981,13 +11930,80 @@
                             "government",
                             "finance",
                             "other"
-                          ]
+                          ],
+                          "description": "Subject area you were looking for."
                         },
+                        "detail": {
+                          "$ref": "#/components/schemas/FeedbackDetail"
+                        },
+                        "basis": {
+                          "$ref": "#/components/schemas/FeedbackBasis"
+                        },
+                        "comparison": {
+                          "$ref": "#/components/schemas/FeedbackComparison"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "detail",
+                        "basis",
+                        "position"
+                      ],
+                      "additionalProperties": false,
+                      "title": "useful",
+                      "not": {
+                        "properties": {
+                          "basis": {
+                            "enum": [
+                              "source_comparison"
+                            ]
+                          }
+                        },
+                        "not": {
+                          "required": [
+                            "comparison"
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
                         "kind": {
                           "type": "string",
                           "enum": [
                             "irrelevant"
                           ]
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "web",
+                            "images",
+                            "news"
+                          ],
+                          "description": "Result group containing the position. Required when the search requested multiple sources; otherwise defaults to web."
+                        },
+                        "position": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "description": "Position in the returned result group, starting at 1.",
+                          "example": 1
+                        },
+                        "vertical": {
+                          "type": "string",
+                          "enum": [
+                            "web_general",
+                            "social",
+                            "business",
+                            "research",
+                            "developer",
+                            "news",
+                            "government",
+                            "finance",
+                            "other"
+                          ],
+                          "description": "Subject area you were looking for."
                         },
                         "reason": {
                           "type": "string",
@@ -11998,48 +12014,46 @@
                             "wrong_content_type",
                             "snippet_misleading",
                             "blocked_or_paywalled"
-                          ]
+                          ],
+                          "description": "Reason for the issue."
+                        },
+                        "detail": {
+                          "$ref": "#/components/schemas/FeedbackDetail"
+                        },
+                        "basis": {
+                          "$ref": "#/components/schemas/FeedbackBasis"
+                        },
+                        "comparison": {
+                          "$ref": "#/components/schemas/FeedbackComparison"
                         }
                       },
                       "required": [
+                        "kind",
                         "detail",
                         "basis",
                         "position",
-                        "kind",
                         "reason"
                       ],
                       "additionalProperties": false,
                       "title": "irrelevant",
-                      "anyOf": [
-                        {
-                          "properties": {
-                            "basis": {
-                              "enum": [
-                                "output",
-                                "expectation"
-                              ]
-                            }
+                      "not": {
+                        "properties": {
+                          "basis": {
+                            "enum": [
+                              "source_comparison"
+                            ]
                           }
                         },
-                        {
+                        "not": {
                           "required": [
                             "comparison"
                           ]
                         }
-                      ]
+                      }
                     },
                     {
                       "type": "object",
                       "properties": {
-                        "detail": {
-                          "$ref": "#/components/schemas/KeylessFeedbackDetail"
-                        },
-                        "basis": {
-                          "$ref": "#/components/schemas/KeylessFeedbackBasis"
-                        },
-                        "comparison": {
-                          "$ref": "#/components/schemas/KeylessFeedbackComparison"
-                        },
                         "kind": {
                           "type": "string",
                           "enum": [
@@ -12058,59 +12072,80 @@
                             "government",
                             "finance",
                             "other"
-                          ]
+                          ],
+                          "description": "Subject area you were looking for."
                         },
                         "topic": {
                           "type": "string",
+                          "description": "Information missing from the results.",
                           "minLength": 1,
                           "maxLength": 200
                         },
                         "knownSources": {
-                          "maxItems": 20,
                           "type": "array",
+                          "description": "Known sources that were missing from the results.",
+                          "maxItems": 20,
                           "items": {
                             "type": "string",
                             "format": "uri",
                             "pattern": "^https?://"
                           }
+                        },
+                        "detail": {
+                          "$ref": "#/components/schemas/FeedbackDetail"
+                        },
+                        "basis": {
+                          "$ref": "#/components/schemas/FeedbackBasis"
+                        },
+                        "comparison": {
+                          "$ref": "#/components/schemas/FeedbackComparison"
                         }
                       },
                       "required": [
+                        "kind",
                         "detail",
                         "basis",
-                        "kind",
                         "vertical"
                       ],
                       "additionalProperties": false,
                       "title": "missing",
-                      "anyOf": [
-                        {
-                          "properties": {
-                            "basis": {
-                              "enum": [
-                                "output",
-                                "expectation"
-                              ]
-                            }
+                      "not": {
+                        "properties": {
+                          "basis": {
+                            "enum": [
+                              "source_comparison"
+                            ]
                           }
                         },
-                        {
+                        "not": {
                           "required": [
                             "comparison"
                           ]
                         }
-                      ]
+                      }
                     }
                   ]
                 }
+              },
+              "origin": {
+                "type": "string",
+                "description": "Client submitting the feedback.",
+                "maxLength": 100,
+                "default": "api"
+              },
+              "integration": {
+                "type": "string",
+                "description": "Integration submitting the feedback.",
+                "maxLength": 100,
+                "nullable": true
               }
             },
             "required": [
+              "endpoint",
               "jobId",
               "rating",
               "task",
               "assessment",
-              "endpoint",
               "observations"
             ],
             "additionalProperties": false,
@@ -12119,11 +12154,16 @@
           {
             "type": "object",
             "properties": {
+              "endpoint": {
+                "type": "string",
+                "enum": [
+                  "scrape"
+                ]
+              },
               "jobId": {
                 "type": "string",
                 "format": "uuid",
-                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-                "description": "Job reference returned for the same caller and endpoint."
+                "description": "Job ID returned by /scrape."
               },
               "rating": {
                 "type": "string",
@@ -12131,117 +12171,99 @@
                   "good",
                   "partial",
                   "bad"
-                ]
+                ],
+                "description": "Overall quality of the result."
               },
               "task": {
-                "$ref": "#/components/schemas/KeylessFeedbackDetail"
+                "type": "string",
+                "description": "What you were trying to accomplish.",
+                "minLength": 10,
+                "maxLength": 2000
               },
               "assessment": {
-                "$ref": "#/components/schemas/KeylessFeedbackDetail"
-              },
-              "origin": {
-                "default": "api",
                 "type": "string",
-                "maxLength": 100
-              },
-              "integration": {
-                "nullable": true,
-                "type": "string",
-                "maxLength": 100
-              },
-              "endpoint": {
-                "type": "string",
-                "enum": [
-                  "scrape"
-                ]
+                "description": "How well the result met your needs.",
+                "minLength": 10,
+                "maxLength": 2000
               },
               "observations": {
+                "type": "array",
+                "description": "Specific results or content you want to give feedback on. Text is trimmed before length validation.",
                 "minItems": 1,
                 "maxItems": 20,
-                "type": "array",
                 "items": {
                   "anyOf": [
                     {
                       "type": "object",
                       "properties": {
-                        "detail": {
-                          "$ref": "#/components/schemas/KeylessFeedbackDetail"
-                        },
-                        "basis": {
-                          "$ref": "#/components/schemas/KeylessFeedbackBasis"
-                        },
-                        "comparison": {
-                          "$ref": "#/components/schemas/KeylessFeedbackComparison"
-                        },
-                        "format": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "A format type requested by the job. Required for output and source_comparison observations when multiple formats were requested; optional otherwise."
-                        },
-                        "location": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 200
-                        },
                         "kind": {
                           "type": "string",
                           "enum": [
                             "correct"
                           ]
+                        },
+                        "format": {
+                          "type": "string",
+                          "description": "Output format requested by the job. Required when multiple formats were requested, except for expectation observations.",
+                          "minLength": 1
+                        },
+                        "location": {
+                          "type": "string",
+                          "description": "Location of the content in the page or output.",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "detail": {
+                          "$ref": "#/components/schemas/FeedbackDetail"
+                        },
+                        "basis": {
+                          "$ref": "#/components/schemas/FeedbackBasis"
+                        },
+                        "comparison": {
+                          "$ref": "#/components/schemas/FeedbackComparison"
                         }
                       },
                       "required": [
+                        "kind",
                         "detail",
-                        "basis",
-                        "kind"
+                        "basis"
                       ],
                       "additionalProperties": false,
                       "title": "correct",
-                      "anyOf": [
-                        {
-                          "properties": {
-                            "basis": {
-                              "enum": [
-                                "output",
-                                "expectation"
-                              ]
-                            }
+                      "not": {
+                        "properties": {
+                          "basis": {
+                            "enum": [
+                              "source_comparison"
+                            ]
                           }
                         },
-                        {
+                        "not": {
                           "required": [
                             "comparison"
                           ]
                         }
-                      ]
+                      }
                     },
                     {
                       "type": "object",
                       "properties": {
-                        "detail": {
-                          "$ref": "#/components/schemas/KeylessFeedbackDetail"
-                        },
-                        "basis": {
-                          "$ref": "#/components/schemas/KeylessFeedbackBasis"
-                        },
-                        "comparison": {
-                          "$ref": "#/components/schemas/KeylessFeedbackComparison"
-                        },
-                        "format": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "A format type requested by the job. Required for output and source_comparison observations when multiple formats were requested; optional otherwise."
-                        },
-                        "location": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 200
-                        },
                         "kind": {
                           "type": "string",
                           "enum": [
                             "wrong_success"
                           ]
+                        },
+                        "format": {
+                          "type": "string",
+                          "description": "Output format requested by the job. Required when multiple formats were requested, except for expectation observations.",
+                          "minLength": 1
+                        },
+                        "location": {
+                          "type": "string",
+                          "description": "Location of the content in the page or output.",
+                          "minLength": 1,
+                          "maxLength": 200
                         },
                         "reason": {
                           "type": "string",
@@ -12253,62 +12275,61 @@
                             "wrong_page",
                             "stale",
                             "wrong_locale"
-                          ]
+                          ],
+                          "description": "Reason for the issue."
+                        },
+                        "detail": {
+                          "$ref": "#/components/schemas/FeedbackDetail"
+                        },
+                        "basis": {
+                          "$ref": "#/components/schemas/FeedbackBasis"
+                        },
+                        "comparison": {
+                          "$ref": "#/components/schemas/FeedbackComparison"
                         }
                       },
                       "required": [
+                        "kind",
                         "detail",
                         "basis",
-                        "kind",
                         "reason"
                       ],
                       "additionalProperties": false,
                       "title": "wrong_success",
-                      "anyOf": [
-                        {
-                          "properties": {
-                            "basis": {
-                              "enum": [
-                                "output",
-                                "expectation"
-                              ]
-                            }
+                      "not": {
+                        "properties": {
+                          "basis": {
+                            "enum": [
+                              "source_comparison"
+                            ]
                           }
                         },
-                        {
+                        "not": {
                           "required": [
                             "comparison"
                           ]
                         }
-                      ]
+                      }
                     },
                     {
                       "type": "object",
                       "properties": {
-                        "detail": {
-                          "$ref": "#/components/schemas/KeylessFeedbackDetail"
-                        },
-                        "basis": {
-                          "$ref": "#/components/schemas/KeylessFeedbackBasis"
-                        },
-                        "comparison": {
-                          "$ref": "#/components/schemas/KeylessFeedbackComparison"
-                        },
-                        "format": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "A format type requested by the job. Required for output and source_comparison observations when multiple formats were requested; optional otherwise."
-                        },
-                        "location": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 200
-                        },
                         "kind": {
                           "type": "string",
                           "enum": [
                             "incomplete"
                           ]
+                        },
+                        "format": {
+                          "type": "string",
+                          "description": "Output format requested by the job. Required when multiple formats were requested, except for expectation observations.",
+                          "minLength": 1
+                        },
+                        "location": {
+                          "type": "string",
+                          "description": "Location of the content in the page or output.",
+                          "minLength": 1,
+                          "maxLength": 200
                         },
                         "reason": {
                           "type": "string",
@@ -12318,62 +12339,61 @@
                             "pagination",
                             "main_content_stripped",
                             "format_lost"
-                          ]
+                          ],
+                          "description": "Reason for the issue."
+                        },
+                        "detail": {
+                          "$ref": "#/components/schemas/FeedbackDetail"
+                        },
+                        "basis": {
+                          "$ref": "#/components/schemas/FeedbackBasis"
+                        },
+                        "comparison": {
+                          "$ref": "#/components/schemas/FeedbackComparison"
                         }
                       },
                       "required": [
+                        "kind",
                         "detail",
                         "basis",
-                        "kind",
                         "reason"
                       ],
                       "additionalProperties": false,
                       "title": "incomplete",
-                      "anyOf": [
-                        {
-                          "properties": {
-                            "basis": {
-                              "enum": [
-                                "output",
-                                "expectation"
-                              ]
-                            }
+                      "not": {
+                        "properties": {
+                          "basis": {
+                            "enum": [
+                              "source_comparison"
+                            ]
                           }
                         },
-                        {
+                        "not": {
                           "required": [
                             "comparison"
                           ]
                         }
-                      ]
+                      }
                     },
                     {
                       "type": "object",
                       "properties": {
-                        "detail": {
-                          "$ref": "#/components/schemas/KeylessFeedbackDetail"
-                        },
-                        "basis": {
-                          "$ref": "#/components/schemas/KeylessFeedbackBasis"
-                        },
-                        "comparison": {
-                          "$ref": "#/components/schemas/KeylessFeedbackComparison"
-                        },
-                        "format": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "A format type requested by the job. Required for output and source_comparison observations when multiple formats were requested; optional otherwise."
-                        },
-                        "location": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 200
-                        },
                         "kind": {
                           "type": "string",
                           "enum": [
                             "incorrect"
                           ]
+                        },
+                        "format": {
+                          "type": "string",
+                          "description": "Output format requested by the job. Required when multiple formats were requested, except for expectation observations.",
+                          "minLength": 1
+                        },
+                        "location": {
+                          "type": "string",
+                          "description": "Location of the content in the page or output.",
+                          "minLength": 1,
+                          "maxLength": 200
                         },
                         "reason": {
                           "type": "string",
@@ -12381,45 +12401,64 @@
                             "wrong",
                             "hallucinated",
                             "missing_fields"
-                          ]
+                          ],
+                          "description": "Reason for the issue."
+                        },
+                        "detail": {
+                          "$ref": "#/components/schemas/FeedbackDetail"
+                        },
+                        "basis": {
+                          "$ref": "#/components/schemas/FeedbackBasis"
+                        },
+                        "comparison": {
+                          "$ref": "#/components/schemas/FeedbackComparison"
                         }
                       },
                       "required": [
+                        "kind",
                         "detail",
                         "basis",
-                        "kind",
                         "reason"
                       ],
                       "additionalProperties": false,
                       "title": "incorrect",
-                      "anyOf": [
-                        {
-                          "properties": {
-                            "basis": {
-                              "enum": [
-                                "output",
-                                "expectation"
-                              ]
-                            }
+                      "not": {
+                        "properties": {
+                          "basis": {
+                            "enum": [
+                              "source_comparison"
+                            ]
                           }
                         },
-                        {
+                        "not": {
                           "required": [
                             "comparison"
                           ]
                         }
-                      ]
+                      }
                     }
                   ]
                 }
+              },
+              "origin": {
+                "type": "string",
+                "description": "Client submitting the feedback.",
+                "maxLength": 100,
+                "default": "api"
+              },
+              "integration": {
+                "type": "string",
+                "description": "Integration submitting the feedback.",
+                "maxLength": 100,
+                "nullable": true
               }
             },
             "required": [
+              "endpoint",
               "jobId",
               "rating",
               "task",
               "assessment",
-              "endpoint",
               "observations"
             ],
             "additionalProperties": false,
@@ -12428,11 +12467,16 @@
           {
             "type": "object",
             "properties": {
+              "endpoint": {
+                "type": "string",
+                "enum": [
+                  "parse"
+                ]
+              },
               "jobId": {
                 "type": "string",
                 "format": "uuid",
-                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
-                "description": "Job reference returned for the same caller and endpoint."
+                "description": "Job ID returned by /parse."
               },
               "rating": {
                 "type": "string",
@@ -12440,29 +12484,20 @@
                   "good",
                   "partial",
                   "bad"
-                ]
+                ],
+                "description": "Overall quality of the result."
               },
               "task": {
-                "$ref": "#/components/schemas/KeylessFeedbackDetail"
+                "type": "string",
+                "description": "What you were trying to accomplish.",
+                "minLength": 10,
+                "maxLength": 2000
               },
               "assessment": {
-                "$ref": "#/components/schemas/KeylessFeedbackDetail"
-              },
-              "origin": {
-                "default": "api",
                 "type": "string",
-                "maxLength": 100
-              },
-              "integration": {
-                "nullable": true,
-                "type": "string",
-                "maxLength": 100
-              },
-              "endpoint": {
-                "type": "string",
-                "enum": [
-                  "parse"
-                ]
+                "description": "How well the result met your needs.",
+                "minLength": 10,
+                "maxLength": 2000
               },
               "docClass": {
                 "type": "string",
@@ -12472,36 +12507,18 @@
                   "mixed",
                   "unknown"
                 ],
-                "description": "Document class, provided once for the submission. Use unknown when the class is not already known."
+                "description": "Type of document. Use unknown if you cannot determine the type."
               },
               "observations": {
+                "type": "array",
+                "description": "Specific results or content you want to give feedback on. Text is trimmed before length validation.",
                 "minItems": 1,
                 "maxItems": 20,
-                "type": "array",
                 "items": {
                   "anyOf": [
                     {
                       "type": "object",
                       "properties": {
-                        "detail": {
-                          "$ref": "#/components/schemas/KeylessFeedbackDetail"
-                        },
-                        "basis": {
-                          "$ref": "#/components/schemas/KeylessFeedbackBasis"
-                        },
-                        "comparison": {
-                          "$ref": "#/components/schemas/KeylessFeedbackComparison"
-                        },
-                        "format": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "A format type requested by the job. Required for output and source_comparison observations when multiple formats were requested; optional otherwise."
-                        },
-                        "page": {
-                          "type": "integer",
-                          "maximum": 9007199254740991,
-                          "minimum": 1
-                        },
                         "kind": {
                           "type": "string",
                           "enum": [
@@ -12513,60 +12530,69 @@
                             "headings_formatting",
                             "images_dropped"
                           ]
+                        },
+                        "format": {
+                          "type": "string",
+                          "description": "Output format requested by the job. Required when multiple formats were requested, except for expectation observations.",
+                          "minLength": 1
+                        },
+                        "page": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "description": "Page number, starting at 1.",
+                          "example": 1
+                        },
+                        "detail": {
+                          "$ref": "#/components/schemas/FeedbackDetail"
+                        },
+                        "basis": {
+                          "$ref": "#/components/schemas/FeedbackBasis"
+                        },
+                        "comparison": {
+                          "$ref": "#/components/schemas/FeedbackComparison"
                         }
                       },
                       "required": [
+                        "kind",
                         "detail",
-                        "basis",
-                        "kind"
+                        "basis"
                       ],
                       "additionalProperties": false,
-                      "title": "correct / formula / chart_figure / reading_order / headers_footers / headings_formatting / images_dropped",
-                      "anyOf": [
-                        {
-                          "properties": {
-                            "basis": {
-                              "enum": [
-                                "output",
-                                "expectation"
-                              ]
-                            }
+                      "title": "Other",
+                      "not": {
+                        "properties": {
+                          "basis": {
+                            "enum": [
+                              "source_comparison"
+                            ]
                           }
                         },
-                        {
+                        "not": {
                           "required": [
                             "comparison"
                           ]
                         }
-                      ]
+                      }
                     },
                     {
                       "type": "object",
                       "properties": {
-                        "detail": {
-                          "$ref": "#/components/schemas/KeylessFeedbackDetail"
-                        },
-                        "basis": {
-                          "$ref": "#/components/schemas/KeylessFeedbackBasis"
-                        },
-                        "comparison": {
-                          "$ref": "#/components/schemas/KeylessFeedbackComparison"
-                        },
-                        "format": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "A format type requested by the job. Required for output and source_comparison observations when multiple formats were requested; optional otherwise."
-                        },
-                        "page": {
-                          "type": "integer",
-                          "maximum": 9007199254740991,
-                          "minimum": 1
-                        },
                         "kind": {
                           "type": "string",
                           "enum": [
                             "text_ocr"
                           ]
+                        },
+                        "format": {
+                          "type": "string",
+                          "description": "Output format requested by the job. Required when multiple formats were requested, except for expectation observations.",
+                          "minLength": 1
+                        },
+                        "page": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "description": "Page number, starting at 1.",
+                          "example": 1
                         },
                         "reason": {
                           "type": "string",
@@ -12574,62 +12600,61 @@
                             "misread_chars",
                             "garbled",
                             "missing_text"
-                          ]
+                          ],
+                          "description": "Reason for the issue."
+                        },
+                        "detail": {
+                          "$ref": "#/components/schemas/FeedbackDetail"
+                        },
+                        "basis": {
+                          "$ref": "#/components/schemas/FeedbackBasis"
+                        },
+                        "comparison": {
+                          "$ref": "#/components/schemas/FeedbackComparison"
                         }
                       },
                       "required": [
+                        "kind",
                         "detail",
                         "basis",
-                        "kind",
                         "reason"
                       ],
                       "additionalProperties": false,
                       "title": "text_ocr",
-                      "anyOf": [
-                        {
-                          "properties": {
-                            "basis": {
-                              "enum": [
-                                "output",
-                                "expectation"
-                              ]
-                            }
+                      "not": {
+                        "properties": {
+                          "basis": {
+                            "enum": [
+                              "source_comparison"
+                            ]
                           }
                         },
-                        {
+                        "not": {
                           "required": [
                             "comparison"
                           ]
                         }
-                      ]
+                      }
                     },
                     {
                       "type": "object",
                       "properties": {
-                        "detail": {
-                          "$ref": "#/components/schemas/KeylessFeedbackDetail"
-                        },
-                        "basis": {
-                          "$ref": "#/components/schemas/KeylessFeedbackBasis"
-                        },
-                        "comparison": {
-                          "$ref": "#/components/schemas/KeylessFeedbackComparison"
-                        },
-                        "format": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "A format type requested by the job. Required for output and source_comparison observations when multiple formats were requested; optional otherwise."
-                        },
-                        "page": {
-                          "type": "integer",
-                          "maximum": 9007199254740991,
-                          "minimum": 1
-                        },
                         "kind": {
                           "type": "string",
                           "enum": [
                             "table"
                           ]
+                        },
+                        "format": {
+                          "type": "string",
+                          "description": "Output format requested by the job. Required when multiple formats were requested, except for expectation observations.",
+                          "minLength": 1
+                        },
+                        "page": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "description": "Page number, starting at 1.",
+                          "example": 1
                         },
                         "reason": {
                           "type": "string",
@@ -12637,62 +12662,61 @@
                             "structure",
                             "cells_glued",
                             "digits"
-                          ]
+                          ],
+                          "description": "Reason for the issue."
+                        },
+                        "detail": {
+                          "$ref": "#/components/schemas/FeedbackDetail"
+                        },
+                        "basis": {
+                          "$ref": "#/components/schemas/FeedbackBasis"
+                        },
+                        "comparison": {
+                          "$ref": "#/components/schemas/FeedbackComparison"
                         }
                       },
                       "required": [
+                        "kind",
                         "detail",
                         "basis",
-                        "kind",
                         "reason"
                       ],
                       "additionalProperties": false,
                       "title": "table",
-                      "anyOf": [
-                        {
-                          "properties": {
-                            "basis": {
-                              "enum": [
-                                "output",
-                                "expectation"
-                              ]
-                            }
+                      "not": {
+                        "properties": {
+                          "basis": {
+                            "enum": [
+                              "source_comparison"
+                            ]
                           }
                         },
-                        {
+                        "not": {
                           "required": [
                             "comparison"
                           ]
                         }
-                      ]
+                      }
                     },
                     {
                       "type": "object",
                       "properties": {
-                        "detail": {
-                          "$ref": "#/components/schemas/KeylessFeedbackDetail"
-                        },
-                        "basis": {
-                          "$ref": "#/components/schemas/KeylessFeedbackBasis"
-                        },
-                        "comparison": {
-                          "$ref": "#/components/schemas/KeylessFeedbackComparison"
-                        },
-                        "format": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "A format type requested by the job. Required for output and source_comparison observations when multiple formats were requested; optional otherwise."
-                        },
-                        "page": {
-                          "type": "integer",
-                          "maximum": 9007199254740991,
-                          "minimum": 1
-                        },
                         "kind": {
                           "type": "string",
                           "enum": [
                             "completeness"
                           ]
+                        },
+                        "format": {
+                          "type": "string",
+                          "description": "Output format requested by the job. Required when multiple formats were requested, except for expectation observations.",
+                          "minLength": 1
+                        },
+                        "page": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "description": "Page number, starting at 1.",
+                          "example": 1
                         },
                         "reason": {
                           "type": "string",
@@ -12700,62 +12724,61 @@
                             "pages_missing",
                             "truncated_at_max_pages",
                             "sections_dropped"
-                          ]
+                          ],
+                          "description": "Reason for the issue."
+                        },
+                        "detail": {
+                          "$ref": "#/components/schemas/FeedbackDetail"
+                        },
+                        "basis": {
+                          "$ref": "#/components/schemas/FeedbackBasis"
+                        },
+                        "comparison": {
+                          "$ref": "#/components/schemas/FeedbackComparison"
                         }
                       },
                       "required": [
+                        "kind",
                         "detail",
                         "basis",
-                        "kind",
                         "reason"
                       ],
                       "additionalProperties": false,
                       "title": "completeness",
-                      "anyOf": [
-                        {
-                          "properties": {
-                            "basis": {
-                              "enum": [
-                                "output",
-                                "expectation"
-                              ]
-                            }
+                      "not": {
+                        "properties": {
+                          "basis": {
+                            "enum": [
+                              "source_comparison"
+                            ]
                           }
                         },
-                        {
+                        "not": {
                           "required": [
                             "comparison"
                           ]
                         }
-                      ]
+                      }
                     },
                     {
                       "type": "object",
                       "properties": {
-                        "detail": {
-                          "$ref": "#/components/schemas/KeylessFeedbackDetail"
-                        },
-                        "basis": {
-                          "$ref": "#/components/schemas/KeylessFeedbackBasis"
-                        },
-                        "comparison": {
-                          "$ref": "#/components/schemas/KeylessFeedbackComparison"
-                        },
-                        "format": {
-                          "type": "string",
-                          "minLength": 1,
-                          "description": "A format type requested by the job. Required for output and source_comparison observations when multiple formats were requested; optional otherwise."
-                        },
-                        "page": {
-                          "type": "integer",
-                          "maximum": 9007199254740991,
-                          "minimum": 1
-                        },
                         "kind": {
                           "type": "string",
                           "enum": [
                             "incorrect"
                           ]
+                        },
+                        "format": {
+                          "type": "string",
+                          "description": "Output format requested by the job. Required when multiple formats were requested, except for expectation observations.",
+                          "minLength": 1
+                        },
+                        "page": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "description": "Page number, starting at 1.",
+                          "example": 1
                         },
                         "reason": {
                           "type": "string",
@@ -12763,85 +12786,71 @@
                             "wrong",
                             "hallucinated",
                             "missing_fields"
-                          ]
+                          ],
+                          "description": "Reason for the issue."
+                        },
+                        "detail": {
+                          "$ref": "#/components/schemas/FeedbackDetail"
+                        },
+                        "basis": {
+                          "$ref": "#/components/schemas/FeedbackBasis"
+                        },
+                        "comparison": {
+                          "$ref": "#/components/schemas/FeedbackComparison"
                         }
                       },
                       "required": [
+                        "kind",
                         "detail",
                         "basis",
-                        "kind",
                         "reason"
                       ],
                       "additionalProperties": false,
                       "title": "incorrect",
-                      "anyOf": [
-                        {
-                          "properties": {
-                            "basis": {
-                              "enum": [
-                                "output",
-                                "expectation"
-                              ]
-                            }
+                      "not": {
+                        "properties": {
+                          "basis": {
+                            "enum": [
+                              "source_comparison"
+                            ]
                           }
                         },
-                        {
+                        "not": {
                           "required": [
                             "comparison"
                           ]
                         }
-                      ]
+                      }
                     }
                   ]
                 }
+              },
+              "origin": {
+                "type": "string",
+                "description": "Client submitting the feedback.",
+                "maxLength": 100,
+                "default": "api"
+              },
+              "integration": {
+                "type": "string",
+                "description": "Integration submitting the feedback.",
+                "maxLength": 100,
+                "nullable": true
               }
             },
             "required": [
+              "endpoint",
               "jobId",
               "rating",
               "task",
               "assessment",
-              "endpoint",
-              "docClass",
-              "observations"
+              "observations",
+              "docClass"
             ],
             "additionalProperties": false,
             "title": "Parse"
           }
         ]
-      },
-      "KeylessFeedbackDetail": {
-        "type": "string",
-        "minLength": 10,
-        "maxLength": 2000,
-        "description": "Length is measured after trimming whitespace."
-      },
-      "KeylessFeedbackBasis": {
-        "type": "string",
-        "enum": [
-          "output",
-          "source_comparison",
-          "expectation"
-        ],
-        "description": "Use output for returned content, source_comparison with comparison for a source you already inspected, or expectation for an unmet need."
-      },
-      "KeylessFeedbackComparison": {
-        "type": "object",
-        "properties": {
-          "reference": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 2048
-          },
-          "detail": {
-            "$ref": "#/components/schemas/KeylessFeedbackDetail"
-          }
-        },
-        "required": [
-          "reference",
-          "detail"
-        ],
-        "additionalProperties": false
       }
     }
   },
