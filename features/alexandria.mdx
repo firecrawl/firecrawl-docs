@@ -20,7 +20,7 @@ Alexandria is a catalogue of data tools your agent can call through Firecrawl: m
     Every provider and tool in the dashboard, with copyable requests.
   </Card>
   <Card title="Provider terms" icon="file-signature" href="https://www.firecrawl.dev/app/settings?tab=data-sources">
-    Some providers need an admin to accept their terms once. Manage that here.
+    Review provider agreements and manage your organization's acceptance.
   </Card>
 </CardGroup>
 
@@ -47,7 +47,7 @@ npx firecrawl-cli@alexandria scrape --alexandria particle/podcasts/episodes/sear
 
     Try asking: "Find Particle's podcast tools, show me the episode-search inputs and price, then run it for conversations about AI agents."
 
-    When a provider needs its terms accepted, the tool result says so and links the admin to the page; the agent never accepts terms itself.
+    When a provider needs its terms accepted, the tool result includes a dashboard link. Servers advertising `firecrawl_terms_show` and `firecrawl_terms_accept` also support reading and explicitly accepting an exact agreement through MCP. See [Provider terms](#provider-terms).
   </Tab>
 </Tabs>
 
@@ -69,21 +69,22 @@ npx firecrawl-cli@alexandria alexandria people fullenrich
 npx firecrawl-cli@alexandria alexandria people fullenrich people/search
 ```
 
-Use the category and provider IDs returned by discovery. The same pattern works for `apps`, `podcasts`, and the other categories in the index. A category can contain multiple providers. Selecting a tool shows its contract; it does not execute the tool.
+Use the category, provider, and capability IDs returned by live discovery. Providers are published dynamically, so the examples illustrate the shape of a call rather than a fixed list of IDs. The same pattern works for `apps`, `podcasts`, and the other categories in the index. A category can contain multiple providers. Selecting a tool shows its contract; it does not execute the tool.
 
 Add `--json` for machine-readable output. To explicitly load full contracts across a category, use `npx firecrawl-cli@alexandria alexandria people --contracts --json`. To list providers across the catalogue, use `npx firecrawl-cli@alexandria alexandria list --providers`.
 
-For URL discovery and precise catalogue filters, `find-tools` remains available:
+For URL discovery, natural-language queries, and precise catalogue filters, `find-tools` remains available:
 
 ```bash
 npx firecrawl-cli@alexandria find-tools --options '{"providers":["particle"],"capabilities":["podcasts/episodes/search"],"level":"tools","expand":["options","response"]}' --json
+npx firecrawl-cli@alexandria find-tools --options '{"query":"podcast conversations about AI agents","limit":3}' --json
 ```
 
-`find-tools` accepts catalogue selectors or a URL, not a natural-language query. Use `search --sources alexandria` for semantic discovery. Execute a selected tool with `scrape --alexandria`, as above; browsing commands never execute it.
+`find-tools` accepts a natural-language `query` inside `--options`, catalogue selectors, or a URL. Use `search` when you also want web results. Follow an item's `next` request to narrow or inspect it; follow the page's `next` request for more results. Execute a selected tool with `scrape --alexandria`, as above; browsing commands never execute it.
 
 ### Find Tools, the meta tool
 
-Alexandria ships one tool that is about the other tools. **Find Tools** walks the catalogue a step at a time so an agent reads only what it needs: providers, then a provider's groups, then the tools in a group, then one tool's inputs, response shape, and examples. It can also start from a page URL and return the tools that cover that site. Every step is free and every item comes back with a ready-made `next` request, so the agent follows a path instead of guessing parameters.
+Alexandria ships one tool that is about the other tools. **Find Tools** walks the catalogue a step at a time so an agent reads only what it needs: categories, providers, compact tool listings, then one tool's inputs, response shape, and examples. Groups are an optional filter. It can also start from a page URL or a description of the data you need. Discovery is free, and returned `next` requests let the agent follow a path instead of guessing parameters.
 
 In the CLI it is `firecrawl find-tools`; in MCP it is `firecrawl_find_tools`; in the SDKs it is `findTools` / `find_tools`; over HTTP it is the `firecrawl` provider's `find-tools` capability. Details and examples are in [Find Tools](#find-tools) below.
 
@@ -445,5 +446,44 @@ Errors use a consistent envelope:
 
 Other Alexandria refusals are relayed as-is, with the provider's status and `code` (for example, 402 `credit_budget_exceeded`), and nothing was executed.
 
-A 403 with `code: "THIRD_PARTY_DATA_TERMS_REQUIRED"` includes `requiresAction.url`: an org admin must accept the provider's terms at that URL before the request can proceed.
+A 403 with `code: "THIRD_PARTY_DATA_TERMS_REQUIRED"` includes `requiresAction.url`. Review and accept the provider's agreement before retrying the data request. No provider execution occurs for this refusal.
 
+## Provider terms
+
+Read agreements through the API or CLI. Acceptance applies to the organization associated with your Firecrawl API key. An agent can submit acceptance after the user explicitly authorizes the exact agreement; a request to retrieve data is not permission to accept terms. An organization admin can also use the dashboard URL returned with the refusal.
+
+### CLI
+
+Use `firecrawl-cli@alexandria` version `1.23.4-alexandria-beta.14` or later. Replace `RETURNED_PROVIDER` with the provider ID from discovery or the terms refusal:
+
+```bash
+npx firecrawl-cli@alexandria alexandria terms show RETURNED_PROVIDER --pretty
+```
+
+Read `terms.document` and retain its `terms.version` and `terms.digest`. After explicit authorization, pass those exact values:
+
+```bash
+npx firecrawl-cli@alexandria alexandria terms accept RETURNED_PROVIDER \
+  --terms-version REVIEWED_VERSION \
+  --digest REVIEWED_SHA256_DIGEST \
+  --confirm
+```
+
+Use `--terms-version`, not `--version` (which prints the CLI version). The digest is the 64-character lowercase SHA-256 value returned with the agreement. `show` reads the agreement; it does not report whether your organization has already accepted it.
+
+### API and MCP
+
+`GET /exchange/provider-terms` returns the accessible agreements in `providers`. To accept one, send its provider ID, reviewed version, and digest to `POST /exchange/provider-terms/accept`:
+
+```bash
+curl https://api.firecrawl.dev/exchange/provider-terms/accept \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"provider":"RETURNED_PROVIDER","version":"REVIEWED_VERSION","digest":"REVIEWED_SHA256_DIGEST","confirmed":true}'
+```
+
+The API records the acceptance in Exchange's terms ledger. The organization and credential identity come from authentication. A successful response includes `success: true`, `provider`, `version`, `digest`, and `acceptedAt`.
+
+On an MCP server that advertises the terms tools, use `firecrawl_terms_show` with `{ "provider": "RETURNED_PROVIDER" }`, then `firecrawl_terms_accept` with the same four fields as the API body after explicit authorization. Check the connected server's tool inventory; these tools are not available on the search-only surface.
+
+If acceptance returns `409 terms_changed`, read and review the new agreement before accepting again. If the outcome is uncertain, check your organization's acceptance in the [provider terms settings](https://www.firecrawl.dev/app/settings?tab=data-sources) before retrying; do not automatically resubmit. After confirmed acceptance, retry the original data request with the same payload and request ID.
