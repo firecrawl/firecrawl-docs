@@ -11,7 +11,7 @@ Canonical Firecrawl Rust source of truth for agents. Generated from SDK source a
 cargo add firecrawl
 ```
 
-Crate: **`firecrawl`** on crates.io. The current SDK version is **2.0.0** (verify the latest release on crates.io before pinning).
+Crate: **`firecrawl`** on crates.io. The current SDK version is **2.20.0** (verify the latest release on crates.io before pinning).
 
 ## Authenticate
 
@@ -59,11 +59,16 @@ use firecrawl::{
 };
 
 let options = SearchOptions {
-    sources: Some(vec![SearchSource::Web, SearchSource::News]),
-    categories: Some(vec![SearchCategory::Research]),
+    sources: Some(vec![SearchSource::Web, SearchSource::News, SearchSource::Alexandria]),
+    categories: Some(vec![SearchCategory::Research, SearchCategory::Github]),
     limit: Some(10),
     tbs: Some("qdr:m".to_string()),
     location: Some("San Francisco,California,United States".to_string()),
+    country: Some("US".to_string()),
+    domain_tools: Some(true),
+    highlights: Some(true),
+    include_domains: Some(vec!["docs.firecrawl.dev".to_string()]),
+    exclude_domains: Some(vec!["example.com".to_string()]),
     ignore_invalid_urls: Some(true),
     timeout: Some(60000),
     scrape_options: Some(ScrapeOptions {
@@ -95,6 +100,7 @@ let results = client
   - `web: Option<Vec<SearchResultOrDocument>>` — each item is either `SearchResultOrDocument::WebResult(SearchResultWeb)` (url, title, description, …) or `SearchResultOrDocument::Document(Document)` when the API returned scraped content for that row (detected when markdown, html, rawHtml, or metadata is present).
   - `news: Option<Vec<SearchResultNews>>`
   - `images: Option<Vec<SearchResultImage>>`
+  - `tools: Option<Vec<DiscoveredTool>>` — populated when `domain_tools` is enabled.
 
 ### Parameters
 
@@ -106,12 +112,12 @@ let results = client
 - `options.sources`
   - Type: `Vec<SearchSource>`
   - Use when: you want to control which sources are searched.
-  - Confirmed values: `Web`, `News`, `Images`
+  - Confirmed values: `Web`, `News`, `Images`, `Alexandria`
 
 - `options.categories`
   - Type: `Vec<SearchCategory>`
   - Use when: you want to filter results by category.
-  - Confirmed values: `Research`, `Pdf`
+  - Confirmed values: `Research`, `Pdf`, `Github`
 
 - `options.limit`
   - Type: u32
@@ -124,6 +130,26 @@ let results = client
 - `options.location`
   - Type: String
   - Use when: you want localized results.
+
+- `options.domain_tools`
+  - Type: bool
+  - Use when: you want Alexandria domain-tool discovery.
+
+- `options.include_domains`
+  - Type: `Vec<String>`
+  - Use when: you want results only from specific domains.
+
+- `options.exclude_domains`
+  - Type: `Vec<String>`
+  - Use when: you want to exclude specific domains.
+
+- `options.country`
+  - Type: String
+  - Use when: ISO 3166-1 alpha-2 geo-targeting.
+
+- `options.highlights`
+  - Type: bool
+  - Use when: query-relevant highlights. Defaults to true.
 
 - `options.ignore_invalid_urls`
   - Type: bool
@@ -170,7 +196,7 @@ let doc = client
 ```rust
 use firecrawl::{
     Client, ScrapeOptions, Format, JsonOptions, ScreenshotOptions, ChangeTrackingOptions,
-    ChangeTrackingMode, AttributeSelector, Action, ParserConfig, ProxyType,
+    ChangeTrackingMode, AttributeSelector, Action, ParserConfig, ProxyType, AuditMetadata,
 };
 
 let doc = client
@@ -182,6 +208,7 @@ let doc = client
             Format::Screenshot,
             Format::ChangeTracking,
             Format::Attributes,
+            Format::Product,
         ]),
         json_options: Some(JsonOptions {
             prompt: Some("Extract plan names and prices.".to_string()),
@@ -204,6 +231,10 @@ let doc = client
         parsers: Some(vec![ParserConfig::Pdf {
             parser_type: "pdf".to_string(),
             max_pages: Some(5),
+            mode: Some("fast".to_string()),
+            pages: Some(true),
+            blocks: Some(false),
+            page_markers: Some(true),
         }]),
         actions: Some(vec![
             Action::Click { selector: "#accept".to_string() },
@@ -211,6 +242,12 @@ let doc = client
             Action::Scrape,
         ]),
         proxy: Some(ProxyType::Auto),
+        lockdown: Some(false),
+        redact_pii: Some(true),
+        domain_tools: Some(true),
+        audit_metadata: Some(AuditMetadata {
+            username: "agent-user".to_string(),
+        }),
         ..Default::default()
     })
     .await?;
@@ -225,7 +262,8 @@ let doc = client
 - `options.formats`
   - Type: `Vec<Format>`
   - Use when: you want multiple output formats.
-  - Confirmed values: `Markdown`, `Html`, `RawHtml`, `Links`, `Images`, `Screenshot`, `Summary`, `ChangeTracking`, `Json`, `Attributes`, `Branding`, `Audio`, `Video`
+  - Confirmed values: `Markdown`, `Html`, `RawHtml`, `Links`, `Images`, `Screenshot`, `Summary`, `ChangeTracking`, `Json`, `Attributes`, `Branding`, `Audio`, `Video`, `Product`, `Menu`
+  - Notes: `Question(QuestionFormat)`, `Highlights(HighlightsFormat)`, `Query(QueryFormat)` are parametric variants.
 
 - `options.headers`
   - Type: `HashMap<String, String>`
@@ -260,7 +298,7 @@ let doc = client
   - Use when: you need file parsing controls.
   - Confirmed values:
     - `ParserConfig::Simple("pdf".to_string())`
-    - `ParserConfig::Pdf { parser_type: "pdf", max_pages: Some(n) }`
+    - `ParserConfig::Pdf { parser_type: "pdf", max_pages: Some(n), mode: Option<String>, pages: Option<bool>, blocks: Option<bool>, page_markers: Option<bool> }`
 
 - `options.actions`
   - Type: `Vec<Action>`
@@ -318,6 +356,29 @@ let doc = client
   - Type: `ProfileConfig`
   - Use when: you want a persistent browser profile shared across scrapes and interactions.
   - Confirmed fields: `name`, `save_changes`
+
+- `options.lockdown`
+  - Type: bool
+  - Use when: you want to serve only previously cached results.
+
+- `options.redact_pii`
+  - Type: bool
+  - Use when: you want to redact PII from returned content.
+  - Notes: JSON key is `redactPII`.
+
+- `options.audit_metadata`
+  - Type: `AuditMetadata`
+  - Use when: you need SIEM logging attribution.
+  - Confirmed fields: `username: String`
+
+- `options.domain_tools`
+  - Type: bool
+  - Use when: you want Alexandria domain-tool discovery for this URL.
+
+- `options.origin`
+  - Type: String
+  - Use when: you need an origin label for request telemetry.
+  - Notes: auto-set to `"rust-sdk@{version}"` if not provided.
 
 - `options.integration`
   - Type: `Option<String>`
@@ -431,7 +492,7 @@ At least one of `options.code` or `options.prompt` must be non-empty; otherwise 
 ### Response types
 
 - `interact` → `Result<ScrapeExecuteResponse, FirecrawlError>`
-  - `success: bool` is always present; `live_view_url`, `interactive_live_view_url`, `output`, `stdout`, `result`, `stderr`, `exit_code`, `killed`, and `error` are `Option` fields on the struct.
+  - `success: bool` is always present; `live_view_url`, `interactive_live_view_url`, `cdp_url`, `output`, `stdout`, `result`, `stderr`, `exit_code`, `killed`, and `error` are `Option` fields on the struct.
 - `stop_interaction` → `Result<ScrapeBrowserDeleteResponse, FirecrawlError>`
   - `success: bool` is always present; `session_duration_ms`, `credits_billed`, and `error` are optional.
 
@@ -442,6 +503,10 @@ The v2 OpenAPI spec currently models the interact request body with `code` as re
 - Deprecated aliases: `scrape_execute`, `stop_interactive_browser`, and `delete_scrape_browser` map to `interact` and `stop_interaction`.
 - `ScrapeOptions` includes dedicated `json_options`, `screenshot_options`, and `change_tracking_options` for advanced formats.
 - `search_and_scrape(query, limit)` is a convenience helper: it calls `search` with default `ScrapeOptions` and returns `Vec<Document>` built from `SearchResultOrDocument::Document` entries in `data.web` (see `search.rs`).
+- `client.scrape_alexandria(calls, options)` executes Alexandria domain-tool calls.
+- `client.find_tools(options)` discovers Alexandria tool catalogue.
+- `client.search_papers(query, options)` and `client.search_github(query, options)` search specialized indexes.
+- `client.scrape_with_schema(url, schema, prompt)` is a convenience method for JSON extraction with a schema.
 - v2 SDK exports all types at the crate root: `use firecrawl::Client` (not `use firecrawl::v2::Client`).
 - Error types simplified in v2: `CrawlJobFailed(String, CrawlStatus)` → `JobFailed(String)`, `Missuse` → `Misuse`.
 

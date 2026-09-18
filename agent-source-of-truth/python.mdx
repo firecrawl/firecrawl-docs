@@ -3,7 +3,7 @@ title: "Python Source of Truth"
 description: "Canonical Firecrawl Python source of truth for agents using key endpoints like search, scrape, and interact."
 ---
 
-Canonical Firecrawl Python source of truth for agents. Generated from SDK source (`firecrawl-py` / `firecrawl` **4.22.1**) and the v2 OpenAPI spec. Method names, parameters, and return types match the v2 client in `firecrawl/v2/client.py` unless noted.
+Canonical Firecrawl Python source of truth for agents. Generated from SDK source (`firecrawl-py` / `firecrawl` **4.43.0**) and the v2 OpenAPI spec. Method names, parameters, and return types match the v2 client in `firecrawl/v2/client.py` unless noted.
 
 ## Install
 
@@ -46,10 +46,11 @@ Returns a `SearchData` model with optional lists:
 - `web` — web hits (`SearchResultWeb` or full `Document` when `scrape_options` hydrates content)
 - `news` — news hits (`SearchResultNews` or `Document`)
 - `images` — image hits (`SearchResultImages` or `Document`)
+- `tools` — discovered Alexandria tools (present when `domain_tools=True`)
 
 Omitted buckets are `None` when the API did not return that key.
 
-**Wrong turn to avoid:** `search()` does not return `{ data: [...] }`. Do not access `result.data`. Web results are in `result.web`, news in `result.news`, images in `result.images`.
+**Wrong turn to avoid:** `search()` does not return `{ data: [...] }`. Do not access `result.data` — it raises `AttributeError` with a helpful message directing you to the correct attributes. Web results are in `result.web`, news in `result.news`, images in `result.images`.
 
 ### Simple Example
 
@@ -106,7 +107,8 @@ results = client.search(
     - `"web"`: web index results
     - `"news"`: news results
     - `"images"`: image results
-    - `Source(type="web" | "news" | "images")`: typed source object form
+    - `"alexandria"`: Alexandria knowledge-base results
+    - `Source(type="web" | "news" | "images" | "alexandria")`: typed source object form
 
 - `categories`
   - Type: list of category names or `Category` objects
@@ -115,7 +117,8 @@ results = client.search(
     - `"developer"`: Developer Index results
     - `"research"`: research and academic results
     - `"pdf"`: PDF-focused results
-    - `Category(type="developer" | "research" | "pdf")`: typed category object form
+    - `"github"`: GitHub code results
+    - `Category(type="developer" | "research" | "pdf" | "github")`: typed category object form
 
 - `limit`
   - Type: int
@@ -142,6 +145,40 @@ results = client.search(
 - `scrape_options`
   - Type: `ScrapeOptions`
   - Use when: you want to scrape each search result (see Scrape parameters for fields).
+
+- `domain_tools`
+  - Type: bool
+  - Use when: you want Alexandria domain-tool discovery.
+
+- `include_domains`
+  - Type: list of str
+  - Use when: you want results only from specific domains.
+
+- `exclude_domains`
+  - Type: list of str
+  - Use when: you want to exclude specific domains. Cannot combine with `include_domains`.
+
+- `country`
+  - Type: str
+  - Use when: you need ISO 3166-1 alpha-2 geo-targeting.
+
+- `highlights`
+  - Type: bool
+  - Use when: you want query-relevant highlights.
+  - Notes: defaults to `true`.
+
+- `integration`
+  - Type: str
+  - Use when: you need an integration identifier.
+
+- `enterprise`
+  - Type: list of str
+  - Use when: enterprise search options.
+  - Confirmed values: `"zdr"` for Zero Data Retention, `"anon"` for anonymized.
+
+- `threat_protection`
+  - Type: ThreatProtectionOptions
+  - Use when: enterprise per-request threat protection override.
 
 ## Scrape
 
@@ -175,7 +212,7 @@ doc = client.scrape(
     headers={"User-Agent": "FirecrawlDocsBot/1.0"},
     only_main_content=True,
     wait_for=1000,
-    parsers=[{"type": "pdf", "mode": "auto", "max_pages": 5}],
+    parsers=[{"type": "pdf", "mode": "auto", "max_pages": 5, "pages": True, "blocks": True, "page_markers": True}],
     actions=[
         {"type": "click", "selector": "#accept"},
         {"type": "wait", "milliseconds": 750},
@@ -190,6 +227,18 @@ doc = client.scrape(
     store_in_cache=True,
     profile={"name": "docs-session", "save_changes": True},
 )
+```
+
+### Alexandria Scrape
+
+Execute Alexandria domain-tool calls without a URL:
+
+```py
+from firecrawl.v2.types import AlexandriaCall
+
+doc = client.scrape(alexandria=AlexandriaCall(...))
+# or with multiple calls:
+doc = client.scrape(alexandria=[...], request_id="...", timeout=...)
 ```
 
 ### Parameters
@@ -214,6 +263,8 @@ doc = client.scrape(
     - `"branding"`: branding profile output
     - `"audio"`: audio extraction
     - `"video"`: video extraction
+    - `"product"`: product data extraction
+    - `"menu"`: menu data extraction
   - Object-only format types:
     - `{"type": "json", ...}`: JSON extraction. Use an object, not the plain string `"json"`.
     - `{"type": "question", "question": "..."}`: question-answer output.
@@ -262,7 +313,7 @@ doc = client.scrape(
   - Use when: you need file parsing controls (for example PDF parsing).
   - Confirmed values:
     - `"pdf"`: enable PDF parsing
-    - `{ "type": "pdf", "mode": "fast" | "auto" | "ocr", "max_pages": int }`: PDF parser options
+    - `{ "type": "pdf", "mode": "fast" | "auto" | "ocr", "max_pages": int, "pages": bool, "blocks": bool, "page_markers": bool }`: PDF parser options
 
 - `actions`
   - Type: list of action objects
@@ -307,11 +358,6 @@ doc = client.scrape(
   - Type: int
   - Use when: you want cached data up to a maximum age (milliseconds).
 
-- `min_age`
-  - Type: int
-  - Use when: you want cached data only if it is at least this old (milliseconds).
-  - Notes: only on `ScrapeOptions` passed as `scrape_options` to `client.search`. The `client.scrape` method does not accept `min_age`.
-
 - `store_in_cache`
   - Type: bool
   - Use when: you want Firecrawl to cache the result.
@@ -319,6 +365,30 @@ doc = client.scrape(
 - `profile`
   - Type: dict with `name` and optional `save_changes` or `saveChanges`
   - Use when: you want a persistent browser profile shared across scrapes and interactions.
+
+- `auto_resume`
+  - Type: bool
+  - Use when: you want automatic retry on timeout (attaches to same in-flight job).
+
+- `lockdown`
+  - Type: bool
+  - Use when: you want to serve only previously cached results (returns 404 on cache miss).
+
+- `audit_metadata`
+  - Type: AuditMetadata (has `username: str`)
+  - Use when: you need SIEM logging attribution.
+
+- `integration`
+  - Type: str
+  - Use when: you need an integration identifier.
+
+- `domain_tools`
+  - Type: bool
+  - Use when: you want Alexandria domain-tool discovery for this URL.
+
+- `threat_protection`
+  - Type: ThreatProtectionOptions
+  - Use when: enterprise per-request threat protection override.
 
 ## Interact
 
@@ -382,9 +452,13 @@ result = client.interact(
   - Type: int
   - Use when: you need an execution timeout in seconds.
 
+- `origin`
+  - Type: str
+  - Use when: optional origin label for execution telemetry.
+
 ### Return value
 
-Returns `BrowserExecuteResponse`: `success`, optional `live_view_url`, `interactive_live_view_url`, `output`, `stdout`, `result`, `stderr`, `exit_code`, `killed`, `error` (API camelCase is normalized to snake_case on the model).
+Returns `BrowserExecuteResponse`: `success`, optional `live_view_url`, `interactive_live_view_url`, `output`, `stdout`, `result`, `stderr`, `exit_code`, `killed`, `error`, `cdp_url` (API camelCase is normalized to snake_case on the model).
 
 ## Ask (Agentic Debugging)
 
@@ -507,9 +581,17 @@ print(response.json()["answer"])
 
 ## Notes
 
-- Deprecated aliases: `scrape_execute` → `interact`; `stop_interactive_browser` and `delete_scrape_browser` → `stop_interaction`.
+- Deprecated aliases: `scrape_execute` → `interact`; `stop_interactive_browser` and `delete_scrape_browser` → `stop_interaction`; `scrape_url` → `scrape`.
 - The top-level `Firecrawl` client exposes v2 methods directly; v1 remains under `client.v1`.
 - The bundled v2 OpenAPI snippet for `POST /v2/scrape/{jobId}/interact` may only document `code`; the Python SDK and server accept either `code` or `prompt` for this endpoint.
+- Alexandria tool calling is supported via `client.scrape(alexandria=...)`.
+- `client.scrape_alexandria(calls, ...)` is also available as a convenience method for Alexandria calls.
+- `client.developer_search(query, **kwargs)` searches the dedicated developer index.
+- `client.search_papers(query, **kwargs)` searches the research paper index.
+- `client.search_github(query, **kwargs)` searches the GitHub code index.
+- `client.find_tools(**kwargs)` discovers the Alexandria tool catalogue.
+- `client.parse(file, **options)` parses uploaded files.
+- Async client available via `AsyncFirecrawl` / `AsyncFirecrawlApp`.
 
 ## Source Of Truth
 
