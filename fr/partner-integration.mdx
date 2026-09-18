@@ -36,13 +36,13 @@ https://integrations.firecrawl.dev
   ## Authentification
 </div>
 
-Toutes les requêtes adressées à l’API d’intégration partenaire nécessitent un en-tête `Authorization` contenant votre clé partenaire :
+Toutes les requêtes adressées à l’API d’intégration partenaire nécessitent un en-tête `Authorization` contenant votre clé partenaire :
 
 ```bash
 Authorization: Bearer <partner key>
 ```
 
-Les clés partenaires sont distinctes des clés API Firecrawl standards et sont fournies directement par l’équipe Firecrawl.
+Les clés partenaires sont distinctes des clés API Firecrawl standards. Vous pouvez les créer et les révoquer dans Settings &gt; Partner API du [tableau de bord Firecrawl](https://www.firecrawl.dev/app/partner-api).
 
 <div id="security-requirements">
   ## Exigences de sécurité
@@ -61,7 +61,7 @@ Les clés partenaires sont distinctes des clés API Firecrawl standards et sont 
   ### Créer un utilisateur
 </div>
 
-Crée une clé API Firecrawl associée à l’adresse e-mail de l’utilisateur.
+Provisionne un compte Firecrawl pour l’un de vos utilisateurs, identifié par son e-mail, et renvoie sa clé API.
 
 ```
 POST /partner/v1/accounts
@@ -71,9 +71,18 @@ POST /partner/v1/accounts
   #### Comportement
 </div>
 
-* Si l’utilisateur ne possède pas encore de compte Firecrawl, un nouvel utilisateur et une nouvelle équipe seront créés.
-* Si l’utilisateur possède déjà un compte Firecrawl, mais n’a pas d’équipe associée à votre intégration partenaire, une nouvelle équipe associée au partenaire sera créée.
-* Si l’utilisateur possède déjà un compte Firecrawl et a déjà une équipe associée à votre intégration partenaire, l’équipe existante est renvoyée et le coupon promotionnel n’est **pas** appliqué de nouveau.
+Avec la configuration **Partner API** :
+
+* Si l&#39;utilisateur n&#39;a pas encore de compte Firecrawl, un nouvel utilisateur et une nouvelle équipe sont créés.
+* Si l&#39;utilisateur a déjà un compte Firecrawl mais aucune équipe associée à votre intégration, une nouvelle équipe associée au partenaire est créée.
+* Si l&#39;utilisateur a déjà un compte Firecrawl et une équipe associée à votre intégration, l&#39;équipe existante est renvoyée.
+
+Avec la configuration **Gateway** :
+
+* Chaque compte est créé pour votre intégration uniquement. Une requête ne se rattache jamais à un compte Firecrawl existant, même si l&#39;e-mail correspond à celui d&#39;un compte existant. L&#39;e-mail est enregistré comme adresse de contact du compte et ne sert pas à rechercher des comptes.
+* Les appels répétés avec le même e-mail renvoient le même compte et sa clé API.
+
+Si votre intégration inclut des crédits promotionnels, ceux-ci sont attribués une seule fois, à la création du compte.
 
 <div id="request">
   #### Requête
@@ -88,9 +97,9 @@ curl -X POST "https://integrations.firecrawl.dev/partner/v1/accounts" \
 
 **Corps**
 
-| Champ   | Type   | Obligatoire | Description                               |
-| ------- | ------ | ----------- | ----------------------------------------- |
-| `email` | string | Oui         | L&#39;adresse e-mail de l&#39;utilisateur |
+| Champ   | Type   | Obligatoire | Description                                                                                                                    |
+| ------- | ------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `email` | string | Oui         | L&#39;adresse e-mail de l&#39;utilisateur. Avec la configuration Gateway, elle est stockée comme adresse de contact du compte. |
 
 <div id="response">
   #### Réponse
@@ -105,10 +114,21 @@ curl -X POST "https://integrations.firecrawl.dev/partner/v1/accounts" \
 }
 ```
 
-| Champ            | Type    | Description                                                                                                                                      |
-| ---------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `apiKey`         | string  | La clé API Firecrawl de l’équipe associée au partenaire de cet utilisateur                                                                       |
-| `alreadyExisted` | boolean | `true` si l’utilisateur et l’équipe associée au partenaire existaient déjà. Lorsque `true`, le coupon promotionnel n’est pas appliqué à nouveau. |
+Avec le setup Gateway, la réponse contient également l’état d’inscription :
+
+```json
+{
+  "apiKey": "fc-...",
+  "alreadyExisted": false,
+  "gatewayStatus": "enrolled"
+}
+```
+
+| Champ            | Type    | Description                                                                                                                                           |
+| ---------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apiKey`         | string  | La clé API Firecrawl de l’équipe associée au partenaire de cet utilisateur                                                                            |
+| `alreadyExisted` | boolean | `true` si votre intégration avait déjà provisionné un compte pour cet e-mail. Cela n’indique en rien si l’e-mail existe ailleurs dans Firecrawl.      |
+| `gatewayStatus`  | string  | Intégrations de passerelle uniquement. `enrolled` lors de l’appel qui crée le compte, `already_enrolled` lors des appels répétés pour le même e-mail. |
 
 <div id="errors">
   #### Erreurs
@@ -116,6 +136,7 @@ curl -X POST "https://integrations.firecrawl.dev/partner/v1/accounts" \
 
 | État  | Description                                                            |
 | ----- | ---------------------------------------------------------------------- |
+| `400` | Requête incorrecte - `email` est manquant ou mal formé                 |
 | `401` | Non autorisé - la clé partenaire est incorrecte ou non valide          |
 | `500` | Erreur interne du serveur - ces erreurs sont surveillées par Firecrawl |
 
@@ -169,20 +190,21 @@ curl -X POST "https://integrations.firecrawl.dev/partner/v1/api-keys/validate" \
 }
 ```
 
-| Champ      | Type   | Description                                               |
-| ---------- | ------ | --------------------------------------------------------- |
-| `teamName` | string | Le nom de l’équipe associée à cette clé API               |
-| `email`    | string | L’adresse e-mail de l’utilisateur associé à cette clé API |
+| Champ      | Type   | Description                                                                                                                          |
+| ---------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `teamName` | string | Le nom de l’équipe associée à cette clé API                                                                                          |
+| `email`    | string | L’e-mail avec lequel le compte a été provisionné. Pour les comptes Gateway, il s’agit de l’adresse de contact que vous avez fournie. |
 
 <div id="errors-2">
   #### Erreurs
 </div>
 
-| État  | Description                                                                                                    |
-| ----- | -------------------------------------------------------------------------------------------------------------- |
-| `401` | Non autorisé - la clé partenaire est incorrecte ou invalide                                                 |
-| `404` | Impossible d’identifier la clé API - la clé n’existe pas ou n’a pas été créée via cette intégration partenaire |
-| `500` | Erreur interne du serveur - ces erreurs sont surveillées par Firecrawl                                         |
+| État  | Description                                                                                                  |
+| ----- | ------------------------------------------------------------------------------------------------------------ |
+| `400` | Requête incorrecte - la clé API est mal formée                                                               |
+| `401` | Non autorisé - la clé partenaire est incorrecte ou non valide                                                |
+| `404` | Impossible d’identifier la clé API - la clé n&#39;existe pas ou n&#39;a pas été créée via cette intégration partenaire |
+| `500` | Erreur interne du serveur - ces erreurs sont surveillées par Firecrawl                                       |
 
 ***
 

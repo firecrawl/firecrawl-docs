@@ -42,7 +42,7 @@ Todas las solicitudes a la API de integración para socios requieren una cabecer
 Authorization: Bearer <partner key>
 ```
 
-Las claves de socio son distintas de las claves de API estándar de Firecrawl y el equipo de Firecrawl las proporciona directamente.
+Las claves de socio son distintas de las claves de API estándar de Firecrawl. Puedes crearlas y revocarlas en Settings &gt; Partner API, en el [Dashboard de Firecrawl](https://www.firecrawl.dev/app/partner-api).
 
 <div id="security-requirements">
   ## Requisitos de seguridad
@@ -61,7 +61,7 @@ Las claves de socio son distintas de las claves de API estándar de Firecrawl y 
   ### Crear usuario
 </div>
 
-Crea una clave de API de Firecrawl asociada a la dirección de correo electrónico del usuario.
+Aprovisiona una cuenta de Firecrawl para uno de tus usuarios, identificado por su correo electrónico, y devuelve su clave de API.
 
 ```
 POST /partner/v1/accounts
@@ -71,9 +71,18 @@ POST /partner/v1/accounts
   #### Comportamiento
 </div>
 
-* Si el usuario aún no tiene una cuenta de Firecrawl, se crearán un nuevo usuario y un nuevo equipo.
-* Si el usuario ya tiene una cuenta de Firecrawl pero no tiene un equipo asociado a la integración de tu partner, se creará un nuevo equipo asociado a ese partner.
-* Si el usuario ya tiene una cuenta de Firecrawl y ya tiene un equipo asociado a la integración de tu partner, se devolverá el equipo existente y el cupón promocional **no** se volverá a aplicar.
+Con la configuración de **Partner API**:
+
+* Si el usuario aún no tiene una cuenta de Firecrawl, se crean un nuevo usuario y un nuevo equipo.
+* Si el usuario ya tiene una cuenta de Firecrawl pero ningún equipo asociado a tu integración, se crea un nuevo equipo asociado al socio.
+* Si el usuario ya tiene una cuenta de Firecrawl y un equipo asociado a tu integración, se devuelve el equipo existente.
+
+Con la configuración de **Gateway**:
+
+* Cada cuenta se crea exclusivamente para tu integración. Una solicitud nunca se vincula a una cuenta de Firecrawl existente, ni siquiera cuando el correo electrónico coincide con una. El correo electrónico se almacena como dirección de contacto de la cuenta y no se usa para buscar cuentas.
+* Las llamadas repetidas con el mismo correo electrónico devuelven la misma cuenta y su clave de API.
+
+Si tu integración incluye créditos promocionales, se aplican una sola vez, al crearse la cuenta por primera vez.
 
 <div id="request">
   #### Solicitud
@@ -88,9 +97,9 @@ curl -X POST "https://integrations.firecrawl.dev/partner/v1/accounts" \
 
 **Cuerpo**
 
-| Campo   | Tipo   | Obligatorio | Descripción                                    |
-| ------- | ------ | ----------- | ---------------------------------------------- |
-| `email` | string | Sí          | La dirección de correo electrónico del usuario |
+| Campo   | Tipo   | Obligatorio | Descripción                                                                                                                             |
+| ------- | ------ | ----------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `email` | string | Sí          | La dirección de correo electrónico del usuario. Con la configuración de Gateway se almacena como la dirección de contacto de la cuenta. |
 
 <div id="response">
   #### Respuesta
@@ -105,19 +114,31 @@ curl -X POST "https://integrations.firecrawl.dev/partner/v1/accounts" \
 }
 ```
 
-| Campo            | Tipo    | Descripción                                                                                                                                  |
-| ---------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apiKey`         | string  | La clave de API de Firecrawl para el equipo de este usuario asociado con el partner                                                          |
-| `alreadyExisted` | boolean | `true` si tanto el usuario como el equipo asociado con el partner ya existían. Cuando es `true`, el cupón promocional no vuelve a aplicarse. |
+Con la configuración de Gateway, la respuesta también incluye el estado de inscripción:
+
+```json
+{
+  "apiKey": "fc-...",
+  "alreadyExisted": false,
+  "gatewayStatus": "enrolled"
+}
+```
+
+| Campo            | Tipo    | Descripción                                                                                                                                       |
+| ---------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apiKey`         | string  | La clave de API de Firecrawl para el equipo de este usuario asociado al socio                                                               |
+| `alreadyExisted` | boolean | `true` si tu integración ya había aprovisionado una cuenta para este correo. No indica nada sobre si el correo existe en otro lugar de Firecrawl. |
+| `gatewayStatus`  | string  | Solo para integraciones de pasarela. `enrolled` en la llamada que crea la cuenta, `already_enrolled` en llamadas repetidas para el mismo correo.  |
 
 <div id="errors">
   #### Errores
 </div>
 
-| Estado | Descripción                                                    |
-| ------ | -------------------------------------------------------------- |
+| Estado | Descripción                                                   |
+| ------ | ------------------------------------------------------------- |
+| `400`  | Solicitud incorrecta: falta `email` o está mal formado        |
 | `401`  | No autorizado: la clave de socio es incorrecta o no es válida |
-| `500`  | Error interno del servidor: Firecrawl supervisa estos errores  |
+| `500`  | Error interno del servidor: Firecrawl supervisa estos errores |
 
 ***
 
@@ -169,20 +190,21 @@ curl -X POST "https://integrations.firecrawl.dev/partner/v1/api-keys/validate" \
 }
 ```
 
-| Campo      | Tipo   | Descripción                                                                  |
-| ---------- | ------ | ---------------------------------------------------------------------------- |
-| `teamName` | string | El nombre del equipo asociado a esta clave de API                           |
-| `email`    | string | La dirección de correo electrónico del usuario asociada a esta clave de API |
+| Campo      | Tipo   | Descripción                                                                                                                      |
+| ---------- | ------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `teamName` | string | El nombre del equipo asociado a esta clave de API                                                                                |
+| `email`    | string | El correo electrónico con el que se aprovisionó la cuenta. En las cuentas de Gateway, es la dirección de contacto que indicaste. |
 
 <div id="errors-2">
   #### Errores
 </div>
 
-| Estado | Descripción                                                                                                      |
-| ------ | ---------------------------------------------------------------------------------------------------------------- |
-| `401`  | No autorizado: la clave de socio es incorrecta o no válida                                                      |
-| `404`  | No se puede identificar la clave de API: la clave no existe o no se creó a través de esta integración de partner |
-| `500`  | Error interno del servidor: Firecrawl supervisa estos errores                                                    |
+| Estado | Descripción                                                                                       |
+| ------ | ------------------------------------------------------------------------------------------------- |
+| `400`  | Solicitud incorrecta: la clave de API está mal formada                                            |
+| `401`  | No autorizado: la clave de socio es incorrecta o no es válida                                     |
+| `404`  | No se puede identificar la clave de API: la clave no existe o no se creó mediante esta integración de socio |
+| `500`  | Error interno del servidor: Firecrawl supervisa estos errores                                     |
 
 ***
 
