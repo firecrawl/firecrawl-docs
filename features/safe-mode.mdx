@@ -1,0 +1,171 @@
+---
+title: "Safe Mode"
+description: "An organization-level posture that stops Firecrawl from working around a site's defenses or reaching content behind a login. Enforced server-side."
+og:title: "Safe Mode | Firecrawl"
+og:description: "An organization-level posture that stops Firecrawl from working around a site's defenses or reaching content behind a login. Enforced server-side."
+---
+
+Safe Mode restricts how Firecrawl fetches a page. It stops Firecrawl from working around a site's defenses, and it stops Firecrawl from reaching content behind a login. Firecrawl honors robots.txt, uses only basic proxies, presents itself as an automated browser, and drops any credential you send.
+
+Safe Mode is a posture set on the organization, not an option you choose per request. It applies to every API key and every endpoint automatically. A request cannot turn Safe Mode on, and a request cannot turn Safe Mode off unless an administrator allows per-request opt-outs.
+
+<Note>
+Safe Mode is an enterprise feature and is gated per organization. Contact your Firecrawl account team or support@firecrawl.com to have it enabled for your account. There is no self-serve API, route, or dashboard page for the flag today.
+</Note>
+
+## The `safeMode` request parameter
+
+`safeMode` is an optional boolean on the request. It has three states:
+
+| Value | Result |
+| --- | --- |
+| Omitted | Your organization's setting applies. This is the normal case. |
+| `true` | Accepted if Safe Mode is on for your organization. Refused with a `403` if it is not. |
+| `false` | Refused with a `403`, unless an administrator allows per-request opt-outs. |
+
+Send the parameter at the top level on `scrape` and `batch scrape`. Send it inside `scrapeOptions` on `crawl` and `search`. `map` and `extract` do not read it.
+
+```json
+{
+  "url": "https://example.com",
+  "safeMode": true
+}
+```
+
+The parameter cannot weaken your posture on its own. Only an administrator can grant the bypass that makes `safeMode: false` work.
+
+## Controls
+
+Safe Mode has 12 boolean controls and one allowlist. An organization with no configuration gets every control at its strict default, so the whole posture is on. Each control relaxes on its own: set one to `false` and that single restriction lifts while the rest stay strict.
+
+| Control | Strict default | What it does |
+| --- | --- | --- |
+| `lockdown` | `false` | Serves cached data only and never makes an outbound request. See [Lockdown](#lockdown) below. |
+| `domainControls` | `true` | Forces [Threat Protection](/features/threat-protection) on, even if your own policy is set to Off. |
+| `enforceRobots` | `true` | Always honors robots.txt, and refuses the `ignoreRobotsTxt` parameter. |
+| `disableStealthProxy` | `true` | Refuses the stealth and enhanced proxies, and downgrades an inherited proxy choice to `basic`. |
+| `disableAuthentication` | `true` | Refuses and strips credentials: credential headers, browser profiles, login-capable actions, and credentials in the URL. |
+| `disableSiteHandling` | `true` | Returns a site's own restriction instead of working around it. |
+| `exposeWebdriver` | `true` | The browser advertises itself as automated. |
+| `useHeadlessUserAgent` | `true` | The browser sends a headless user agent string. |
+| `disablePlatformSelection` | `true` | No platform selection. |
+| `disableCountrySelection` | `true` | No country selection. |
+| `disableAutomaticReferrer` | `true` | No synthetic referrer. |
+| `allowBypassSafeMode` | absent | When set, a request may send `safeMode: false` and opt out. |
+| `allowlist` | absent | Domains that run with most controls relaxed. See below. |
+
+The `allowlist` is matched per URL, by domain. A match clears nine controls for that URL: `enforceRobots`, `disableStealthProxy`, `disableAuthentication`, `disableSiteHandling`, `exposeWebdriver`, `useHeadlessUserAgent`, `disablePlatformSelection`, `disableCountrySelection`, and `disableAutomaticReferrer`. `lockdown` and `domainControls` still apply to an allowlisted URL.
+
+Ask your account team to change any of these. They are stored on the organization and are not readable or writable through the API.
+
+## What is refused
+
+These requests fail with a `403` and the error code `SAFE_MODE_BLOCKED`. The `error` string names the option that caused the refusal.
+
+```json
+{
+  "success": false,
+  "code": "SAFE_MODE_BLOCKED",
+  "error": "Safe Mode: browser profiles are not allowed for your organization (nothing behind a login)."
+}
+```
+
+| Request option | Message |
+| --- | --- |
+| `proxy: "stealth"` or `proxy: "enhanced"` | `Safe Mode: stealth and enhanced proxies are not allowed for your organization. Remove the proxy option or use proxy: "basic".` |
+| `ignoreRobotsTxt` | `Safe Mode: robots.txt is always honored for your organization; the ignoreRobotsTxt parameter is not allowed.` |
+| A browser `profile` | `Safe Mode: browser profiles are not allowed for your organization (nothing behind a login).` |
+| A `write`, `press`, or `executeJavascript` action | `Safe Mode: the write action is not allowed for your organization (nothing behind a login).` The message names the action type. |
+| An `authorization`, `cookie`, or `proxy-authorization` header | `Safe Mode: the Cookie header is not allowed for your organization (nothing behind a login).` The match is case-insensitive. The message echoes your own casing. |
+| `safeMode: true` on an organization without the feature | `Safe Mode is not enabled for your organization. Contact support@firecrawl.com to enable this feature.` |
+| `safeMode: false` without an administrator opt-out | `Requests are not allowed to disable Safe Mode for your organization. An organization admin can allow per-request opt-outs from the Safe Mode settings.` |
+
+<Warning>
+Only a literal `"stealth"` or `"enhanced"` is refused. A request that omits `proxy` is not refused, because `proxy` defaults to `"auto"` before the check runs. That request is downgraded to `basic` in silence instead. See [What changes silently](#what-changes-silently).
+</Warning>
+
+Two more surfaces are refused outright, and their bodies carry **no `code` field**:
+
+- **Interactive browser sessions.** `/v2/browser` create and execute, and `/v2/scrape/{id}/interact`, return `403` with `{ "success": false, "error": "Safe Mode is enabled for your organization, which does not support interactive browser sessions." }`.
+- **The whole v0 API.** v0 `scrape`, `crawl`, and `search` return `403` with `{ "error": "Safe Mode is enabled for your organization, which is not supported on the v0 API. Please update your code to use the v1 or v2 API." }`. This body has no `success` field either. Move to [v1 or v2](/migrating-from-v0).
+
+## What changes silently
+
+Some restrictions do not produce an error. Your request succeeds, and the result is different from what you asked for. This is the part callers get wrong most often, so read it before you debug a result.
+
+- **The proxy is downgraded to `basic`.** This applies to `auto`, `stealth`, and `enhanced`. A request that names stealth or enhanced directly is refused at the endpoint, so the downgrade reaches inherited options instead: crawl children, batch children, and search or extract sub-scrapes. The only observable signal is `metadata.proxyUsed`, which reads `"basic"`.
+- **Credential headers are stripped.** `authorization`, `cookie`, and `proxy-authorization` are removed before the fetch. A request that sends one directly is refused. A job that inherits one has it stripped.
+- **Credentials in the URL are stripped.** A `user:pass@host` URL loses its userinfo. Firecrawl strips it from the URL it fetches and from `unnormalizedSourceURL`, so the credential is never returned to you and never persisted.
+- **Login-capable actions are dropped.** A `write`, `press`, or `executeJavascript` action is filtered out of the actions array. A browser `profile` is cleared.
+- **robots.txt is always honored.** Firecrawl checks robots.txt on every non-lockdown scrape. `enforceRobots` also overrides a team `ignoreRobots` setting of `forced` on a crawl.
+- **Site handling is turned off.** Firecrawl sends behavior overrides on every scrape: no site-specific workarounds, an automated browser that advertises itself, a headless user agent, no platform selection, no country selection, and no synthetic referrer. Mobile proxies and persistent browser storage are turned off.
+- **Threat Protection is forced on.** `domainControls` resolves your policy with `force: true`, even if your own configuration reads Off. A blocked URL returns a `403` with `code: unsafe_domain_blocked`. See [Billing](#billing) for what this costs.
+
+### Endpoints that are restricted without an error
+
+`scrape`, `crawl`, `batch scrape`, and `map` are checked at the endpoint, so a restricted option there returns a `403`. Three paths are not:
+
+- **`extract`** is not checked at the endpoint. Its sub-scrapes are restricted by the worker instead.
+- **`search` without `scrapeOptions`** is not checked. The check runs only when a request asks for formats and supplies `scrapeOptions`.
+- **[Monitoring](/features/monitoring) runs** follow the same pattern as extract.
+
+These callers get a `200` with degraded results and no signal that anything was restricted. Plan for that: compare against a known baseline rather than waiting for an error.
+
+## Lockdown
+
+`lockdown` turns your organization into a cache-only reader. It supersedes every other control. A lockdown organization that sends `proxy: "stealth"`, a browser profile, and a `Cookie` header does not get `SAFE_MODE_BLOCKED`. It gets the lockdown cache result instead, because the other gates are skipped.
+
+- **Cache only.** Firecrawl never makes an outbound request to the target.
+- **`maxAge` is forced to 2 years** when you do not set it, so older cached pages stay eligible.
+- **A cache miss is an error.** See `SCRAPE_LOCKDOWN_CACHE_MISS` in the [error reference](#error-reference).
+- **Crawl skips discovery.** The crawler skips both robots.txt and sitemap discovery.
+- **Map is forced to index only.**
+- **Search is forced to the `zdr` kind**, unless a separate `searchZDR` setting forces another kind.
+- **Zero data retention applies**, including on a request that tried to bypass Safe Mode and was refused.
+
+[Lockdown Mode](/features/lockdown) documents the per-request `lockdown: true` parameter on `/v2/scrape`. Safe Mode can force the same behavior organization-wide, with no request parameter.
+
+## Error reference
+
+| Status | Code | When |
+| --- | --- | --- |
+| `403` | `SAFE_MODE_BLOCKED` | A request used a restricted option, or tried to turn Safe Mode on or off. See [What is refused](#what-is-refused). |
+| `500` | `SCRAPE_SITE_RESTRICTION_BLOCKED` | The site restricts automated access and `disableSiteHandling` is on, so Firecrawl returns the site's restriction instead of working around it. Message: `This site restricts automated access to the requested content. Safe Mode is enabled for your organization, so the site's restriction is returned instead of being worked around.` |
+| `404` on v2, `500` on v1 | `SCRAPE_LOCKDOWN_CACHE_MISS` | Lockdown is on and no cached copy exists. v2 `scrape` returns `404`. v1 `scrape` returns `500` for the same condition. Match on the code, not on the status. |
+
+`SCRAPE_SITE_RESTRICTION_BLOCKED` is terminal. It stops engine fallback, so there is nothing to retry.
+
+<Warning>
+Do not switch on `code` alone. Four Safe Mode refusals return a `403` with no `code` field at all: a v0 endpoint, an interactive browser endpoint, a `/v2/scrape/{id}/interact` call, and a per-request `threatProtection` opt-out that `domainControls` refuses. A client that reads only `code` sees `undefined`. The v0 body has no `success` field either. Read the `error` string as well as the status.
+</Warning>
+
+Safe Mode never appears in a successful response. No `safeMode` field is returned in any response body or document metadata. `metadata.proxyUsed` is the only observable signal.
+
+## Billing
+
+Safe Mode itself adds no credit charges. Forced Threat Protection is the one thing to check.
+
+**Most organizations pay nothing extra.** If your own Threat Protection configuration reads **Off**, Safe Mode does not charge you the +2 credits per URL scan fee. `domainControls` raises an Off policy only to list enforcement: your own whitelist, blacklist, and blocked-TLD rules are applied, and everything else is allowed with no provider call. The scan fee is charged only when a provider is consulted, so this path never reaches the charge. You still get enforcement: a blacklisted domain is still blocked.
+
+**One case does start paying.** If you stored a Threat Protection mode of **Normal** while the Threat Protection feature was disabled for your team, that configuration was inert and cost you nothing. Safe Mode bypasses the feature check and activates the stored mode. From then on, that organization pays **+2 credits per URL scanned**. **Zscaler** mode stays exempt, because classification runs against your own tenant.
+
+If this applies to you, set your Threat Protection mode to Off before Safe Mode is turned on, or budget for the scan fee. See [Threat Protection billing](/features/threat-protection#billing) and [Billing](/billing).
+
+## What Safe Mode does not change
+
+Safe Mode restricts how a page is fetched. It does not restrict what you do with the result. These are unaffected:
+
+- Output formats, [document parsing](/features/document-parsing), and PDF parsing.
+- [JSON and LLM extraction](/features/llm-extract).
+- Webhooks.
+- `blockAds` and `skipTlsVerification`.
+- Benign actions such as `scroll` and `wait`, and benign headers such as `user-agent`.
+
+`executeJavascript` is refused as one of the three login-capable actions. Page JavaScript still runs, so JavaScript-rendered content is still scraped.
+
+## Notes
+
+- Safe Mode is organization-wide. It applies to every API key and every endpoint automatically, with no way to disable enforcement from within a request.
+- Turning Safe Mode on or changing a control is a support request. Contact support@firecrawl.com.
+- No SDK carries the `SAFE_MODE_BLOCKED` or `SCRAPE_SITE_RESTRICTION_BLOCKED` constant yet. Compare the `code` string directly.
+- Safe Mode is independent of [Key Restrictions](/features/key-restrictions) and [IP Restrictions](/features/ip-restrictions). An organization can use all three at once.
