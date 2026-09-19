@@ -1,14 +1,16 @@
 ---
-title: 'Endpoint Feedback'
-description: 'Submit feedback for a completed v2 endpoint job.'
+title: 'Feedback'
+description: 'Submit feedback for a Firecrawl job.'
 openapi: '/api-reference/v2-openapi.json POST /feedback'
 ---
 
-Use endpoint feedback to tell Firecrawl whether a completed job result was useful, partial, or bad. This is for endpoint-level output quality on jobs such as `scrape`, `parse`, `map`, and `search`.
+Submit feedback on the quality of a job's output, including useful results, missing content, or incorrect data.
 
-The generic feedback schema can carry search-style fields too, but [Search Feedback](/api-reference/endpoint/search-feedback) is the preferred search-specific entry point because it is scoped to a search job ID and highlights valuable sources, missing content, query suggestions, and refund behavior.
+For jobs created with an API key, include your key and use the Authenticated request format. For keyless jobs, omit `Authorization` and use the Search, Scrape, or Parse request format.
 
-### Example Request
+Keyless Parse feedback does not automatically retain the document, extracted output, page images, or layout blocks. Submitted observations and corrections are retained.
+
+### Authenticated example
 
 ```bash
 curl -X POST "https://api.firecrawl.dev/v2/feedback" \
@@ -23,3 +25,47 @@ curl -X POST "https://api.firecrawl.dev/v2/feedback" \
     "url": "https://example.com/pricing"
   }'
 ```
+
+### Keyless example
+
+```bash
+curl -X POST "https://api.firecrawl.dev/v2/feedback" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "endpoint": "search",
+    "jobId": "550e8400-e29b-41d4-a716-446655440000",
+    "rating": "good",
+    "task": "Find the documented retry behavior",
+    "assessment": "The API reference answered the retry question.",
+    "observations": [
+      {
+        "kind": "useful",
+        "source": "web",
+        "position": 1,
+        "detail": "The reference specifies the retry intervals.",
+        "basis": "output"
+      }
+    ]
+  }'
+```
+
+### Keyless limits and failures
+
+Every eligible keyless Search, Scrape, or Parse response includes a feedback pointer and this documentation link. Use the returned job ID from the same caller IP within 24 hours. The default allowance is one accepted submission per caller IP per UTC day across all three endpoints and clients; the invitation states the deployment allowance. There are 30 submission attempts per minute, including rejected requests. Retrying a recorded submission returns its original feedback ID without using another daily slot.
+
+The serialized stored keyless metadata must fit within 8 KiB (8192 UTF-8 bytes), including server defaults and verification flags. Keep observations concise and omit raw outputs.
+
+For Search, positions refer to the ordered results in the delivered `web`, `images`, or `news` group. Specify `source` for multi-source jobs and for images-only or news-only jobs; omission defaults to `web`. If the saved Search response is unavailable, otherwise valid feedback is accepted with an internal `metadata.unverified: true` marker because positions could not be checked. Ownership and requested sources are still checked. Invalid positions in available results are rejected.
+
+An explicitly failed job can receive a `failure` observation. Use the reported error, without diagnosing an unobserved cause. For example, replace the observation in your submission with:
+
+```json
+{
+  "kind": "failure",
+  "reason": "timeout",
+  "basis": "output",
+  "detail": "The operation returned a timeout before producing a result."
+}
+```
+
+A failure observation has no position, source, format, location, or page. Parse still requires a top-level `docClass`, which may be `unknown`. The API accepts this observation only for a saved failed job. Requests rejected before execution, such as invalid input or exhausted operation quota, are not feedback jobs.
