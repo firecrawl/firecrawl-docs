@@ -11,6 +11,7 @@ on:
 # scope and no secrets.
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: docs-checks-${{ github.event.pull_request.number || github.ref }}
@@ -30,7 +31,30 @@ jobs:
           node-version: '22'
 
       - name: Keep API literals untranslated
-        run: sh scripts/check-locale-api-literals.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The full check finds every API-literal problem in the tree, but a pull request
+          # is only responsible for the files it changes. Locadex commits mangled identifiers
+          # straight to main, so without this scoping every unrelated PR inherits a red check
+          # for pre-existing breakage it never touched. Fail only when a file THIS PR changed
+          # carries a problem; Locadex's own sync PRs still fail here, because the files they
+          # rewrite are exactly their diff. (Main-wide visibility is a separate push check.)
+          gh api "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --paginate --jq '.[].filename' | sort -u > /tmp/changed.txt
+          out="$(sh scripts/check-locale-api-literals.sh 2>&1)" || true
+          printf '%s\n' "$out"
+          printf '%s\n' "$out" | grep -E '^(missing|translated) API literal:' \
+            | sed -E 's/^[^:]*: ([^ ]+).*/\1/' | sort -u > /tmp/violating.txt
+          hits="$(comm -12 /tmp/violating.txt /tmp/changed.txt)"
+          if [ -n "$hits" ]; then
+            echo ""
+            echo "This PR changes files that carry API-literal problems:"
+            echo "$hits"
+            echo "Restore the English identifiers on those files (see the lines above)."
+            exit 1
+          fi
+          echo "No API-literal regressions in this PR's changed files."
 
       - name: Check the locale literal fixtures
         run: sh scripts/check-locale-api-literals-selftest.sh
