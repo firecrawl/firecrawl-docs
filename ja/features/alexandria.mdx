@@ -1,0 +1,203 @@
+---
+title: "Alexandria"
+description: "超知能のための知識ライブラリ"
+og:title: "Alexandria | Firecrawl"
+og:description: "Firecrawl でデータツールを見つけ、Agent に必要なコンテキストだけを渡して活用できます。"
+icon: "books"
+---
+
+import AlexandriaJourney from "/snippets/ja/alexandria-journey.mdx";
+
+<AlexandriaJourney />
+
+Alexandria は、Firecrawl を通じてエージェントに structured data へのアクセスを提供します。ツールを探し、その入力を確認してから実行します。ディスカバリーは無料で、実行時にはツールに記載されたクレジットを消費します。
+
+[プロバイダーを見る](https://www.firecrawl.dev/app/alexandria) · [プロバイダー規約を管理](https://www.firecrawl.dev/app/settings?tab=data-sources)
+
+<div id="built-for-agents">
+  ## Agentのために設計
+</div>
+
+[CLI](/ja/sdks/cli) をインストールするか、[MCP server](/ja/mcp-server) に接続します。
+
+<Tabs>
+  <Tab title="Firecrawl CLI">
+    ```bash
+    # web の検索結果と一緒にツールを探す。
+    firecrawl search "podcast conversations about AI agents" --sources web,alexandria --domain-tools --limit 2
+
+    # 入力と料金を確認する。
+    firecrawl find-tools --providers particle --level tools --expand options,response
+
+    # ツールを実行する。
+    firecrawl scrape particle/podcasts/episodes/search --options '{"keyword_search":"AI agents","limit":2}'
+    ```
+
+    `npm install -g firecrawl-cli` でインストールし、`firecrawl login` でサインインします。
+  </Tab>
+
+  <Tab title="MCP">
+    Agentにこう指示します。「Particle のポッドキャストツールを探して、エピソード検索の入力と料金を確認し、AI Agentに関する会話を見つけて。」
+
+    Agentは `firecrawl_search` でツールを探し、`firecrawl_find_tools` で内容を確認し、`firecrawl_scrape` で実行します。
+  </Tab>
+</Tabs>
+
+<div id="use-it-from-the-sdks-and-api">
+  ## SDKs と API から利用する
+</div>
+
+<Steps>
+  <Step title="適切なツールを見つける">
+    必要な内容を記述するだけで、Alexandria が web の検索結果とあわせて関連するツールを返します。
+
+    <CodeGroup>
+      ```javascript JavaScript
+      const result = await firecrawl.search(
+        "podcast conversations about AI agents",
+        {
+          sources: ["web", "alexandria"],
+          limit: 2,
+        },
+      );
+      ```
+
+      ```python Python
+      result = firecrawl.search(
+          "podcast conversations about AI agents",
+          sources=["web", "alexandria"],
+          limit=2,
+      )
+      ```
+
+      ```bash cURL
+      curl https://api.firecrawl.dev/v2/search \
+        -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+        -H "Content-Type: application/json" \
+        -d '{
+        "query": "podcast conversations about AI agents",
+        "sources": [
+          "web",
+          "alexandria"
+        ],
+        "limit": 2
+      }'
+      ```
+    </CodeGroup>
+
+    結果には `web` ページと、ランク付けされた `tools` が含まれます。各ツールには provider、capability、入力、response の仕様、価格が含まれます。
+  </Step>
+
+  <Step title="必要なものを確認する">
+    呼び出す前に、選択したツールの `options`、`response`、実行価格を確認してください。詳細は [Find Tools](#find-tools) を参照してください。
+  </Step>
+
+  <Step title="データを取得する">
+    `scrape` を使い、仕様で定められた入力を渡してツールを呼び出します。provider と capability は `alexandria` の配下に指定します。ページ URL は不要です。
+
+    <CodeGroup>
+      ```javascript JavaScript
+      const episodes = await firecrawl.scrape({
+        alexandria: {
+          provider: "particle",
+          capability: "podcasts/episodes/search",
+          options: {
+            semantic_search: "AI agents",
+            limit: 2,
+          },
+        },
+      });
+
+      console.log(episodes.alexandria[0].data);
+      ```
+
+      ```python Python
+      episodes = firecrawl.scrape(
+          alexandria={
+              "provider": "particle",
+              "capability": "podcasts/episodes/search",
+              "options": {
+                  "semantic_search": "AI agents",
+                  "limit": 2,
+              },
+          },
+      )
+
+      print(episodes.alexandria[0].data)
+      ```
+
+      ```bash cURL
+      REQUEST_ID="$(uuidgen)"
+
+      curl https://api.firecrawl.dev/v2/scrape \
+        -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+        -H "Content-Type: application/json" \
+        -H "x-request-id: $REQUEST_ID" \
+        -d '{
+        "alexandria": {
+          "provider": "particle",
+          "capability": "podcasts/episodes/search",
+          "options": {
+            "semantic_search": "AI agents",
+            "limit": 2
+          }
+        }
+      }'
+      ```
+    </CodeGroup>
+
+    結果は `episodes.alexandria[0].data` から読み取ります。データを使う前に、ツールごとの結果にエラーがないか確認してください。生の HTTP レスポンスでは、SDK の結果が `data` にラップされます。
+  </Step>
+</Steps>
+
+<div id="find-tools">
+  ## Find Tools
+</div>
+
+`findTools` / `find_tools` を使うと、プロバイダーを一覧表示し、そのツールを無料で確認できます。各項目の `next` リクエストを辿ると、さらに詳しい情報を取得できます。トップレベルの `next` はカタログのページ送りに使います。
+
+<CodeGroup>
+  ```javascript JavaScript
+  const catalogue = await firecrawl.findTools({
+    providers: ["particle"],
+    limit: 2,
+  });
+
+  // next リクエストごとにカタログの別の部分が見えてきます。
+  const next = catalogue.items[0]?.next;
+  if (next) {
+    const details = await firecrawl.scrape({ alexandria: next });
+    console.log(details.alexandria[0].data);
+  }
+  ```
+
+  ```python Python
+  catalogue = firecrawl.find_tools(providers=["particle"], limit=2)
+
+  if catalogue.items and catalogue.items[0].get("next"):
+      details = firecrawl.scrape(alexandria=catalogue.items[0]["next"])
+      print(details.alexandria[0].data)
+  ```
+</CodeGroup>
+
+<div id="pricing-and-access">
+  ## 料金とアクセス
+</div>
+
+* **ツールのディスカバリー:** 無料。ツールのみを取得する場合は `sources: ["alexandria"]`、有料の Web 結果も含める場合は `["web", "alexandria"]` を使用します。
+* **実行:** ツールに記載された価格で課金されます。
+* **プロバイダーの規約:** `THIRD_PARTY_DATA_TERMS_REQUIRED` エラーには `requiresAction.url` が含まれます。組織の管理者がそのページで規約を確認し、承諾する必要があります。Agentが規約を承諾するには、ユーザーによる明示的な認可が必要です。
+
+<AccordionGroup>
+  <Accordion title="Web サイト向けのツールを探す">
+    search または通常の URL スクレイピングに `domainTools: true` を追加すると、その Web サイトに一致するツールが結果に含まれます。マッチング自体は無料で、Web search やページのスクレイピングは通常どおり課金されます。結果には `matchedBy` と `matchedUrls` が含まれます。
+
+    search では、`sources` に `alexandria` が含まれる場合、ドメインマッチングがデフォルトで有効になります。無効にするには `domainTools: false` を設定してください。URL スクレイピングでは、ドメインマッチングはデフォルトで無効です。
+  </Accordion>
+</AccordionGroup>
+
+<div id="feedback">
+  ## フィードバック
+</div>
+
+不具合の報告や機能のリクエストは `firecrawl alexandria feedback` で行えます。オプションを確認するには `firecrawl alexandria feedback --help` を実行してください。
