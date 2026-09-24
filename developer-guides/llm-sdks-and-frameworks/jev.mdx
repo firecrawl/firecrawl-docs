@@ -1,0 +1,194 @@
+---
+title: "Jev"
+description: "Use Firecrawl with TypeSafe's Jev to make fast, structured decisions on web data"
+---
+
+[Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) is a decision model from TypeSafe. It doesn't generate text. You send it a `state` and a set of typed questions, and it returns structured answers with probabilities, usually in under half a second. Firecrawl turns the web into that state, and Jev decides what to do with it: classify a page, qualify a lead, or flag a change worth alerting on.
+
+Jev answers three kinds of questions, all evaluated in parallel in a single call:
+
+| Question | Asks | Returns |
+| --- | --- | --- |
+| `choice` | Which option fits best? | `choice`, `probabilities`, `confidence` |
+| `score` | Where does this land on a rubric? | `score`, `probabilities`, `confidence` |
+| `noul` | Is this statement true? | `noul`, a probability from 0 to 1 |
+
+<Note>
+  Jev is in early access. Request access at [typesafe.ai](https://typesafe.ai/), then create an API key in the [TypeSafe console](https://console.typesafe.ai/keys).
+</Note>
+
+## Setup
+
+```bash
+npm install firecrawl @typesafe-ai/sdk
+```
+
+Create `.env` file:
+```bash
+FIRECRAWL_API_KEY=your_firecrawl_key
+TYPESAFE_API_KEY=your_typesafe_key
+```
+
+> **Note:** The TypeSafe SDK requires Node 20 or newer.
+
+## Scrape + Classify
+
+This example scrapes a page and asks Jev three questions about it at once.
+
+```typescript
+import { Firecrawl } from 'firecrawl';
+import { choice, noul, score, TypeSafeClient } from '@typesafe-ai/sdk';
+
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+const typesafe = new TypeSafeClient();
+
+const url = 'https://www.firecrawl.dev/pricing';
+const page = await firecrawl.scrape(url, { formats: ['markdown'] });
+
+const { answers } = await typesafe.systemOne({
+    state: { url, markdown: page.markdown ?? '' },
+    questions: {
+        pageType: choice('What kind of page is this?', {
+            pricing: 'Plans, prices, or billing details',
+            product: 'Describes a product or feature',
+            blog: 'An article or announcement',
+            docs: 'Technical documentation or an API reference',
+            other: null
+        }),
+        hasFreeTier: noul('The page offers a free plan or free credits'),
+        audience: score('How technical the intended reader is', [
+            'A general audience',
+            'Readers with some technical background',
+            'Software engineers'
+        ])
+    }
+});
+
+console.log('Page type:', answers.pageType.choice, answers.pageType.confidence);
+console.log('Free tier:', answers.hasFreeTier.noul);
+console.log('Audience:', answers.audience.score);
+```
+
+## Qualify Leads
+
+This example scrapes a list of company homepages, asks Jev whether each company fits your target market, and routes it by confidence. Confident matches go straight to your CRM, and anything uncertain goes to a person.
+
+```typescript
+import { Firecrawl } from 'firecrawl';
+import { choice, noul, TypeSafeClient } from '@typesafe-ai/sdk';
+
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+const typesafe = new TypeSafeClient();
+
+const companies = ['https://ramp.com', 'https://mercury.com', 'https://www.jpmorganchase.com'];
+const { data: pages } = await firecrawl.batchScrape(companies, { options: { formats: ['markdown'] } });
+
+const questions = {
+    isFintech: noul('The company builds financial technology such as payments, banking, lending, or spend management software'),
+    sellsToBusinesses: noul('The company primarily sells to businesses rather than consumers'),
+    stage: choice('How established the company appears to be', {
+        startup: 'Early stage, with a small team or a single product',
+        growth: 'Several products or a sizable customer base',
+        enterprise: 'A large, long-established company'
+    })
+};
+
+const results = await Promise.all(pages.map(async (page) => {
+    const { answers } = await typesafe.systemOne({
+        // Jev accepts up to 32k tokens of state, so long pages are trimmed
+        state: { url: page.metadata?.sourceURL ?? '', homepage: page.markdown?.slice(0, 50_000) ?? '' },
+        questions
+    });
+
+    const fit = answers.isFintech.noul * answers.sellsToBusinesses.noul;
+    const { choice: stage, confidence } = answers.stage;
+
+    let route = 'skip';
+    if (confidence < 0.6) route = 'review';
+    else if (fit > 0.8 && stage !== 'enterprise') route = 'crm';
+    else if (fit > 0.4) route = 'review';
+
+    return { url: page.metadata?.sourceURL, fit, stage, confidence, route };
+}));
+
+console.table(results);
+```
+
+Each question answers one narrow thing, and the weighting lives in your code. To change what counts as a good lead, adjust a threshold instead of rewriting a prompt.
+
+## Tag a Crawl
+
+This example crawls a docs site and labels every page. Because Jev charges only for input tokens and answers in parallel, tagging hundreds of pages takes seconds.
+
+```typescript
+import { Firecrawl } from 'firecrawl';
+import { choice, TypeSafeClient } from '@typesafe-ai/sdk';
+
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+const typesafe = new TypeSafeClient();
+
+const crawl = await firecrawl.crawl('https://docs.firecrawl.dev', {
+    limit: 50,
+    scrapeOptions: { formats: ['markdown'] }
+});
+
+const tagged = await Promise.all(crawl.data.map(async (page) => {
+    const { answers } = await typesafe.systemOne({
+        state: { title: page.metadata?.title ?? '', markdown: page.markdown?.slice(0, 50_000) ?? '' },
+        questions: {
+            kind: choice('What kind of documentation page is this?', {
+                tutorial: 'Walks the reader through building something step by step',
+                howTo: 'Explains how to accomplish one specific task',
+                reference: 'Lists parameters, endpoints, or options',
+                concept: 'Explains an idea or how something works'
+            })
+        }
+    });
+    return { url: page.metadata?.sourceURL, kind: answers.kind.choice };
+}));
+
+console.table(tagged);
+```
+
+## Triage Page Changes
+
+This example combines [change tracking](/features/change-tracking) with Jev to decide whether a change on a competitor's page is worth an alert. Firecrawl finds what changed, and Jev rates how much it matters.
+
+```typescript
+import { Firecrawl } from 'firecrawl';
+import { score, TypeSafeClient } from '@typesafe-ai/sdk';
+
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+const typesafe = new TypeSafeClient();
+
+const url = 'https://example.com/pricing';
+const page = await firecrawl.scrape(url, {
+    formats: ['markdown', { type: 'changeTracking', modes: ['git-diff'] }]
+});
+
+const diff = page.changeTracking?.diff as { text: string } | undefined;
+
+if (page.changeTracking?.changeStatus === 'changed' && diff) {
+    const { answers } = await typesafe.systemOne({
+        state: { url, diff: diff.text },
+        questions: {
+            impact: score('How much this change matters to a competitor', [
+                'Cosmetic: layout, typos, dates, or reordered content',
+                'Minor: reworded copy or small feature mentions',
+                'Material: prices, plans, limits, or a new product'
+            ])
+        }
+    });
+
+    if (answers.impact.score >= 1.5) {
+        console.log('Alert:', url, answers.impact.score);
+    }
+}
+```
+
+The first scrape of a URL stores a baseline and returns `changeStatus: "new"`. Run the script on a schedule, and later runs compare against that baseline.
+
+## Learn More
+
+- [TypeSafe docs](https://docs.typesafe.ai/) cover each question type, confidence, and patterns such as [confidence-gated routing](https://docs.typesafe.ai/patterns/confidence-routing).
+- [Jev models and limits](https://docs.typesafe.ai/models) lists pricing, rate limits, and context length.
