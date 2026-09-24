@@ -3,7 +3,7 @@ title: "Python Source of Truth"
 description: "Canonical Firecrawl Python source of truth for agents using key endpoints like search, scrape, and interact."
 ---
 
-Canonical Firecrawl Python source of truth for agents. Generated from SDK source (`firecrawl-py` / `firecrawl` **4.22.1**) and the v2 OpenAPI spec. Method names, parameters, and return types match the v2 client in `firecrawl/v2/client.py` unless noted.
+Canonical Firecrawl Python source of truth for agents. Generated from SDK source (`firecrawl-py` / `firecrawl` **4.44.0**) and the v2 OpenAPI spec. Method names, parameters, and return types match the v2 client in `firecrawl/v2/client.py` unless noted.
 
 ## Install
 
@@ -19,7 +19,13 @@ from firecrawl import Firecrawl
 
 client = Firecrawl(api_key=os.environ.get("FIRECRAWL_API_KEY"))
 # client = Firecrawl(api_key="fc-...", api_url="https://api.firecrawl.dev")
+# client = Firecrawl(api_key="fc-...", timeout=30.0, max_retries=5, backoff_factor=1.0)
 ```
+
+The constructor also accepts:
+- `timeout` (float): Request timeout in seconds.
+- `max_retries` (int): Maximum number of retries for failed requests (default `3`).
+- `backoff_factor` (float): Exponential backoff factor for retries, e.g. `0.5` means wait 0.5s, then 1s, then 2s between retries (default `0.5`).
 
 ## When To Use What
 
@@ -46,6 +52,7 @@ Returns a `SearchData` model with optional lists:
 - `web` — web hits (`SearchResultWeb` or full `Document` when `scrape_options` hydrates content)
 - `news` — news hits (`SearchResultNews` or `Document`)
 - `images` — image hits (`SearchResultImages` or `Document`)
+- `tools` — discovered tools (`Optional[List[DiscoveredTool]]`), present when `domain_tools` is enabled
 
 Omitted buckets are `None` when the API did not return that key.
 
@@ -115,7 +122,8 @@ results = client.search(
     - `"developer"`: Developer Index results
     - `"research"`: research and academic results
     - `"pdf"`: PDF-focused results
-    - `Category(type="developer" | "research" | "pdf")`: typed category object form
+    - `"github"`: restrict web results to github.com (a `site:` filter)
+    - `Category(type="developer" | "research" | "pdf" | "github")`: typed category object form
 
 - `limit`
   - Type: int
@@ -142,6 +150,38 @@ results = client.search(
 - `scrape_options`
   - Type: `ScrapeOptions`
   - Use when: you want to scrape each search result (see Scrape parameters for fields).
+
+- `domain_tools`
+  - Type: bool
+  - Use when: domain-matched tool discovery.
+
+- `tool_detail`
+  - Type: Literal["compact", "summary", "full"]
+  - Use when: control tool contract verbosity.
+
+- `include_domains`
+  - Type: list of str
+  - Use when: restrict results to specific domains.
+
+- `exclude_domains`
+  - Type: list of str
+  - Use when: exclude specific domains. Mutually exclusive with `include_domains`.
+
+- `country`
+  - Type: str
+  - Use when: ISO 3166-1 alpha-2 geo targeting.
+
+- `highlights`
+  - Type: bool
+  - Use when: query-relevant highlights. Defaults to true.
+
+- `enterprise`
+  - Type: list of str
+  - Use when: enterprise search controls.
+
+- `threat_protection`
+  - Type: `ThreatProtectionOptions`
+  - Use when: you need threat protection controls (see Scrape parameters for fields).
 
 ## Scrape
 
@@ -214,10 +254,14 @@ doc = client.scrape(
     - `"branding"`: branding profile output
     - `"audio"`: audio extraction
     - `"video"`: video extraction
+    - `"product"`: structured product data extraction
+    - `"menu"`: structured menu data extraction
+    - `"query"`: deprecated alias — use `{"type": "highlights", ...}` instead
   - Object-only format types:
     - `{"type": "json", ...}`: JSON extraction. Use an object, not the plain string `"json"`.
     - `{"type": "question", "question": "..."}`: question-answer output.
     - `{"type": "highlights", "query": "..."}`: relevant source-text output.
+  - Deprecated: `QueryFormat` — use `{"type": "highlights", ...}` instead.
   - Format object fields:
     - `type`: one of the format strings above, or `"json"`, `"question"`, or `"highlights"` for object-only formats
     - `question`: for `type: "question"`
@@ -320,6 +364,36 @@ doc = client.scrape(
   - Type: dict with `name` and optional `save_changes` or `saveChanges`
   - Use when: you want a persistent browser profile shared across scrapes and interactions.
 
+- `auto_resume`
+  - Type: bool
+  - Use when: you want the SDK to auto-resume timed-out scrapes (default behavior).
+
+- `lockdown`
+  - Type: bool
+  - Use when: you only want to serve previously cached results, never scrape live. Returns 404 `SCRAPE_LOCKDOWN_CACHE_MISS` on cache miss.
+
+- `redact_pii`
+  - Type: Union[bool, `RedactPIIOptions`]
+  - Use when: you want to redact PII from output.
+  - Notes: set on `ScrapeOptions`. `RedactPIIOptions` fields: `mode` (Literal["accurate", "aggressive", "fast"]), `entities` (list of entity types), `replace_style` (Literal["tag", "mask", "remove"]).
+
+- `audit_metadata`
+  - Type: `AuditMetadata` (has `username: str`)
+  - Use when: you need SIEM logging attribution.
+
+- `domain_tools`
+  - Type: bool
+  - Use when: you want to discover Alexandria tools for the URL being scraped.
+
+- `tool_detail`
+  - Type: Literal["compact", "summary", "full"]
+  - Use when: you want to control tool contract verbosity.
+
+- `threat_protection`
+  - Type: `ThreatProtectionOptions`
+  - Use when: you need threat protection controls.
+  - Fields: `mode` (Literal["off", "manual-only", "normal", "zscaler"]), `risk_score_threshold` (int, 0-100), `blacklist` (list of str), `whitelist` (list of str), `blocked_tlds` (list of str), `failure_policy` (Literal["open", "closed"]).
+
 ## Interact
 
 ### Why use it
@@ -328,7 +402,7 @@ Use interact when a page requires browser actions or code execution after a scra
 
 ### Preferred SDK method
 
-`client.interact(job_id, code=None, *, prompt=None, language="node", timeout=None)`
+`client.interact(job_id, code=None, *, prompt=None, language="node", timeout=None, origin=None)`
 
 `prompt` is keyword-only: call `client.interact(job_id, prompt="...")` or `client.interact(job_id, code="...")`. At least one of `code` or `prompt` must be non-empty (validated in `firecrawl/v2/methods/scrape.py`).
 
@@ -381,6 +455,11 @@ result = client.interact(
 - `timeout`
   - Type: int
   - Use when: you need an execution timeout in seconds.
+
+- `origin`
+  - Type: str
+  - Use when: request attribution.
+  - Notes: auto-set by SDK.
 
 ### Return value
 
