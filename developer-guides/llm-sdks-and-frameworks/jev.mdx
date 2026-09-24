@@ -19,42 +19,54 @@ TYPESAFE_API_KEY=your_typesafe_key
 
 > **Note:** Jev is in early access. Request access at [typesafe.ai](https://typesafe.ai/). The TypeSafe SDK requires Node 20 or newer.
 
-## Scrape + Classify
+## Search + Filter
 
-This example scrapes a page and asks Jev three questions about it at once.
+This example searches the web, has Jev judge each result from its title and description, and scrapes only the results worth reading.
 
 ```typescript
-import { Firecrawl } from 'firecrawl';
-import { choice, noul, score, TypeSafeClient } from '@typesafe-ai/sdk';
+import { Firecrawl, type SearchResultWeb } from 'firecrawl';
+import { noul, score, TypeSafeClient } from '@typesafe-ai/sdk';
 
 const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
 const typesafe = new TypeSafeClient();
 
-const url = 'https://www.firecrawl.dev/pricing';
-const page = await firecrawl.scrape(url, { formats: ['markdown'] });
+const query = 'how to rotate Postgres credentials without downtime';
+const search = await firecrawl.search(query, { limit: 10 });
+const results = (search.web ?? []).filter((r): r is SearchResultWeb => 'url' in r);
 
-const { answers } = await typesafe.systemOne({
-    state: { url, markdown: page.markdown ?? '' },
-    questions: {
-        pageType: choice('What kind of page is this?', {
-            pricing: 'Plans, prices, or billing details',
-            product: 'Describes a product or feature',
-            blog: 'An article or announcement',
-            docs: 'Technical documentation or an API reference',
-            other: null
-        }),
-        hasFreeTier: noul('The page offers a free plan or free credits'),
-        audience: score('How technical the intended reader is', [
-            'A general audience',
-            'Readers with some technical background',
-            'Software engineers'
-        ])
-    }
-});
+const judged = await Promise.all(results.map(async (result) => {
+    const { answers } = await typesafe.systemOne({
+        state: { query, url: result.url, title: result.title ?? '', description: result.description ?? '' },
+        questions: {
+            relevance: score('How well this result answers the query', [
+                'Unrelated to the query',
+                'Related topic, but does not answer the query',
+                'Directly answers the query'
+            ]),
+            primarySource: noul('This is official documentation, an engineering blog, or another primary source rather than an aggregator'),
+            marketing: noul('This is mainly a product or marketing page')
+        }
+    });
+    return {
+        url: result.url,
+        relevance: answers.relevance.score,
+        primarySource: answers.primarySource.noul,
+        marketing: answers.marketing.noul
+    };
+}));
 
-console.log('Page type:', answers.pageType.choice, answers.pageType.confidence);
-console.log('Free tier:', answers.hasFreeTier.noul);
-console.log('Audience:', answers.audience.score);
+console.table(judged);
+
+const worthReading = judged
+    .filter((r) => r.relevance >= 1.5 && r.marketing < 0.5)
+    .sort((a, b) => b.primarySource - a.primarySource)
+    .slice(0, 3)
+    .map((r) => r.url);
+
+if (worthReading.length > 0) {
+    const { data: pages } = await firecrawl.batchScrape(worthReading, { options: { formats: ['markdown'] } });
+    console.log(`Scraped ${pages.length} of ${results.length} results`);
+}
 ```
 
 ## Qualify Leads
