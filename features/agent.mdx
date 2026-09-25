@@ -248,6 +248,118 @@ The `model` parameter is optional — every request runs `spark-2`:
 
 </CodeGroup>
 
+## Data providers that need terms
+
+Agent can call [Alexandria](/features/alexandria) data providers during a run, but only the ones whose data terms your team has accepted. A provider whose terms you haven't accepted is never called, whatever `exchange.onTermsRequired` is set to. The run carries on with the providers it can use, and the status response reports what it skipped.
+
+There is no auto-accept mode. Accepting a provider's terms always needs a person to agree to them, either in the [dashboard](https://www.firecrawl.dev/app/settings?tab=data-sources) or through a `terms/accept` call your application makes after its user has explicitly agreed. If you build an agent on top of Firecrawl, it must ask its user before calling `terms/accept`. A request for data isn't consent to a provider's terms.
+
+| `onTermsRequired` | What happens |
+|---|---|
+| `skip` (default) | The run answers with accepted providers only and never blocks. `exchange.skippedProviders` lists the gated providers that would have helped. |
+| `ask` | The same as `skip`. The run also ends with `exchange.requiresAction` and a `pendingApproval` of `kind: "terms"`, so you can ask your user, accept, and continue the thread. |
+| `fail` | The run stops making calls as soon as it needs a gated provider. `exchange.error.code` is `THIRD_PARTY_DATA_TERMS_REQUIRED`, and `exchange.requiresAction` holds the calls to accept. This mode's behaviour may still change. |
+
+If you leave `onTermsRequired` out on a follow-up turn of a thread, the turn uses the previous turn's value.
+
+### Response fields
+
+These fields are on the `exchange` object of `GET /v2/agent/{id}`:
+
+- `skippedProviders` (any mode): one entry per gated provider that would have helped, with `provider`, `name`, `capability`, `adds` (what it would have added), `reason: "terms_required"`, `version` (the terms version) and `termsUrl` (where to accept in the dashboard).
+- `requiresAction` (`ask` and `fail`): `type: "accept_terms"` and a `providers` list. Each provider carries the exact `show` (`terms/show`) and `accept` (`terms/accept`) calls to make, plus an `id`. In `ask` mode, `requiresAction.approvalId` is the id to answer when you continue the thread. `accept.options.digest` is `null` when the catalog didn't publish a digest, and `terms/show` returns it.
+- `error` (`fail` only): `{ "code": "THIRD_PARTY_DATA_TERMS_REQUIRED", "message": "..." }`.
+
+```json
+{
+  "status": "completed",
+  "exchange": {
+    "enabled": true,
+    "onTermsRequired": "ask",
+    "paidCalls": 0,
+    "creditsUsed": null,
+    "skippedProviders": [
+      {
+        "provider": "apollo",
+        "name": "Apollo",
+        "capability": "people/search",
+        "adds": "verified work emails and direct phone numbers",
+        "reason": "terms_required",
+        "version": "F-1.0.0",
+        "termsUrl": "https://www.firecrawl.dev/app/alexandria/apollo"
+      }
+    ],
+    "requiresAction": {
+      "type": "accept_terms",
+      "approvalId": "0199aaaa-0000-7000-8000-000000000000",
+      "providers": [
+        {
+          "id": "apollo",
+          "provider": "apollo",
+          "name": "Apollo",
+          "capability": "people/search",
+          "version": "F-1.0.0",
+          "url": "https://www.firecrawl.dev/app/alexandria/apollo",
+          "show": { "provider": "firecrawl", "capability": "terms/show", "options": { "provider": "apollo" } },
+          "accept": {
+            "provider": "firecrawl",
+            "capability": "terms/accept",
+            "options": { "provider": "apollo", "version": "F-1.0.0", "digest": "<sha256>", "confirmed": true }
+          }
+        }
+      ]
+    }
+  },
+  "pendingApproval": {
+    "id": "0199aaaa-0000-7000-8000-000000000000",
+    "kind": "terms",
+    "reason": "Apollo could add verified work emails and direct phone numbers.",
+    "calls": [],
+    "terms": [{ "id": "apollo", "provider": "apollo", "name": "Apollo", "version": "F-1.0.0", "url": "https://www.firecrawl.dev/app/alexandria/apollo" }],
+    "resolution": null
+  }
+}
+```
+
+### Accept, then continue
+
+In `ask` mode:
+
+1. Show your user the terms. Run the provider's `show` call through [`/v2/scrape`](/features/alexandria) with `alexandria`.
+2. Only if the user explicitly agrees, run its `accept` call the same way:
+
+```bash
+curl -X POST https://api.firecrawl.dev/v2/scrape \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "alexandria": {
+      "provider": "firecrawl",
+      "capability": "terms/accept",
+      "options": { "provider": "apollo", "version": "F-1.0.0", "digest": "<sha256>", "confirmed": true }
+    }
+  }'
+```
+
+3. Continue the same thread with `exchange.approve`. `callIds` lists the accepted provider `id`s, and leaving it out means all of them. The next turn uses those providers to fill the gap the previous answer named, rather than re-running everything.
+
+```bash
+curl -X POST https://api.firecrawl.dev/v2/agent \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "threadId": "<threadId from the previous run>",
+    "prompt": "Continue with Apollo.",
+    "exchange": {
+      "approve": { "approvalId": "0199aaaa-0000-7000-8000-000000000000", "callIds": ["apollo"] }
+    }
+  }'
+```
+
+To go on without the provider, continue with `exchange.decline: { "approvalId": "..." }` instead. Declined providers aren't offered again for the rest of the thread.
+
+In `skip` and `fail` modes there's no pending approval to answer. After the terms are accepted, start a new run (or a new turn of the thread) and the provider is available.
+
 ## Parameters
 
 | Parameter | Type | Required | Description |
@@ -260,6 +372,7 @@ The `model` parameter is optional — every request runs `spark-2`:
 | `strictConstrainToURLs` | boolean | No | If `true`, the agent only visits the URLs provided in the `urls` array |
 | `webhook` | object | No | Webhook to receive agent lifecycle events (`agent.started`, `agent.action`, `agent.completed`, `agent.failed`, `agent.cancelled`). See the [webhook payloads](/api-reference/endpoint/webhook-agent-started) |
 | `maxCredits` | number | No | Maximum number of credits to spend on this agent task. Defaults to **2,500** if not set. The dashboard supports values up to **2,500**; for higher limits, set `maxCredits` via the API (values above 2,500 are always treated as paid requests). If the limit is reached, the job fails and **no data is returned**. Failed runs are not billed: credits used for AI reasoning are never charged on failure, any credits used for tool calls during the run (scraping, search, mapping, etc.) are refunded, and the response reports `creditsUsed: 0`. |
+| `exchange.onTermsRequired` | string | No | What to do when an Alexandria data provider the agent would use needs terms your team has not accepted: `skip` (default), `ask`, or `fail`. See [Data providers that need terms](#data-providers-that-need-terms) |
 
 ## Agent vs Extract: What's Improved
 
