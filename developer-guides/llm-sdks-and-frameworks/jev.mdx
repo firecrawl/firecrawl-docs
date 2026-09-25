@@ -17,13 +17,36 @@ FIRECRAWL_API_KEY=your_firecrawl_key
 TYPESAFE_API_KEY=your_typesafe_key
 ```
 
+## Scrape + Decide
+
+This example scrapes a page and asks Jev a single yes/no question about it. A `noul` question returns the probability of a yes answer, from 0 to 1.
+
+```typescript
+import { Firecrawl } from 'firecrawl';
+import { noul, TypeSafeClient } from '@typesafe-ai/sdk';
+
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+const typesafe = new TypeSafeClient();
+
+const page = await firecrawl.scrape('https://firecrawl.dev', { formats: ['markdown'] });
+
+const { answers } = await typesafe.systemOne({
+    state: { page: page.markdown ?? '' },
+    questions: {
+        hasFreeTier: noul('The product offers a free plan or free credits')
+    }
+});
+
+console.log('Free tier:', answers.hasFreeTier.noul);
+```
+
 ## Search + Filter
 
-This example searches the web, has Jev judge each result from its title and description, and scrapes only the results worth reading.
+This example searches the web, has Jev rate each result from its title and description, and scrapes only the relevant ones. A `score` question takes a rubric ordered from 0, and returns the expected score, which can fall between levels. With three levels, a score of 1.5 or more leans toward "Directly answers the query".
 
 ```typescript
 import { Firecrawl, type SearchResultWeb } from 'firecrawl';
-import { noul, score, TypeSafeClient } from '@typesafe-ai/sdk';
+import { score, TypeSafeClient } from '@typesafe-ai/sdk';
 
 const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
 const typesafe = new TypeSafeClient();
@@ -32,44 +55,31 @@ const query = 'how to rotate Postgres credentials without downtime';
 const search = await firecrawl.search(query, { limit: 10 });
 const results = (search.web ?? []) as SearchResultWeb[];
 
-const judged = await Promise.all(results.map(async (result) => {
+const rated = await Promise.all(results.map(async (result) => {
     const { answers } = await typesafe.systemOne({
-        state: { query, url: result.url, title: result.title ?? '', description: result.description ?? '' },
+        state: { query, title: result.title ?? '', description: result.description ?? '' },
         questions: {
             relevance: score('How well this result answers the query', [
                 'Unrelated to the query',
                 'Related topic, but does not answer the query',
                 'Directly answers the query'
-            ]),
-            primarySource: noul('This is official documentation, an engineering blog, or another primary source rather than an aggregator'),
-            marketing: noul('This is mainly a product or marketing page')
+            ])
         }
     });
-    return {
-        url: result.url,
-        relevance: answers.relevance.score,
-        primarySource: answers.primarySource.noul,
-        marketing: answers.marketing.noul
-    };
+    return { url: result.url, relevance: answers.relevance.score };
 }));
 
-console.table(judged);
+const relevant = rated.filter((r) => r.relevance >= 1.5).map((r) => r.url);
 
-const worthReading = judged
-    .filter((r) => r.relevance >= 1.5 && r.marketing < 0.5)
-    .sort((a, b) => b.primarySource - a.primarySource)
-    .slice(0, 3)
-    .map((r) => r.url);
-
-if (worthReading.length > 0) {
-    const { data: pages } = await firecrawl.batchScrape(worthReading, { options: { formats: ['markdown'] } });
+if (relevant.length > 0) {
+    const { data: pages } = await firecrawl.batchScrape(relevant, { options: { formats: ['markdown'] } });
     console.log(`Scraped ${pages.length} of ${results.length} results`);
 }
 ```
 
 ## Qualify Leads
 
-This example scrapes company homepages and routes each company to your CRM, a review queue, or the bin based on Jev's answers and confidence.
+This example scrapes company homepages and sends each one to your CRM or a person for review. A `choice` question returns the selected label along with a `confidence`, so you can hand uncertain answers to a person instead of trusting them.
 
 ```typescript
 import { Firecrawl } from 'firecrawl';
@@ -81,68 +91,27 @@ const typesafe = new TypeSafeClient();
 const companies = ['https://ramp.com', 'https://mercury.com', 'https://www.jpmorganchase.com'];
 const { data: pages } = await firecrawl.batchScrape(companies, { options: { formats: ['markdown'] } });
 
-const questions = {
-    isFintech: noul('The company builds financial technology such as payments, banking, lending, or spend management software'),
-    sellsToBusinesses: noul('The company primarily sells to businesses rather than consumers'),
-    stage: choice('How established the company appears to be', {
-        startup: 'Early stage, with a small team or a single product',
-        growth: 'Several products or a sizable customer base',
-        enterprise: 'A large, long-established company'
-    })
-};
-
-const results = await Promise.all(pages.map(async (page) => {
+const leads = await Promise.all(pages.map(async (page) => {
     const { answers } = await typesafe.systemOne({
-        state: { url: page.metadata?.sourceURL ?? '', homepage: page.markdown?.slice(0, 50_000) ?? '' },
-        questions
-    });
-
-    const fit = answers.isFintech.noul * answers.sellsToBusinesses.noul;
-    const { choice: stage, confidence } = answers.stage;
-
-    let route = 'skip';
-    if (confidence < 0.6) route = 'review';
-    else if (fit > 0.8 && stage !== 'enterprise') route = 'crm';
-    else if (fit > 0.4) route = 'review';
-
-    return { url: page.metadata?.sourceURL, fit, stage, confidence, route };
-}));
-
-console.table(results);
-```
-
-## Tag a Crawl
-
-This example crawls a docs site and labels every page.
-
-```typescript
-import { Firecrawl } from 'firecrawl';
-import { choice, TypeSafeClient } from '@typesafe-ai/sdk';
-
-const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
-const typesafe = new TypeSafeClient();
-
-const crawl = await firecrawl.crawl('https://docs.firecrawl.dev', {
-    limit: 50,
-    scrapeOptions: { formats: ['markdown'] }
-});
-
-const tagged = await Promise.all(crawl.data.map(async (page) => {
-    const { answers } = await typesafe.systemOne({
-        state: { title: page.metadata?.title ?? '', markdown: page.markdown?.slice(0, 50_000) ?? '' },
+        state: { homepage: page.markdown ?? '' },
         questions: {
-            kind: choice('What kind of documentation page is this?', {
-                tutorial: 'Walks the reader through building something step by step',
-                howTo: 'Explains how to accomplish one specific task',
-                reference: 'Lists parameters, endpoints, or options',
-                concept: 'Explains an idea or how something works'
+            isFintech: noul('The company builds financial technology such as payments, banking, or spend management software'),
+            stage: choice('How established the company appears to be', {
+                startup: 'Early stage, with a small team or a single product',
+                growth: 'Several products or a sizable customer base',
+                enterprise: 'A large, long-established company'
             })
         }
     });
-    return { url: page.metadata?.sourceURL, kind: answers.kind.choice };
+
+    const { choice: stage, confidence } = answers.stage;
+    const qualified = answers.isFintech.noul > 0.8 && stage !== 'enterprise';
+    const route = qualified && confidence >= 0.6 ? 'crm' : 'review';
+
+    return { url: page.metadata?.sourceURL, stage, confidence, route };
 }));
 
-console.table(tagged);
+console.table(leads);
 ```
 
 ## Triage Page Changes
@@ -180,3 +149,5 @@ if (page.changeTracking?.changeStatus === 'changed' && diff) {
     }
 }
 ```
+
+For more on question types and options, see the [TypeSafe docs](https://docs.typesafe.ai/).
