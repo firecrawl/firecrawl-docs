@@ -258,7 +258,6 @@ There is no auto-accept mode. Accepting a provider's terms always needs a person
 |---|---|
 | `skip` (default) | The run answers with accepted providers only and never blocks. `exchange.skippedProviders` lists the gated providers that would have helped. |
 | `ask` | The same as `skip`. The run also ends with `exchange.requiresAction` and a `pendingApproval` of `kind: "terms"`, so you can ask your user, accept, and continue the thread. |
-| `fail` | The run stops making calls as soon as it needs a gated provider, and `exchange.error.code` is `THIRD_PARTY_DATA_TERMS_REQUIRED`. Like `ask`, it also ends with `exchange.requiresAction` and a `pendingApproval` of `kind: "terms"`, so you can accept and continue the thread. This mode's behaviour may still change. |
 
 If you leave `onTermsRequired` out on a follow-up turn of a thread, the turn uses the previous turn's value.
 
@@ -267,9 +266,7 @@ If you leave `onTermsRequired` out on a follow-up turn of a thread, the turn use
 These fields are on the `exchange` object of `GET /v2/agent/{id}`:
 
 - `skippedProviders` (any mode): one entry per gated provider that would have helped, with `provider`, `name`, `capability`, `adds` (what it would have added), `reason: "terms_required"`, `version` (the terms version) and `termsUrl` (where to accept in the dashboard).
-- `requiresAction` (`ask` and `fail`): `type: "accept_terms"`, an `approvalId` and a `providers` list. `approvalId` is always present. It's the id of the `terms` pending approval you answer when you continue the thread. Each provider carries the exact `show` (`terms/show`) and `accept` (`terms/accept`) calls to make, plus an `id`. `accept.options.digest` can be `null`. When it is, run `terms/show` first and send the digest it returns.
-- If the same turn also stopped on a paid-call approval (`requireApproval`), that approval comes first. The turn then has `skippedProviders` but no `requiresAction`, and its `pendingApproval` is the paid-call one. The terms offer, with its own `approvalId`, arrives on the next turn.
-- `error` (`fail` only): `{ "code": "THIRD_PARTY_DATA_TERMS_REQUIRED", "message": "..." }`.
+- `requiresAction` (`ask` only): `type: "accept_terms"`, an `approvalId` and a `providers` list. `approvalId` is always present. It's the id of the `terms` pending approval you answer when you continue the thread. Each provider carries the exact `show` (`terms/show`) and `accept` (`terms/accept`) calls to make, plus an `id`. Each provider's `digest` (and `accept.options.digest`) is always present and can be `null`, meaning the catalog didn't publish one. In that case, run `terms/show` first and send the digest it returns.
 
 ```json
 {
@@ -300,6 +297,7 @@ These fields are on the `exchange` object of `GET /v2/agent/{id}`:
           "name": "Apollo",
           "capability": "people/search",
           "version": "F-1.0.0",
+          "digest": "<sha256>",
           "url": "https://www.firecrawl.dev/app/alexandria/apollo",
           "show": { "provider": "firecrawl", "capability": "terms/show", "options": { "provider": "apollo" } },
           "accept": {
@@ -316,7 +314,7 @@ These fields are on the `exchange` object of `GET /v2/agent/{id}`:
     "kind": "terms",
     "reason": "Apollo could add verified work emails and direct phone numbers.",
     "calls": [],
-    "terms": [{ "id": "apollo", "provider": "apollo", "name": "Apollo", "version": "F-1.0.0", "url": "https://www.firecrawl.dev/app/alexandria/apollo" }],
+    "terms": [{ "id": "apollo", "provider": "apollo", "name": "Apollo", "version": "F-1.0.0", "digest": "<sha256>", "url": "https://www.firecrawl.dev/app/alexandria/apollo" }],
     "resolution": null
   }
 }
@@ -324,7 +322,7 @@ These fields are on the `exchange` object of `GET /v2/agent/{id}`:
 
 ### Accept, then continue
 
-In `ask` and `fail` modes:
+In `ask` mode:
 
 1. Show your user the terms. Run the provider's `show` call through [`/v2/scrape`](/features/alexandria) with `alexandria`.
 2. Only if the user explicitly agrees, run its `accept` call the same way. If `accept.options.digest` is `null`, use the digest `terms/show` returned:
@@ -342,7 +340,7 @@ curl -X POST https://api.firecrawl.dev/v2/scrape \
   }'
 ```
 
-3. Continue the same thread with `exchange.approve`. `callIds` lists the accepted provider `id`s. Only the ids you list count, so an empty list names nobody. Leaving `callIds` out means every provider on the offer. The next turn uses those providers to fill the gap the previous answer named, rather than re-running everything.
+3. Continue the same thread with `exchange.approve`. The offer is accepted as a whole. The next turn uses those providers to fill the gap the previous answer named, rather than re-running everything.
 
 ```bash
 curl -X POST https://api.firecrawl.dev/v2/agent \
@@ -352,12 +350,12 @@ curl -X POST https://api.firecrawl.dev/v2/agent \
     "threadId": "<threadId from the previous run>",
     "prompt": "Continue with Apollo.",
     "exchange": {
-      "approve": { "approvalId": "0199aaaa-0000-7000-8000-000000000000", "callIds": ["apollo"] }
+      "approve": { "approvalId": "0199aaaa-0000-7000-8000-000000000000" }
     }
   }'
 ```
 
-To go on without the provider, continue with `exchange.decline: { "approvalId": "...", "callIds": ["apollo"] }` instead. `callIds` lists the provider `id`s the user declined. An empty list declines nobody, and leaving it out declines the whole offer. Declined providers aren't offered again for the rest of the thread. Any providers on the offer that weren't declined can still be offered later.
+To go on without the provider, continue with `exchange.decline: { "approvalId": "..." }` instead. This declines the whole offer, and its providers aren't offered again for the rest of the thread.
 
 In `skip` mode there's no pending approval to answer. After the terms are accepted, start a new run (or a new turn of the thread) and the provider is available.
 
@@ -373,7 +371,7 @@ In `skip` mode there's no pending approval to answer. After the terms are accept
 | `strictConstrainToURLs` | boolean | No | If `true`, the agent only visits the URLs provided in the `urls` array |
 | `webhook` | object | No | Webhook to receive agent lifecycle events (`agent.started`, `agent.action`, `agent.completed`, `agent.failed`, `agent.cancelled`). See the [webhook payloads](/api-reference/endpoint/webhook-agent-started) |
 | `maxCredits` | number | No | Maximum number of credits to spend on this agent task. Defaults to **2,500** if not set. The dashboard supports values up to **2,500**; for higher limits, set `maxCredits` via the API (values above 2,500 are always treated as paid requests). If the limit is reached, the job fails and **no data is returned**. Failed runs are not billed: credits used for AI reasoning are never charged on failure, any credits used for tool calls during the run (scraping, search, mapping, etc.) are refunded, and the response reports `creditsUsed: 0`. |
-| `exchange.onTermsRequired` | string | No | What to do when an Alexandria data provider the agent would use needs terms your team has not accepted: `skip` (default), `ask`, or `fail`. See [Data providers that need terms](#data-providers-that-need-terms) |
+| `exchange.onTermsRequired` | string | No | What to do when an Alexandria data provider the agent would use needs terms your team has not accepted: `skip` (default) or `ask`. See [Data providers that need terms](#data-providers-that-need-terms) |
 
 ## Agent vs Extract: What's Improved
 
