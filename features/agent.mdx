@@ -250,6 +250,8 @@ The `model` parameter is optional — every request runs `spark-2`:
 
 ## Data providers that need terms
 
+<Note>Terms gating for Agent is rolling out. Until it's enabled for your runs, `onTermsRequired` has no effect, and none of the fields below appear.</Note>
+
 Agent can call [Alexandria](/features/alexandria) data providers during a run, but only the ones whose data terms your team has accepted. A provider whose terms you haven't accepted is never called, whatever `exchange.onTermsRequired` is set to. The run carries on with the providers it can use, and the status response reports what it skipped.
 
 There is no auto-accept mode. Accepting a provider's terms always needs a person to agree to them, either in the [dashboard](https://www.firecrawl.dev/app/settings?tab=data-sources) or through a `terms/accept` call your application makes after its user has explicitly agreed. If you build an agent on top of Firecrawl, it must ask its user before calling `terms/accept`. A request for data isn't consent to a provider's terms.
@@ -259,14 +261,14 @@ There is no auto-accept mode. Accepting a provider's terms always needs a person
 | `skip` (default) | The run answers with accepted providers only and never blocks. `exchange.skippedProviders` lists the gated providers that would have helped. |
 | `ask` | The same as `skip`. The run also ends with `exchange.requiresAction` and a `pendingApproval` of `kind: "terms"`, so you can ask your user, accept, and continue the thread. |
 
-If you leave `onTermsRequired` out on a follow-up turn of a thread, the turn uses the previous turn's value.
+If you leave `onTermsRequired` out on a follow-up turn of a thread, the turn uses the previous turn's value. If a turn ends on a paid-call approval (`requireApproval`), it has no terms offer.
 
 ### Response fields
 
 These fields are on the `exchange` object of `GET /v2/agent/{id}`:
 
 - `skippedProviders` (any mode): one entry per gated provider that would have helped, with `provider`, `name`, `capability`, `adds` (what it would have added), `reason: "terms_required"`, `version` (the terms version) and `termsUrl` (where to accept in the dashboard).
-- `requiresAction` (`ask` only): `type: "accept_terms"`, an `approvalId` and a `providers` list. `approvalId` is always present. It's the id of the `terms` pending approval you answer when you continue the thread. Each provider carries the exact `show` (`terms/show`) and `accept` (`terms/accept`) calls to make, plus an `id`. Each provider's `digest` (and `accept.options.digest`) is always present and can be `null`, meaning the catalog didn't publish one. In that case, run `terms/show` first and send the digest it returns.
+- `requiresAction` (`ask` only): `type: "accept_terms"`, an `approvalId` and a `providers` list. `approvalId` is always present. It's the id of the `terms` pending approval you answer when you continue the thread. Each provider carries the exact `show` (`terms/show`) and `accept` (`terms/accept`) calls to make. Each provider's `digest` (and `accept.options.digest`) is always present and can be `null`, meaning the catalog didn't publish one. In that case, run `terms/show` first and send the digest it returns.
 
 ```json
 {
@@ -292,7 +294,6 @@ These fields are on the `exchange` object of `GET /v2/agent/{id}`:
       "approvalId": "0199aaaa-0000-7000-8000-000000000000",
       "providers": [
         {
-          "id": "apollo",
           "provider": "apollo",
           "name": "Apollo",
           "capability": "people/search",
@@ -314,7 +315,7 @@ These fields are on the `exchange` object of `GET /v2/agent/{id}`:
     "kind": "terms",
     "reason": "Apollo could add verified work emails and direct phone numbers.",
     "calls": [],
-    "terms": [{ "id": "apollo", "provider": "apollo", "name": "Apollo", "version": "F-1.0.0", "digest": "<sha256>", "url": "https://www.firecrawl.dev/app/alexandria/apollo" }],
+    "terms": [{ "provider": "apollo", "name": "Apollo", "version": "F-1.0.0", "digest": "<sha256>", "url": "https://www.firecrawl.dev/app/alexandria/apollo" }],
     "resolution": null
   }
 }
@@ -340,7 +341,7 @@ curl -X POST https://api.firecrawl.dev/v2/scrape \
   }'
 ```
 
-3. Continue the same thread with `exchange.approve`. The offer is accepted as a whole. The next turn uses those providers to fill the gap the previous answer named, rather than re-running everything.
+3. Continue the same thread with `exchange.approve`. The offer is accepted as a whole, and `callIds` and `always` are ignored on it. The next turn uses those providers to fill the gap the previous answer named, rather than re-running everything.
 
 ```bash
 curl -X POST https://api.firecrawl.dev/v2/agent \
