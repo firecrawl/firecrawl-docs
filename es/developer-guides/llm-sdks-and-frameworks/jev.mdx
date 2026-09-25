@@ -1,0 +1,118 @@
+---
+title: "Jev"
+description: "Usa Firecrawl con Jev de TypeSafe para tomar decisiones rápidas y estructuradas a partir de datos web"
+---
+
+Integra Firecrawl con Jev de TypeSafe para tomar decisiones rápidas y estructuradas a partir de datos web.
+
+## Configuración {#setup}
+
+```bash
+npm install firecrawl @typesafe-ai/sdk
+```
+
+Crea un archivo `.env`:
+
+```bash
+FIRECRAWL_API_KEY=your_firecrawl_key
+TYPESAFE_API_KEY=your_typesafe_key
+```
+
+## Scraping + Decisión {#scrape-decide}
+
+Este ejemplo hace scrape de una página y le plantea a Jev una única question de sí o no sobre ella. Una question `noul` devuelve la probabilidad de que la respuesta sea afirmativa, de 0 a 1.
+
+```typescript
+import { Firecrawl } from 'firecrawl';
+import { noul, TypeSafeClient } from '@typesafe-ai/sdk';
+
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+const typesafe = new TypeSafeClient();
+
+const page = await firecrawl.scrape('https://firecrawl.dev', { formats: ['markdown'] });
+
+const { answers } = await typesafe.systemOne({
+    state: { page: page.markdown ?? '' },
+    questions: {
+        hasFreeTier: noul('The product offers a free plan or free credits')
+    }
+});
+
+console.log('Free tier:', answers.hasFreeTier.noul);
+```
+
+## Búsqueda + filtrado {#search-filter}
+
+Este ejemplo busca en la web, pide a Jev que califique cada resultado según su título y descripción, y hace scrape solo de los relevantes. Una question de tipo `score` recibe una rúbrica ordenada a partir de 0 y devuelve la puntuación esperada, que puede situarse entre dos niveles. Con tres niveles, una puntuación de 1.5 o superior se inclina hacia &quot;Responde directamente a la consulta&quot;.
+
+```typescript
+import { Firecrawl, type SearchResultWeb } from 'firecrawl';
+import { score, TypeSafeClient } from '@typesafe-ai/sdk';
+
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+const typesafe = new TypeSafeClient();
+
+const query = 'how to rotate Postgres credentials without downtime';
+const search = await firecrawl.search(query, { limit: 10 });
+const results = (search.web ?? []) as SearchResultWeb[];
+
+const rated = await Promise.all(results.map(async (result) => {
+    const { answers } = await typesafe.systemOne({
+        state: { query, title: result.title ?? '', description: result.description ?? '' },
+        questions: {
+            relevance: score('How well this result answers the query', [
+                'Unrelated to the query',
+                'Related topic, but does not answer the query',
+                'Directly answers the query'
+            ])
+        }
+    });
+    return { url: result.url, relevance: answers.relevance.score };
+}));
+
+const relevant = rated.filter((r) => r.relevance >= 1.5).map((r) => r.url);
+
+if (relevant.length > 0) {
+    const { data: pages } = await firecrawl.batchScrape(relevant, { options: { formats: ['markdown'] } });
+    console.log(`Scraped ${pages.length} of ${results.length} results`);
+}
+```
+
+## Calificar leads {#qualify-leads}
+
+Este ejemplo hace scrape de las páginas de inicio de empresas y envía cada una a tu CRM o a una persona para que la revise. Una question de tipo `choice` devuelve la etiqueta seleccionada junto con un valor `confidence`, para que puedas derivar las respuestas dudosas a una persona en lugar de darlas por buenas.
+
+```typescript
+import { Firecrawl } from 'firecrawl';
+import { choice, noul, TypeSafeClient } from '@typesafe-ai/sdk';
+
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+const typesafe = new TypeSafeClient();
+
+const companies = ['https://ramp.com', 'https://mercury.com', 'https://www.jpmorganchase.com'];
+const { data: pages } = await firecrawl.batchScrape(companies, { options: { formats: ['markdown'] } });
+
+const leads = await Promise.all(pages.map(async (page) => {
+    const { answers } = await typesafe.systemOne({
+        state: { homepage: page.markdown ?? '' },
+        questions: {
+            isFintech: noul('The company builds financial technology such as payments, banking, or spend management software'),
+            stage: choice('How established the company appears to be', {
+                startup: 'Early stage, with a small team or a single product',
+                growth: 'Several products or a sizable customer base',
+                enterprise: 'A large, long-established company'
+            })
+        }
+    });
+
+    const { choice: stage, confidence } = answers.stage;
+    const qualified = answers.isFintech.noul > 0.8 && stage !== 'enterprise';
+    const route = qualified && confidence >= 0.6 ? 'crm' : 'review';
+
+    return { url: page.metadata?.sourceURL, stage, confidence, route };
+}));
+
+console.table(leads);
+```
+
+Para obtener más información sobre los tipos de questions y sus opciones, consulta la [documentación de TypeSafe](https://docs.typesafe.ai/).
