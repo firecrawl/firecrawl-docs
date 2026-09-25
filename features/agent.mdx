@@ -258,7 +258,7 @@ There is no auto-accept mode. Accepting a provider's terms always needs a person
 |---|---|
 | `skip` (default) | The run answers with accepted providers only and never blocks. `exchange.skippedProviders` lists the gated providers that would have helped. |
 | `ask` | The same as `skip`. The run also ends with `exchange.requiresAction` and a `pendingApproval` of `kind: "terms"`, so you can ask your user, accept, and continue the thread. |
-| `fail` | The run stops making calls as soon as it needs a gated provider. `exchange.error.code` is `THIRD_PARTY_DATA_TERMS_REQUIRED`, and `exchange.requiresAction` holds the calls to accept. This mode's behaviour may still change. |
+| `fail` | The run stops making calls as soon as it needs a gated provider, and `exchange.error.code` is `THIRD_PARTY_DATA_TERMS_REQUIRED`. Like `ask`, it also ends with `exchange.requiresAction` and a `pendingApproval` of `kind: "terms"`, so you can accept and continue the thread. This mode's behaviour may still change. |
 
 If you leave `onTermsRequired` out on a follow-up turn of a thread, the turn uses the previous turn's value.
 
@@ -267,7 +267,8 @@ If you leave `onTermsRequired` out on a follow-up turn of a thread, the turn use
 These fields are on the `exchange` object of `GET /v2/agent/{id}`:
 
 - `skippedProviders` (any mode): one entry per gated provider that would have helped, with `provider`, `name`, `capability`, `adds` (what it would have added), `reason: "terms_required"`, `version` (the terms version) and `termsUrl` (where to accept in the dashboard).
-- `requiresAction` (`ask` and `fail`): `type: "accept_terms"` and a `providers` list. Each provider carries the exact `show` (`terms/show`) and `accept` (`terms/accept`) calls to make, plus an `id`. In `ask` mode, `requiresAction.approvalId` is the id to answer when you continue the thread. `accept.options.digest` is `null` when the catalog didn't publish a digest, and `terms/show` returns it.
+- `requiresAction` (`ask` and `fail`): `type: "accept_terms"`, an `approvalId` and a `providers` list. `approvalId` is always present. It's the id of the `terms` pending approval you answer when you continue the thread. Each provider carries the exact `show` (`terms/show`) and `accept` (`terms/accept`) calls to make, plus an `id`. `accept.options.digest` can be `null`. When it is, run `terms/show` first and send the digest it returns.
+- If the same turn also stopped on a paid-call approval (`requireApproval`), that approval comes first. The turn then has `skippedProviders` but no `requiresAction`, and its `pendingApproval` is the paid-call one. The terms offer, with its own `approvalId`, arrives on the next turn.
 - `error` (`fail` only): `{ "code": "THIRD_PARTY_DATA_TERMS_REQUIRED", "message": "..." }`.
 
 ```json
@@ -323,10 +324,10 @@ These fields are on the `exchange` object of `GET /v2/agent/{id}`:
 
 ### Accept, then continue
 
-In `ask` mode:
+In `ask` and `fail` modes:
 
 1. Show your user the terms. Run the provider's `show` call through [`/v2/scrape`](/features/alexandria) with `alexandria`.
-2. Only if the user explicitly agrees, run its `accept` call the same way:
+2. Only if the user explicitly agrees, run its `accept` call the same way. If `accept.options.digest` is `null`, use the digest `terms/show` returned:
 
 ```bash
 curl -X POST https://api.firecrawl.dev/v2/scrape \
@@ -341,7 +342,7 @@ curl -X POST https://api.firecrawl.dev/v2/scrape \
   }'
 ```
 
-3. Continue the same thread with `exchange.approve`. `callIds` lists the accepted provider `id`s, and leaving it out means all of them. The next turn uses those providers to fill the gap the previous answer named, rather than re-running everything.
+3. Continue the same thread with `exchange.approve`. `callIds` lists the accepted provider `id`s. Only the ids you list count, so an empty list names nobody. Leaving `callIds` out means every provider on the offer. The next turn uses those providers to fill the gap the previous answer named, rather than re-running everything.
 
 ```bash
 curl -X POST https://api.firecrawl.dev/v2/agent \
@@ -356,9 +357,9 @@ curl -X POST https://api.firecrawl.dev/v2/agent \
   }'
 ```
 
-To go on without the provider, continue with `exchange.decline: { "approvalId": "...", "callIds": ["apollo"] }` instead. `callIds` lists the provider `id`s the user declined, and leaving it out declines the whole offer. Declined providers aren't offered again for the rest of the thread. Any providers on the offer that weren't declined can still be offered later.
+To go on without the provider, continue with `exchange.decline: { "approvalId": "...", "callIds": ["apollo"] }` instead. `callIds` lists the provider `id`s the user declined. An empty list declines nobody, and leaving it out declines the whole offer. Declined providers aren't offered again for the rest of the thread. Any providers on the offer that weren't declined can still be offered later.
 
-In `skip` and `fail` modes there's no pending approval to answer. After the terms are accepted, start a new run (or a new turn of the thread) and the provider is available.
+In `skip` mode there's no pending approval to answer. After the terms are accepted, start a new run (or a new turn of the thread) and the provider is available.
 
 ## Parameters
 
