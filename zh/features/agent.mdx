@@ -248,23 +248,23 @@ Firecrawl 代理使用 **Spark 2**，相比早期的 Spark 1 模型成本更低�
 
 ## 需要接受条款的数据提供商 {#data-providers-that-need-terms}
 
-Agent 在运行过程中可以调用 [Alexandria](/zh/features/alexandria) 数据提供商，但只会调用你的团队已接受其数据条款的提供商。无论 `exchange.onTermsRequired` 设置为何值，都不会调用你尚未接受条款的提供商。运行会继续使用可用的提供商，并在状态响应中报告跳过了哪些提供商。
+代理在运行期间可以调用 [Alexandria](/zh/features/alexandria) 数据提供商，但仅限于你的团队已接受其数据条款的提供商。对于尚未接受条款的提供商，无论 `exchange.onTermsRequired` 如何设置，都不会被调用。运行会继续使用可用的提供商，状态响应中会列出被跳过的提供商。
 
-没有自动接受模式。接受提供商的条款始终需要由人来同意：可以在 [控制台](https://www.firecrawl.dev/app/settings?tab=data-sources) 中完成，也可以由你的应用在用户明确同意后调用 `terms/accept` 完成。如果你在 Firecrawl 之上构建代理，它必须在调用 `terms/accept` 之前征得用户同意。请求数据并不等于同意提供商的条款。
+不支持自动接受模式。接受提供商的条款必须由人来确认：可以在 [Dashboard](https://www.firecrawl.dev/app/settings?tab=data-sources) 中操作，也可以由你的应用在用户明确同意后调用 `terms/accept`。如果你基于 Firecrawl 构建代理，该代理必须先征得用户同意，再调用 `terms/accept`。请求数据并不代表同意提供商的条款。
 
-| `onTermsRequired` | 行为 |
-|---|---|
-| `skip`（默认） | 运行仅使用已接受的提供商作答，且不会阻塞。`exchange.skippedProviders` 会列出本可提供帮助、但需要接受条款的提供商。 |
-| `ask` | 与 `skip` 相同。此外，运行结束时会返回 `exchange.requiresAction` 以及一个 `kind: "terms"` 的 `pendingApproval`，便于你询问用户、接受条款并继续该线程。 |
+| `onTermsRequired` | 行为                                                                                                               |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `skip` (默认值)      | 运行仅使用已接受条款的提供商作答，且不会阻塞。`exchange.skippedProviders` 会列出本可派上用场、但受条款限制的提供商。                                         |
+| `ask`             | 与 `skip` 相同。此外，运行结束时会返回 `exchange.requiresAction` 以及一个 `kind: "terms"` 的 `pendingApproval`，便于你征询用户、接受条款，然后继续该会话。 |
 
-如果你在线程的后续轮次中省略 `onTermsRequired`，该轮次会沿用上一轮的值。如果某一轮以付费调用审批（`requireApproval`）结束，则该轮不会包含条款请求。
+如果在会话的后续轮次中省略 `onTermsRequired`，该轮次将沿用上一轮的值。如果某一轮次因需要审批付费调用 (`requireApproval`) 而结束，则该轮次不会提示接受条款。
 
 ### 响应字段 {#response-fields}
 
-这些字段位于 `GET /v2/agent/{id}` 返回的 `exchange` 对象中：
+以下字段位于 `GET /v2/agent/{id}` 的 `exchange` 对象中：
 
-- `skippedProviders`（所有模式）：每个本可提供帮助、但需要接受条款的提供商对应一条记录，包含 `provider`、`name`、`capability`、`adds`（它本可补充的内容）、`reason: "terms_required"`、`version`（条款版本）和 `termsUrl`（在控制台中接受条款的位置）。
-- `requiresAction`（仅 `ask`）：包含 `type: "accept_terms"`、一个 `approvalId` 和一个 `providers` 列表。`approvalId` 始终存在，它是你继续线程时要答复的 `terms` 待审批项的 id。每个提供商都附带需要执行的完整 `show`（`terms/show`）和 `accept`（`terms/accept`）调用。每个提供商的 `digest`（以及 `accept.options.digest`）始终存在，值可能为 `null`，表示目录未发布摘要。此时请先运行 `terms/show`，再发送它返回的 digest。
+* `skippedProviders` (任意模式) ：每个本可派上用场、但因条款限制而被跳过的提供商对应一个条目，包含 `provider`、`name`、`capability`、`adds` (本可补充的内容) 、`reason: "terms_required"`、`version` (条款版本) 和 `termsUrl` (在 Dashboard 中接受条款的位置) 。
+* `requiresAction` (仅限 `ask`) ：包含 `type: "accept_terms"`、一个 `approvalId` 和一个 `providers` 列表。`approvalId` 始终存在，它是 `terms` 待审批项的 id，你在继续该会话时需要对其作出答复。每个提供商都附带需要执行的具体 `show` (`terms/show`) 和 `accept` (`terms/accept`) 调用。每个提供商的 `digest` (以及 `accept.options.digest`) 字段始终存在，但值可能为 `null`，表示目录未发布摘要。遇到这种情况，请先运行 `terms/show`，再发送其返回的摘要。
 
 ```json
 {
@@ -317,12 +317,12 @@ Agent 在运行过程中可以调用 [Alexandria](/zh/features/alexandria) 数�
 }
 ```
 
-### 接受后继续 {#accept-then-continue}
+### 先接受条款，再继续 {#accept-then-continue}
 
 在 `ask` 模式下：
 
-1. 向用户展示条款。通过 [`/v2/scrape`](/zh/features/alexandria) 并使用 `alexandria` 运行该提供商的 `show` 调用。
-2. 仅在用户明确同意后，以同样方式运行其 `accept` 调用。如果 `accept.options.digest` 为 `null`，请使用 `terms/show` 返回的 digest：
+1. 向用户展示条款。通过 [`/v2/scrape`](/zh/features/alexandria) 并使用 `alexandria` 执行该提供商的 `show` 调用。
+2. 仅在用户明确同意后，才以相同方式执行其 `accept` 调用。如果 `accept.options.digest` 为 `null`，请使用 `terms/show` 返回的 digest：
 
 ```bash
 curl -X POST https://api.firecrawl.dev/v2/scrape \
@@ -337,7 +337,7 @@ curl -X POST https://api.firecrawl.dev/v2/scrape \
   }'
 ```
 
-3. 使用 `exchange.approve` 继续同一线程。条款请求作为一个整体被接受，其中的 `callIds` 和 `always` 会被忽略。下一轮会使用这些提供商补齐上一次回答指出的缺口，而不是重新执行全部内容。
+3. 使用 `exchange.approve` 在同一会话中继续。该提议会被整体接受，其中的 `callIds` 和 `always` 将被忽略。下一轮会调用这些提供商来补足上一个答案中指出的缺口，而不会重新运行全部内容。
 
 ```bash
 curl -X POST https://api.firecrawl.dev/v2/agent \
@@ -352,23 +352,23 @@ curl -X POST https://api.firecrawl.dev/v2/agent \
   }'
 ```
 
-如果不使用该提供商继续，请改用 `exchange.decline: { "approvalId": "..." }` 继续。这会拒绝整个条款请求，在该线程余下的轮次中不会再次提供这些提供商。
+如果想在不使用该提供商的情况下继续，请改用 `exchange.decline: { "approvalId": "..." }` 继续。这会拒绝整个报价，且在该会话的后续过程中，其中的提供商都不会再被提供。
 
-在 `skip` 模式下，没有需要答复的待审批项。接受条款后，发起新的运行（或线程的新一轮），即可使用该提供商。
+在 `skip` 模式下，没有需要回复的待审批项。接受条款后，发起一次新的运行 (或在该会话中开始新一轮对话) ，即可使用该提供商。
 
 ## 参数 {#parameters}
 
-| 参数                      | 类型      | 必填    | 描述                                                                                                                                                                                                                                                         |
-| ----------------------- | ------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `prompt`                | string  | **是** | 用自然语言描述你想要提取的数据 (最多 10,000 个字符)                                                                                                                                                                                                                            |
-| `model`                 | string  | 否     | 默认使用 `spark-2`，所有运行均使用该模型。Spark 1 模型已弃用，并会路由至 `spark-2`                                                                                                                                                                                                    |
-| `effort`                | string  | 否     | 推理预算：`low`、`medium` 或 `high`。所有运行均使用 `spark-2`，因此无论是否指定 `model`，都可以传入 `effort`                                                                                                                                                                             |
-| `urls`                  | array   | 否     | 可选的 URL 列表，用于聚焦提取                                                                                                                                                                                                                                          |
-| `schema`                | object  | 否     | 用于结构化输出的可选 JSON schema                                                                                                                                                                                                                                     |
-| `strictConstrainToURLs` | boolean | 否     | 如果为 `true`，代理仅访问 `urls` array 中提供的 URL                                                                                                                                                                                                                     |
-| `webhook`               | object  | 否     | 用于接收代理生命周期事件 (`agent.started`、`agent.action`、`agent.completed`、`agent.failed`、`agent.cancelled`) 的 Webhook。请参见 [webhook payloads](/zh/api-reference/endpoint/webhook-agent-started)                                                                           |
-| `maxCredits`            | number  | 否     | 此代理任务中可花费的最大额度数。如果未设置，默认值为 **2,500**。Dashboard 最高支持 **2,500**；如需更高上限，请通过 API 设置 `maxCredits` (高于 2,500 的值始终按付费请求处理) 。如果达到上限，任务会失败，并且**不会返回任何数据**。失败的运行不会计费：用于 AI 推理的额度在失败时绝不会收费，运行期间任何用于工具调用的额度 (scraping、search、mapping 等) 都会退还，并且响应会返回 `creditsUsed: 0`。 |
-| `exchange.onTermsRequired` | string | 否 | 当代理要使用的 Alexandria 数据提供商需要你的团队尚未接受的条款时的处理方式：`skip`（默认）或 `ask`。参见 [需要接受条款的数据提供商](#data-providers-that-need-terms) |
+| 参数                         | 类型      | 必填    | 描述                                                                                                                                                                                                                                                         |
+| -------------------------- | ------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prompt`                   | string  | **是** | 用自然语言描述你想要提取的数据 (最多 10,000 个字符)                                                                                                                                                                                                                            |
+| `model`                    | string  | 否     | 默认使用 `spark-2`，所有运行均使用该模型。Spark 1 模型已弃用，并会路由至 `spark-2`                                                                                                                                                                                                    |
+| `effort`                   | string  | 否     | 推理预算：`low`、`medium` 或 `high`。所有运行均使用 `spark-2`，因此无论是否指定 `model`，都可以传入 `effort`                                                                                                                                                                             |
+| `urls`                     | array   | 否     | 可选的 URL 列表，用于聚焦提取                                                                                                                                                                                                                                          |
+| `schema`                   | object  | 否     | 用于结构化输出的可选 JSON schema                                                                                                                                                                                                                                     |
+| `strictConstrainToURLs`    | boolean | 否     | 如果为 `true`，代理仅访问 `urls` array 中提供的 URL                                                                                                                                                                                                                     |
+| `webhook`                  | object  | 否     | 用于接收代理生命周期事件 (`agent.started`、`agent.action`、`agent.completed`、`agent.failed`、`agent.cancelled`) 的 Webhook。请参见 [webhook payloads](/zh/api-reference/endpoint/webhook-agent-started)                                                                           |
+| `maxCredits`               | number  | 否     | 此代理任务中可花费的最大额度数。如果未设置，默认值为 **2,500**。Dashboard 最高支持 **2,500**；如需更高上限，请通过 API 设置 `maxCredits` (高于 2,500 的值始终按付费请求处理) 。如果达到上限，任务会失败，并且**不会返回任何数据**。失败的运行不会计费：用于 AI 推理的额度在失败时绝不会收费，运行期间任何用于工具调用的额度 (scraping、search、mapping 等) 都会退还，并且响应会返回 `creditsUsed: 0`。 |
+| `exchange.onTermsRequired` | string  | 否     | 当代理需要使用的 Alexandria 数据提供商要求接受你的团队尚未接受的条款时，应采取的处理方式：`skip` (默认值) 或 `ask`。请参见[需要接受条款的数据提供商](#data-providers-that-need-terms)                                                                                                                                 |
 
 ## Agent 与 Extract：有哪些改进 {#agent-vs-extract-whats-improved}
 
