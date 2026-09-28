@@ -3,7 +3,7 @@ title: "Node.js Source of Truth"
 description: "Canonical Firecrawl Node.js source of truth for agents using key endpoints like search, scrape, and interact."
 ---
 
-Canonical Firecrawl Node.js source of truth for agents. Aligned with `firecrawl` **v4.18.2** (`firecrawl/apps/js-sdk/firecrawl`) and the v2 OpenAPI spec. Method names, parameters, and types match the SDK public API.
+Canonical Firecrawl Node.js source of truth for agents. Aligned with `firecrawl` **v4.41.0** (`firecrawl/apps/js-sdk/firecrawl`) and the v2 OpenAPI spec. Method names, parameters, and types match the SDK public API.
 
 ## Install
 
@@ -13,12 +13,21 @@ npm install firecrawl
 
 ## Authenticate
 
+The constructor accepts either a plain string API key or an options object:
+
 ```ts
 import { Firecrawl } from "firecrawl";
 
+// Plain string API key
+const client = new Firecrawl(process.env.FIRECRAWL_API_KEY);
+
+// Options object
 const client = new Firecrawl({
   apiKey: process.env.FIRECRAWL_API_KEY,
-  // apiUrl: "https://api.firecrawl.dev" // optional; falls back to FIRECRAWL_API_URL or cloud default
+  apiUrl: "https://api.firecrawl.dev", // optional; falls back to FIRECRAWL_API_URL or cloud default
+  timeoutMs: 30000,       // optional per-request timeout
+  maxRetries: 3,          // optional
+  backoffFactor: 2,       // optional
 });
 ```
 
@@ -78,6 +87,7 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
 - `web`: web index hits
 - `news`: news hits
 - `images`: image hits
+- `tools?: DiscoveredTool[]`: discovered tools when `domainTools` is enabled
 
 **Wrong turn to avoid:** `search()` does not return `{ data: [...] }`. Do not access `result.data`. Web results are in `result.web`, news in `result.news`, images in `result.images`.
 
@@ -98,7 +108,8 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
     - `"web"`: web index results
     - `"news"`: news results
     - `"images"`: image results
-    - `{ type: "web" | "news" | "images" }`: typed source object form
+    - `"alexandria"`: Alexandria knowledge base results
+    - `{ type: "web" | "news" | "images" | "alexandria" }`: typed source object form
 
 - `options.categories`
   - Type: array of category names or typed category objects
@@ -107,7 +118,8 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
     - `"developer"`: Developer Index results
     - `"research"`: research and academic results
     - `"pdf"`: PDF-focused results
-    - `{ type: "developer" | "research" | "pdf" }`: typed category object form
+    - `"github"`: GitHub-focused results
+    - `{ type: "developer" | "research" | "pdf" | "github" }`: typed category object form
 
 - `options.limit`
   - Type: number
@@ -132,6 +144,38 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
 - `options.scrapeOptions`
   - Type: `ScrapeOptions`
   - Use when: you want to scrape each search result (see Scrape parameters for fields). The SDK runs the same validation as for `scrape` (for example plain string `"json"` in `formats` is rejected).
+
+- `options.domainTools`
+  - Type: boolean
+  - Use when: you want domain-matched tool discovery.
+
+- `options.toolDetail`
+  - Type: `"compact" | "summary" | "full"`
+  - Use when: you want to control tool contract verbosity.
+
+- `options.includeDomains`
+  - Type: array of strings
+  - Use when: you want to restrict results to specific domains.
+
+- `options.excludeDomains`
+  - Type: array of strings
+  - Use when: you want to exclude specific domains. Cannot be used with `includeDomains`.
+
+- `options.country`
+  - Type: string
+  - Use when: you want ISO 3166-1 alpha-2 geo targeting.
+
+- `options.highlights`
+  - Type: boolean
+  - Use when: you want query-relevant highlights. Defaults to `true`.
+
+- `options.enterprise`
+  - Type: array of `"default" | "anon" | "zdr"`
+  - Use when: you need enterprise search controls.
+
+- `options.threatProtection`
+  - Type: `ThreatProtectionOptions`
+  - Use when: you need threat protection controls. Fields: `mode` (`"off"` | `"manual-only"` | `"normal"` | `"zscaler"`), `riskScoreThreshold`, `blacklist`, `whitelist`, `blockedTlds`, `failurePolicy`.
 
 ## Scrape
 
@@ -208,6 +252,8 @@ const doc = await client.scrape("https://example.com/pricing", {
     - `"branding"`: branding profile output
     - `"audio"`: audio extraction
     - `"video"`: video extraction
+    - `"product"`: product data extraction
+    - `"menu"`: menu/navigation extraction
   - Object-only format types (at minimum `type` as shown):
     - `{ type: "json", prompt?: string, schema?: JSON schema or Zod schema }`: at least one of `prompt` or `schema` is required (SDK validation).
     - `{ type: "question", question: string }`: question-answer style extraction.
@@ -215,6 +261,7 @@ const doc = await client.scrape("https://example.com/pricing", {
     - `{ type: "screenshot", fullPage?, quality?, viewport? }`: same options as the string form but as an object.
     - `{ type: "changeTracking", modes: ("git-diff" | "json")[], schema?, prompt?, tag? }`: `modes` is required.
     - `{ type: "attributes", selectors: Array<{ selector, attribute }> }`
+    - `{ type: "query", prompt: string, mode?: "freeform" | "directQuote" }`: **(deprecated)** query-based extraction.
   - Shared object fields where applicable:
     - `schema`: JSON schema or Zod schema for `json`, or for `changeTracking` in `json` mode (Zod is converted to JSON Schema by the SDK).
     - `modes`: for `changeTracking` only: `"git-diff"` and/or `"json"`.
@@ -316,6 +363,34 @@ const doc = await client.scrape("https://example.com/pricing", {
   - Type: object with `name` and optional `saveChanges`
   - Use when: you want a persistent browser profile shared across scrapes and interactions.
 
+- `options.lockdown`
+  - Type: boolean
+  - Use when: you only want to serve previously cached results, never scrape live.
+
+- `options.redactPII`
+  - Type: boolean or `RedactPIIOptions`
+  - Use when: you want to redact personally identifiable information from output.
+
+- `options.auditMetadata`
+  - Type: `{ username: string }`
+  - Use when: you need SIEM logging attribution.
+
+- `options.domainTools`
+  - Type: boolean
+  - Use when: you want to discover Alexandria tools for the URL being scraped.
+
+- `options.toolDetail`
+  - Type: `"compact" | "summary" | "full"`
+  - Use when: you want to control tool contract verbosity.
+
+- `options.origin`
+  - Type: string
+  - Use when: you need request attribution. Auto-set by the SDK.
+
+- `options.threatProtection`
+  - Type: `ThreatProtectionOptions`
+  - Use when: you need threat protection controls. Fields: `mode` (`"off"` | `"manual-only"` | `"normal"` | `"zscaler"`), `riskScoreThreshold`, `blacklist`, `whitelist`, `blockedTlds`, `failurePolicy`.
+
 ## Interact
 
 ### Why use it
@@ -373,6 +448,10 @@ const result = await client.interact("<scrapeJobId>", {
 - `args.timeout`
   - Type: number
   - Use when: you need an execution timeout in seconds.
+
+- `args.origin`
+  - Type: string
+  - Use when: you need request attribution. Auto-set by the SDK.
 
 ### Return value (`interact`)
 

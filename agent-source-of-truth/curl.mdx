@@ -76,6 +76,7 @@ curl -X POST "https://api.firecrawl.dev/v2/search" \
 Successful responses include `success`, `data`, optional `warning`, `id`, and `creditsUsed`.
 
 - `data.web`, `data.images`, `data.news`: result arrays; which keys appear depends on `sources` (by default only `data.web` is populated).
+- `data.tools`: array of `DiscoveredTool` objects; present when `domainTools` is enabled or an `alexandria` source is included.
 - Web and news items include fields such as `title`, `url`, and (when `scrapeOptions` / formats request it) `markdown`, `html`, `rawHtml`, `links`, `screenshot`, `audio`, `video`, and `metadata`.
 - Image items include fields such as `imageUrl`, `url`, and dimensions when available.
 - `warning`: optional human-readable notice.
@@ -96,6 +97,7 @@ Successful responses include `success`, `data`, optional `warning`, `id`, and `c
     - `{ "type": "web" }` with optional per-source `tbs` and `location`
     - `{ "type": "news" }`
     - `{ "type": "images" }`
+    - `{ "type": "alexandria" }` (free; returns tool contracts instead of web results)
 
 - `categories`
   - Type: array of typed category objects
@@ -106,7 +108,7 @@ Successful responses include `success`, `data`, optional `warning`, `id`, and `c
     - `{ "type": "pdf" }`
 
 - `limit`
-  - Type: integer (minimum 1, maximum 100, default 5)
+  - Type: integer (minimum 1, maximum 100, default 10)
   - Use when: you want to cap results.
 
 - `tbs`
@@ -135,6 +137,33 @@ Successful responses include `success`, `data`, optional `warning`, `id`, and `c
   - Values:
     - `"zdr"`: end-to-end zero data retention
     - `"anon"`: anonymized zero data retention
+
+- `includeDomains`
+  - Type: array of strings (hostname format)
+  - Use when: you want to restrict results to specific domains.
+  - Notes: cannot be used together with `excludeDomains`.
+
+- `excludeDomains`
+  - Type: array of strings (hostname format)
+  - Use when: you want to exclude specific domains from results.
+  - Notes: cannot be used together with `includeDomains`.
+
+- `highlights`
+  - Type: boolean (default true)
+  - Use when: you want query-relevant highlights in search results.
+
+- `safe`
+  - Type: boolean
+  - Use when: you want to filter explicit content (SafeSearch).
+
+- `domainTools`
+  - Type: boolean
+  - Use when: you want to include tool contracts matching result domains.
+
+- `threatProtection`
+  - Type: ThreatProtectionOverride object
+  - Use when: you need per-request threat protection settings.
+  - Fields: `mode` (`"off"` | `"normal"`), `riskScoreThreshold` (0-100), `blacklist` (string[]), `whitelist` (string[]), `blockedTlds` (string[]), `failurePolicy` (`"open"` | `"closed"`).
 
 - `scrapeOptions`
   - Type: object
@@ -221,6 +250,7 @@ Successful responses include `success` and `data`. Common `data` fields (dependi
     - `"markdown"`: markdown content
     - `"html"`: cleaned HTML
     - `"rawHtml"`: raw HTML
+    - `"rawBase64"`: base64-encoded response body
     - `"links"`: page links
     - `"images"`: image URLs
     - `"screenshot"`: screenshot output
@@ -228,13 +258,17 @@ Successful responses include `success` and `data`. Common `data` fields (dependi
     - `"changeTracking"`: change tracking output
     - `"json"`: JSON extraction
     - `"branding"`: branding profile output
+    - `"product"`: product profile output
+    - `"menu"`: menu profile output
     - `"audio"`: audio extraction
     - `"video"`: video extraction
-  - Format object fields:
+  - Format object forms:
     - `type`: one of the format strings above
     - `prompt`, `schema`: JSON extraction options for `type: "json"`
     - `modes`, `schema`, `prompt`, `tag`: change tracking options for `type: "changeTracking"`
     - `fullPage`, `quality`, `viewport`: screenshot options for `type: "screenshot"`
+    - `{ "type": "question", "question": "..." }`: question-answering format (required `question`, max 10000 chars)
+    - `{ "type": "highlights", "query": "..." }`: highlight extraction format (required `query`, max 10000 chars)
 
 - `headers`
   - Type: object
@@ -249,11 +283,11 @@ Successful responses include `success` and `data`. Common `data` fields (dependi
   - Use when: you want to exclude specific HTML tags.
 
 - `onlyMainContent`
-  - Type: boolean
+  - Type: boolean (default true)
   - Use when: you want to strip nav, footer, and other boilerplate.
 
 - `timeout`
-  - Type: number
+  - Type: number (default 60000, minimum 1000, maximum 300000)
   - Use when: you need a timeout in milliseconds.
 
 - `waitFor`
@@ -265,9 +299,9 @@ Successful responses include `success` and `data`. Common `data` fields (dependi
   - Use when: you want a mobile viewport.
 
 - `parsers`
-  - Type: array of objects
+  - Type: array of objects (default `["pdf"]`)
   - Use when: you need file parsing controls.
-  - Confirmed shape: `{ "type": "pdf", "mode": "fast" | "auto" | "ocr", "maxPages": number }` (`type` required; other fields optional with defaults per spec)
+  - Confirmed shape: `{ "type": "pdf", "mode": "fast" | "auto" | "ocr", "maxPages": number, "pages": boolean, "blocks": boolean, "pageMarkers": boolean }` (`type` required; other fields optional with defaults per spec)
 
 - `actions`
   - Type: array of action objects
@@ -288,24 +322,24 @@ Successful responses include `success` and `data`. Common `data` fields (dependi
   - Use when: you need geo or language-aware scraping.
 
 - `skipTlsVerification`
-  - Type: boolean
+  - Type: boolean (default true)
   - Use when: you need to skip TLS verification.
 
 - `removeBase64Images`
-  - Type: boolean
+  - Type: boolean (default true)
   - Use when: you want to drop base64 images from markdown output.
 
 - `blockAds`
-  - Type: boolean
+  - Type: boolean (default true)
   - Use when: you want ad and cookie popup blocking.
 
 - `proxy`
-  - Type: string
+  - Type: string (default `"auto"`)
   - Use when: you need proxy control.
   - Confirmed values: `"basic"`, `"enhanced"`, `"auto"`
 
 - `maxAge`
-  - Type: number
+  - Type: number (default 172800000, i.e. 2 days)
   - Use when: you want cached data up to a maximum age (milliseconds).
 
 - `minAge`
@@ -313,7 +347,7 @@ Successful responses include `success` and `data`. Common `data` fields (dependi
   - Use when: you want cached data only if it is at least this old (milliseconds).
 
 - `storeInCache`
-  - Type: boolean
+  - Type: boolean (default true)
   - Use when: you want Firecrawl to cache the result.
 
 - `profile`
@@ -323,6 +357,38 @@ Successful responses include `success` and `data`. Common `data` fields (dependi
 - `zeroDataRetention`
   - Type: boolean
   - Use when: you want zero data retention for this scrape.
+
+- `lockdown`
+  - Type: boolean (default false)
+  - Use when: you want to serve from cache only, never making an outbound request. ZDR. 5 credits on cache hit, 1 on miss.
+
+- `redactPII`
+  - Type: boolean or RedactPIIOptions object (default false)
+  - Use when: you want to redact PII from returned markdown.
+  - Notes: `true` for defaults. Object form: `{ "mode": "accurate" | "aggressive" | "fast", "entities": ["PERSON", "EMAIL", "PHONE", "LOCATION", "FINANCIAL", "SECRET"], "replaceStyle": "tag" | "mask" | "remove" }`.
+
+- `auditMetadata`
+  - Type: object
+  - Use when: you need user attribution for SIEM logging.
+  - Fields: `username` (string, max 1024 chars).
+
+- `domainTools`
+  - Type: boolean (default false)
+  - Use when: you want to discover Alexandria tool contracts for the scraped domain.
+
+- `threatProtection`
+  - Type: ThreatProtectionOverride object
+  - Use when: you need per-request threat protection settings.
+  - Fields: `mode` (`"off"` | `"normal"`), `riskScoreThreshold` (0-100), `blacklist` (string[]), `whitelist` (string[]), `blockedTlds` (string[]), `failurePolicy` (`"open"` | `"closed"`).
+
+- `alexandria`
+  - Type: AlexandriaCall or array of AlexandriaCall (1-10)
+  - Use when: you want to execute catalogued provider tools instead of scraping a URL.
+  - Each call: `{ "provider": string, "capability": string, "options": object }`.
+
+- `onlyCleanContent`
+  - Type: boolean (default false, beta)
+  - Use when: you want an LLM-based pass to remove residual boilerplate from output.
 
 ## Interact
 
@@ -377,9 +443,13 @@ curl -X POST "https://api.firecrawl.dev/v2/scrape/<jobId>/interact" \
   - Type: integer (seconds; minimum 1, maximum 300, default 30)
   - Use when: you need an execution timeout.
 
+- `origin` (JSON body)
+  - Type: string (optional)
+  - Use when: you want to attach an origin label to the interaction.
+
 ### Response
 
-Successful responses include `success` plus execution fields such as `stdout`, `result` (alias of stdout), `stderr`, `exitCode`, `killed`, and `error` (nullable).
+Successful responses include `success` plus execution fields such as `stdout`, `result` (alias of stdout), `stderr`, `exitCode`, `killed`, `error` (nullable), `cdpUrl`, and `interactiveLiveViewUrl`.
 
 ### DELETE /scrape/{jobId}/interact
 
