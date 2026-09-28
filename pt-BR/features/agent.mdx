@@ -246,6 +246,116 @@ O parâmetro `model` é opcional — todas as solicitações usam `spark-2`:
   <AgentWithModelCURL />
 </CodeGroup>
 
+## Provedores de dados que exigem termos {#data-providers-that-need-terms}
+
+O Agent pode chamar provedores de dados do [Alexandria](/pt-BR/features/alexandria) durante uma execução, mas apenas aqueles cujos termos de dados sua equipe aceitou. Um provedor cujos termos você não aceitou nunca é chamado, independentemente do valor de `exchange.onTermsRequired`. A execução continua com os provedores que pode usar, e a resposta de status informa quais foram ignorados.
+
+Não existe um modo de aceitação automática. Aceitar os termos de um provedor sempre exige que uma pessoa concorde com eles, seja no [dashboard](https://www.firecrawl.dev/app/settings?tab=data-sources) ou por meio de uma chamada `terms/accept` que sua aplicação faz depois que o usuário concordou explicitamente. Se você cria um agente sobre o Firecrawl, ele deve perguntar ao usuário antes de chamar `terms/accept`. Uma solicitação de dados não equivale a concordar com os termos de um provedor.
+
+| `onTermsRequired` | O que acontece |
+|---|---|
+| `skip` (padrão) | A execução responde apenas com provedores aceitos e nunca bloqueia. `exchange.skippedProviders` lista os provedores restritos que teriam ajudado. |
+| `ask` | O mesmo que `skip`. Além disso, a execução termina com `exchange.requiresAction` e um `pendingApproval` de `kind: "terms"`, para que você possa perguntar ao usuário, aceitar e continuar a thread. |
+
+Se você omitir `onTermsRequired` em um turno de acompanhamento de uma thread, o turno usa o valor do turno anterior. Se um turno terminar em uma aprovação de chamada paga (`requireApproval`), ele não inclui oferta de termos.
+
+### Campos da resposta {#response-fields}
+
+Estes campos ficam no objeto `exchange` de `GET /v2/agent/{id}`:
+
+- `skippedProviders` (qualquer modo): uma entrada para cada provedor restrito que teria ajudado, com `provider`, `name`, `capability`, `adds` (o que ele teria acrescentado), `reason: "terms_required"`, `version` (a versão dos termos) e `termsUrl` (onde aceitá-los no dashboard).
+- `requiresAction` (apenas `ask`): `type: "accept_terms"`, um `approvalId` e uma lista `providers`. `approvalId` está sempre presente: é o id da aprovação pendente do tipo `terms` que você responde ao continuar a thread. Cada provedor traz as chamadas exatas `show` (`terms/show`) e `accept` (`terms/accept`) a fazer. O `digest` de cada provedor (e `accept.options.digest`) está sempre presente e pode ser `null`, o que significa que o catálogo não publicou nenhum. Nesse caso, execute `terms/show` primeiro e envie o digest que ele retornar.
+
+```json
+{
+  "status": "completed",
+  "exchange": {
+    "enabled": true,
+    "onTermsRequired": "ask",
+    "paidCalls": 0,
+    "creditsUsed": null,
+    "skippedProviders": [
+      {
+        "provider": "apollo",
+        "name": "Apollo",
+        "capability": "people/search",
+        "adds": "verified work emails and direct phone numbers",
+        "reason": "terms_required",
+        "version": "F-1.0.0",
+        "termsUrl": "https://www.firecrawl.dev/app/alexandria/apollo"
+      }
+    ],
+    "requiresAction": {
+      "type": "accept_terms",
+      "approvalId": "0199aaaa-0000-7000-8000-000000000000",
+      "providers": [
+        {
+          "provider": "apollo",
+          "name": "Apollo",
+          "capability": "people/search",
+          "version": "F-1.0.0",
+          "digest": "<sha256>",
+          "url": "https://www.firecrawl.dev/app/alexandria/apollo",
+          "show": { "provider": "firecrawl", "capability": "terms/show", "options": { "provider": "apollo" } },
+          "accept": {
+            "provider": "firecrawl",
+            "capability": "terms/accept",
+            "options": { "provider": "apollo", "version": "F-1.0.0", "digest": "<sha256>", "confirmed": true }
+          }
+        }
+      ]
+    }
+  },
+  "pendingApproval": {
+    "id": "0199aaaa-0000-7000-8000-000000000000",
+    "kind": "terms",
+    "reason": "Apollo could add verified work emails and direct phone numbers.",
+    "calls": [],
+    "terms": [{ "provider": "apollo", "name": "Apollo", "version": "F-1.0.0", "digest": "<sha256>", "url": "https://www.firecrawl.dev/app/alexandria/apollo" }],
+    "resolution": null
+  }
+}
+```
+
+### Aceitar e depois continuar {#accept-then-continue}
+
+No modo `ask`:
+
+1. Mostre os termos ao usuário. Execute a chamada `show` do provedor por meio de [`/v2/scrape`](/pt-BR/features/alexandria) com `alexandria`.
+2. Somente se o usuário concordar explicitamente, execute a chamada `accept` da mesma forma. Se `accept.options.digest` for `null`, use o digest retornado por `terms/show`:
+
+```bash
+curl -X POST https://api.firecrawl.dev/v2/scrape \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "alexandria": {
+      "provider": "firecrawl",
+      "capability": "terms/accept",
+      "options": { "provider": "apollo", "version": "F-1.0.0", "digest": "<sha256>", "confirmed": true }
+    }
+  }'
+```
+
+3. Continue a mesma thread com `exchange.approve`. A oferta é aceita como um todo, e `callIds` e `always` são ignorados nela. O próximo turno usa esses provedores para preencher a lacuna apontada pela resposta anterior, em vez de executar tudo de novo.
+
+```bash
+curl -X POST https://api.firecrawl.dev/v2/agent \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "threadId": "<threadId from the previous run>",
+    "prompt": "Continue with Apollo.",
+    "exchange": {
+      "approve": { "approvalId": "0199aaaa-0000-7000-8000-000000000000" }
+    }
+  }'
+```
+
+Para seguir sem o provedor, continue com `exchange.decline: { "approvalId": "..." }`. Isso recusa a oferta inteira, e seus provedores não são oferecidos novamente pelo resto da thread.
+
+No modo `skip` não há aprovação pendente para responder. Depois que os termos forem aceitos, inicie uma nova execução (ou um novo turno da thread) e o provedor estará disponível.
+
 ## Parâmetros {#parameters}
 
 | Parâmetro               | Tipo    | Obrigatório | Descrição                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -258,6 +368,7 @@ O parâmetro `model` é opcional — todas as solicitações usam `spark-2`:
 | `strictConstrainToURLs` | boolean | Não         | Se `true`, o agente visita apenas as URLs fornecidas no array `urls`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `webhook`               | object  | Não         | Webhook para receber eventos do ciclo de vida do agente (`agent.started`, `agent.action`, `agent.completed`, `agent.failed`, `agent.cancelled`). Consulte os [payloads de webhook](/pt-BR/api-reference/endpoint/webhook-agent-started)                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `maxCredits`            | number  | Não         | Número máximo de créditos a serem usados nesta tarefa de agente. O padrão é **2.500** se não for definido. O painel suporta valores de até **2.500**; para limites mais altos, defina `maxCredits` via API (valores acima de 2.500 são sempre tratados como requisições pagas). Se o limite for atingido, o job falha e **nenhum dado é retornado**. Execuções com falha não são cobradas: créditos usados para raciocínio de IA nunca são cobrados em caso de falha, quaisquer créditos usados para chamadas de ferramentas durante a execução (scraping, busca, mapeamento etc.) são reembolsados, e a resposta informa `creditsUsed: 0`. |
+| `exchange.onTermsRequired` | string | Não | O que fazer quando um provedor de dados do Alexandria que o agente usaria exige termos que sua equipe não aceitou: `skip` (padrão) ou `ask`. Veja [Provedores de dados que exigem termos](#data-providers-that-need-terms) |
 
 ## Agent vs Extract: O que melhorou {#agent-vs-extract-whats-improved}
 
