@@ -246,6 +246,116 @@ Firecrawl Agent は **Spark 2** で動作します。Spark 2 は、同等の精�
   <AgentWithModelCURL />
 </CodeGroup>
 
+## 規約への同意が必要なデータプロバイダー {#data-providers-that-need-terms}
+
+Agent は実行中に [Alexandria](/ja/features/alexandria) のデータプロバイダーを呼び出せますが、呼び出すのはチームがデータ規約に同意したプロバイダーだけです。規約に同意していないプロバイダーは、`exchange.onTermsRequired` の設定にかかわらず呼び出されません。実行は利用できるプロバイダーで続行され、スキップしたプロバイダーはステータスのレスポンスで報告されます。
+
+自動同意モードはありません。プロバイダーの規約への同意には、必ず人による同意が必要です。同意は [ダッシュボード](https://www.firecrawl.dev/app/settings?tab=data-sources) で行うか、アプリケーションがユーザーの明示的な同意を得たうえで `terms/accept` を呼び出して行います。Firecrawl の上にエージェントを構築する場合、そのエージェントは `terms/accept` を呼び出す前にユーザーに確認する必要があります。データのリクエストは、プロバイダーの規約への同意にはあたりません。
+
+| `onTermsRequired` | 動作 |
+|---|---|
+| `skip`（デフォルト） | 同意済みのプロバイダーだけで回答し、処理がブロックされることはありません。`exchange.skippedProviders` に、役立ったはずの規約未同意のプロバイダーが一覧表示されます。 |
+| `ask` | `skip` と同じ動作に加えて、実行は `exchange.requiresAction` と `kind: "terms"` の `pendingApproval` で終了します。ユーザーに確認して同意し、スレッドを続行できます。 |
+
+スレッドのフォローアップのターンで `onTermsRequired` を省略すると、前のターンの値が使われます。ターンが有料呼び出しの承認（`requireApproval`）で終了した場合、そのターンに規約のオファーは含まれません。
+
+### レスポンスのフィールド {#response-fields}
+
+これらのフィールドは `GET /v2/agent/{id}` の `exchange` オブジェクトに含まれます。
+
+- `skippedProviders`（すべてのモード）: 役立ったはずの規約未同意のプロバイダーごとに 1 件ずつ、`provider`、`name`、`capability`、`adds`（追加できたはずの内容）、`reason: "terms_required"`、`version`（規約のバージョン）、`termsUrl`（ダッシュボードで同意する場所）を含むエントリーが入ります。
+- `requiresAction`（`ask` のみ）: `type: "accept_terms"`、`approvalId`、`providers` のリスト。`approvalId` は常に含まれ、スレッドを続行するときに応答する `terms` の保留中の承認の id です。各プロバイダーには、実行すべき `show`（`terms/show`）と `accept`（`terms/accept`）の呼び出しがそのまま含まれます。各プロバイダーの `digest`（および `accept.options.digest`）は常に含まれ、`null` の場合があります。これはカタログが digest を公開していないことを意味します。その場合は、先に `terms/show` を実行し、返された digest を送信してください。
+
+```json
+{
+  "status": "completed",
+  "exchange": {
+    "enabled": true,
+    "onTermsRequired": "ask",
+    "paidCalls": 0,
+    "creditsUsed": null,
+    "skippedProviders": [
+      {
+        "provider": "apollo",
+        "name": "Apollo",
+        "capability": "people/search",
+        "adds": "verified work emails and direct phone numbers",
+        "reason": "terms_required",
+        "version": "F-1.0.0",
+        "termsUrl": "https://www.firecrawl.dev/app/alexandria/apollo"
+      }
+    ],
+    "requiresAction": {
+      "type": "accept_terms",
+      "approvalId": "0199aaaa-0000-7000-8000-000000000000",
+      "providers": [
+        {
+          "provider": "apollo",
+          "name": "Apollo",
+          "capability": "people/search",
+          "version": "F-1.0.0",
+          "digest": "<sha256>",
+          "url": "https://www.firecrawl.dev/app/alexandria/apollo",
+          "show": { "provider": "firecrawl", "capability": "terms/show", "options": { "provider": "apollo" } },
+          "accept": {
+            "provider": "firecrawl",
+            "capability": "terms/accept",
+            "options": { "provider": "apollo", "version": "F-1.0.0", "digest": "<sha256>", "confirmed": true }
+          }
+        }
+      ]
+    }
+  },
+  "pendingApproval": {
+    "id": "0199aaaa-0000-7000-8000-000000000000",
+    "kind": "terms",
+    "reason": "Apollo could add verified work emails and direct phone numbers.",
+    "calls": [],
+    "terms": [{ "provider": "apollo", "name": "Apollo", "version": "F-1.0.0", "digest": "<sha256>", "url": "https://www.firecrawl.dev/app/alexandria/apollo" }],
+    "resolution": null
+  }
+}
+```
+
+### 同意してから続行する {#accept-then-continue}
+
+`ask` モードの場合:
+
+1. ユーザーに規約を表示します。プロバイダーの `show` 呼び出しを、`alexandria` を指定して [`/v2/scrape`](/ja/features/alexandria) で実行します。
+2. ユーザーが明示的に同意した場合に限り、同じ方法で `accept` 呼び出しを実行します。`accept.options.digest` が `null` の場合は、`terms/show` が返した digest を使います。
+
+```bash
+curl -X POST https://api.firecrawl.dev/v2/scrape \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "alexandria": {
+      "provider": "firecrawl",
+      "capability": "terms/accept",
+      "options": { "provider": "apollo", "version": "F-1.0.0", "digest": "<sha256>", "confirmed": true }
+    }
+  }'
+```
+
+3. `exchange.approve` で同じスレッドを続行します。オファーはまとめて承認され、`callIds` と `always` は無視されます。次のターンでは、すべてを再実行するのではなく、前の回答が示した不足分をそれらのプロバイダーで補います。
+
+```bash
+curl -X POST https://api.firecrawl.dev/v2/agent \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "threadId": "<threadId from the previous run>",
+    "prompt": "Continue with Apollo.",
+    "exchange": {
+      "approve": { "approvalId": "0199aaaa-0000-7000-8000-000000000000" }
+    }
+  }'
+```
+
+プロバイダーを使わずに進める場合は、代わりに `exchange.decline: { "approvalId": "..." }` で続行します。これによりオファー全体が辞退され、そのプロバイダーはスレッドの残りの期間、再びオファーされません。
+
+`skip` モードでは、応答すべき保留中の承認はありません。規約に同意したら、新しい実行（またはスレッドの新しいターン）を開始すると、そのプロバイダーを利用できます。
+
 ## パラメータ {#parameters}
 
 | パラメータ                   | Type    | Required | Description                                                                                                                                                                                                                                                                                                                                            |
@@ -258,6 +368,7 @@ Firecrawl Agent は **Spark 2** で動作します。Spark 2 は、同等の精�
 | `strictConstrainToURLs` | boolean | No       | `true` の場合、エージェントは `urls` 配列で指定された URL のみを訪問します                                                                                                                                                                                                                                                                                                        |
 | `webhook`               | object  | No       | エージェントのライフサイクルイベント (`agent.started`、`agent.action`、`agent.completed`、`agent.failed`、`agent.cancelled`) を受信する webhook。[webhook ペイロード](/ja/api-reference/endpoint/webhook-agent-started)を参照してください                                                                                                                                                           |
 | `maxCredits`            | number  | No       | このエージェントタスクで使用するクレジットの最大数。設定しない場合、デフォルトは **2,500** です。ダッシュボードでは **2,500** までの値をサポートしています。これを超える上限を設定するには、API 経由で `maxCredits` を指定してください (2,500 を超える値は常に有料リクエストとして扱われます)。上限に達するとジョブは失敗し、**データは一切返されません**。失敗した実行には課金されません。AI の推論に使用されたクレジットは失敗時には請求されず、実行中のツール呼び出し (`scraping`、`search`、`mapping` など) に使用されたクレジットは返還され、レスポンスには `creditsUsed: 0` が記録されます。 |
+| `exchange.onTermsRequired` | string | No | エージェントが使う Alexandria のデータプロバイダーが、チームが同意していない規約を必要とする場合の動作: `skip`（デフォルト）または `ask`。[規約への同意が必要なデータプロバイダー](#data-providers-that-need-terms) を参照してください |
 
 ## Agent と Extract：何が改善されたか {#agent-vs-extract-whats-improved}
 
