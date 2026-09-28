@@ -1,0 +1,117 @@
+---
+title: "Jev"
+description: "Use Firecrawl with TypeSafe's Jev to make fast, structured decisions on web data"
+---
+
+Integrate Firecrawl with TypeSafe's Jev to make fast, structured decisions on web data.
+
+## Setup
+
+```bash
+npm install firecrawl @typesafe-ai/sdk
+```
+
+Create `.env` file:
+```bash
+FIRECRAWL_API_KEY=your_firecrawl_key
+TYPESAFE_API_KEY=your_typesafe_key
+```
+
+## Scrape + Decide
+
+This example scrapes a page and asks Jev a single yes/no question about it. A `noul` question returns the probability of a yes answer, from 0 to 1.
+
+```typescript
+import { Firecrawl } from 'firecrawl';
+import { noul, TypeSafeClient } from '@typesafe-ai/sdk';
+
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+const typesafe = new TypeSafeClient();
+
+const page = await firecrawl.scrape('https://firecrawl.dev', { formats: ['markdown'] });
+
+const { answers } = await typesafe.systemOne({
+    state: { page: page.markdown ?? '' },
+    questions: {
+        hasFreeTier: noul('The product offers a free plan or free credits')
+    }
+});
+
+console.log('Free tier:', answers.hasFreeTier.noul);
+```
+
+## Search + Filter
+
+This example searches the web, has Jev rate each result from its title and description, and scrapes only the relevant ones. A `score` question takes a rubric ordered from 0, and returns the expected score, which can fall between levels. With three levels, a score of 1.5 or more leans toward "Directly answers the query".
+
+```typescript
+import { Firecrawl, type SearchResultWeb } from 'firecrawl';
+import { score, TypeSafeClient } from '@typesafe-ai/sdk';
+
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+const typesafe = new TypeSafeClient();
+
+const query = 'how to rotate Postgres credentials without downtime';
+const search = await firecrawl.search(query, { limit: 10 });
+const results = (search.web ?? []) as SearchResultWeb[];
+
+const rated = await Promise.all(results.map(async (result) => {
+    const { answers } = await typesafe.systemOne({
+        state: { query, title: result.title ?? '', description: result.description ?? '' },
+        questions: {
+            relevance: score('How well this result answers the query', [
+                'Unrelated to the query',
+                'Related topic, but does not answer the query',
+                'Directly answers the query'
+            ])
+        }
+    });
+    return { url: result.url, relevance: answers.relevance.score };
+}));
+
+const relevant = rated.filter((r) => r.relevance >= 1.5).map((r) => r.url);
+
+if (relevant.length > 0) {
+    const { data: pages } = await firecrawl.batchScrape(relevant, { options: { formats: ['markdown'] } });
+    console.log(`Scraped ${pages.length} of ${results.length} results`);
+}
+```
+
+## Qualify Leads
+
+This example scrapes company homepages and sends each one to your CRM or a person for review. A `choice` question returns the selected label along with a `confidence`, so you can hand uncertain answers to a person instead of trusting them.
+
+```typescript
+import { Firecrawl } from 'firecrawl';
+import { choice, noul, TypeSafeClient } from '@typesafe-ai/sdk';
+
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+const typesafe = new TypeSafeClient();
+
+const companies = ['https://ramp.com', 'https://mercury.com', 'https://www.jpmorganchase.com'];
+const { data: pages } = await firecrawl.batchScrape(companies, { options: { formats: ['markdown'] } });
+
+const leads = await Promise.all(pages.map(async (page) => {
+    const { answers } = await typesafe.systemOne({
+        state: { homepage: page.markdown ?? '' },
+        questions: {
+            isFintech: noul('The company builds financial technology such as payments, banking, or spend management software'),
+            stage: choice('How established the company appears to be', {
+                startup: 'Early stage, with a small team or a single product',
+                growth: 'Several products or a sizable customer base',
+                enterprise: 'A large, long-established company'
+            })
+        }
+    });
+
+    const { choice: stage, confidence } = answers.stage;
+    const qualified = answers.isFintech.noul > 0.8 && stage !== 'enterprise';
+    const route = qualified && confidence >= 0.6 ? 'crm' : 'review';
+
+    return { url: page.metadata?.sourceURL, stage, confidence, route };
+}));
+
+console.table(leads);
+```
+
+For more on question types and options, see the [TypeSafe docs](https://docs.typesafe.ai/).

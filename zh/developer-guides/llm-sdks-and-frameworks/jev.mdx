@@ -1,0 +1,118 @@
+---
+title: "Jev"
+description: "结合 Firecrawl 与 TypeSafe 的 Jev，基于网页数据快速做出结构化决策"
+---
+
+将 Firecrawl 与 TypeSafe 的 Jev 集成，基于网页数据快速做出结构化决策。
+
+## 配置 {#setup}
+
+```bash
+npm install firecrawl @typesafe-ai/sdk
+```
+
+创建 `.env` 文件：
+
+```bash
+FIRECRAWL_API_KEY=your_firecrawl_key
+TYPESAFE_API_KEY=your_typesafe_key
+```
+
+## 抓取 + 决策 {#scrape-decide}
+
+此示例会抓取一个页面，并针对该页面向 Jev 提出一个是/否问题。`noul` 问题返回答案为“是”的概率，取值范围为 0 到 1。
+
+```typescript
+import { Firecrawl } from 'firecrawl';
+import { noul, TypeSafeClient } from '@typesafe-ai/sdk';
+
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+const typesafe = new TypeSafeClient();
+
+const page = await firecrawl.scrape('https://firecrawl.dev', { formats: ['markdown'] });
+
+const { answers } = await typesafe.systemOne({
+    state: { page: page.markdown ?? '' },
+    questions: {
+        hasFreeTier: noul('The product offers a free plan or free credits')
+    }
+});
+
+console.log('Free tier:', answers.hasFreeTier.noul);
+```
+
+## 搜索 + 过滤 {#search-filter}
+
+此示例会先搜索网页，由 Jev 根据标题和描述为每条结果评分，然后仅抓取相关结果。`score` 问题接收一个从 0 开始排序的评分标准，并返回期望分数，该分数可能介于两个等级之间。以三个等级为例，得分达到 1.5 分及以上即更倾向于“直接回答了查询”。
+
+```typescript
+import { Firecrawl, type SearchResultWeb } from 'firecrawl';
+import { score, TypeSafeClient } from '@typesafe-ai/sdk';
+
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+const typesafe = new TypeSafeClient();
+
+const query = 'how to rotate Postgres credentials without downtime';
+const search = await firecrawl.search(query, { limit: 10 });
+const results = (search.web ?? []) as SearchResultWeb[];
+
+const rated = await Promise.all(results.map(async (result) => {
+    const { answers } = await typesafe.systemOne({
+        state: { query, title: result.title ?? '', description: result.description ?? '' },
+        questions: {
+            relevance: score('How well this result answers the query', [
+                'Unrelated to the query',
+                'Related topic, but does not answer the query',
+                'Directly answers the query'
+            ])
+        }
+    });
+    return { url: result.url, relevance: answers.relevance.score };
+}));
+
+const relevant = rated.filter((r) => r.relevance >= 1.5).map((r) => r.url);
+
+if (relevant.length > 0) {
+    const { data: pages } = await firecrawl.batchScrape(relevant, { options: { formats: ['markdown'] } });
+    console.log(`Scraped ${pages.length} of ${results.length} results`);
+}
+```
+
+## 筛选线索 {#qualify-leads}
+
+此示例会抓取公司主页，并将每条结果发送到你的 CRM，或交由人工审核。`choice` 问题会返回所选标签及对应的 `confidence`，这样你就可以把不确定的答案交给人工处理，而不是直接采信。
+
+```typescript
+import { Firecrawl } from 'firecrawl';
+import { choice, noul, TypeSafeClient } from '@typesafe-ai/sdk';
+
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+const typesafe = new TypeSafeClient();
+
+const companies = ['https://ramp.com', 'https://mercury.com', 'https://www.jpmorganchase.com'];
+const { data: pages } = await firecrawl.batchScrape(companies, { options: { formats: ['markdown'] } });
+
+const leads = await Promise.all(pages.map(async (page) => {
+    const { answers } = await typesafe.systemOne({
+        state: { homepage: page.markdown ?? '' },
+        questions: {
+            isFintech: noul('The company builds financial technology such as payments, banking, or spend management software'),
+            stage: choice('How established the company appears to be', {
+                startup: 'Early stage, with a small team or a single product',
+                growth: 'Several products or a sizable customer base',
+                enterprise: 'A large, long-established company'
+            })
+        }
+    });
+
+    const { choice: stage, confidence } = answers.stage;
+    const qualified = answers.isFintech.noul > 0.8 && stage !== 'enterprise';
+    const route = qualified && confidence >= 0.6 ? 'crm' : 'review';
+
+    return { url: page.metadata?.sourceURL, stage, confidence, route };
+}));
+
+console.table(leads);
+```
+
+有关问题类型和选项的更多信息，请参见 [TypeSafe 文档](https://docs.typesafe.ai/)。

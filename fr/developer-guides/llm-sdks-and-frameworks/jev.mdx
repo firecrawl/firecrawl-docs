@@ -1,0 +1,118 @@
+---
+title: "Jev"
+description: "Utilisez Firecrawl avec Jev de TypeSafe pour prendre des décisions rapides et structurées à partir de données web"
+---
+
+Intégrez Firecrawl à Jev de TypeSafe pour prendre des décisions rapides et structurées à partir de données web.
+
+## Configuration {#setup}
+
+```bash
+npm install firecrawl @typesafe-ai/sdk
+```
+
+Créez un fichier `.env` :
+
+```bash
+FIRECRAWL_API_KEY=your_firecrawl_key
+TYPESAFE_API_KEY=your_typesafe_key
+```
+
+## Scrape + Decide {#scrape-decide}
+
+Cet exemple scrape une page et pose à Jev une seule question fermée (oui/non) à son sujet. Une question `noul` renvoie la probabilité d&#39;une réponse affirmative, comprise entre 0 et 1.
+
+```typescript
+import { Firecrawl } from 'firecrawl';
+import { noul, TypeSafeClient } from '@typesafe-ai/sdk';
+
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+const typesafe = new TypeSafeClient();
+
+const page = await firecrawl.scrape('https://firecrawl.dev', { formats: ['markdown'] });
+
+const { answers } = await typesafe.systemOne({
+    state: { page: page.markdown ?? '' },
+    questions: {
+        hasFreeTier: noul('The product offers a free plan or free credits')
+    }
+});
+
+console.log('Free tier:', answers.hasFreeTier.noul);
+```
+
+## Recherche + filtrage {#search-filter}
+
+Cet exemple effectue une recherche sur le web, demande à Jev d&#39;évaluer chaque résultat à partir de son titre et de sa description, puis ne scrape que les résultats pertinents. Une question `score` utilise une grille d&#39;évaluation dont les niveaux sont numérotés à partir de 0 et renvoie le score attendu, qui peut se situer entre deux niveaux. Avec trois niveaux, un score de 1,5 ou plus penche vers « Répond directement à la requête ».
+
+```typescript
+import { Firecrawl, type SearchResultWeb } from 'firecrawl';
+import { score, TypeSafeClient } from '@typesafe-ai/sdk';
+
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+const typesafe = new TypeSafeClient();
+
+const query = 'how to rotate Postgres credentials without downtime';
+const search = await firecrawl.search(query, { limit: 10 });
+const results = (search.web ?? []) as SearchResultWeb[];
+
+const rated = await Promise.all(results.map(async (result) => {
+    const { answers } = await typesafe.systemOne({
+        state: { query, title: result.title ?? '', description: result.description ?? '' },
+        questions: {
+            relevance: score('How well this result answers the query', [
+                'Unrelated to the query',
+                'Related topic, but does not answer the query',
+                'Directly answers the query'
+            ])
+        }
+    });
+    return { url: result.url, relevance: answers.relevance.score };
+}));
+
+const relevant = rated.filter((r) => r.relevance >= 1.5).map((r) => r.url);
+
+if (relevant.length > 0) {
+    const { data: pages } = await firecrawl.batchScrape(relevant, { options: { formats: ['markdown'] } });
+    console.log(`Scraped ${pages.length} of ${results.length} results`);
+}
+```
+
+## Qualifier des prospects {#qualify-leads}
+
+Cet exemple scrape les pages d&#39;accueil d&#39;entreprises et envoie chacune d&#39;elles à votre CRM ou à une personne pour vérification. Une question `choice` renvoie le libellé sélectionné accompagné d&#39;un score `confidence`, ce qui vous permet de confier les réponses incertaines à une personne plutôt que de vous y fier aveuglément.
+
+```typescript
+import { Firecrawl } from 'firecrawl';
+import { choice, noul, TypeSafeClient } from '@typesafe-ai/sdk';
+
+const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+const typesafe = new TypeSafeClient();
+
+const companies = ['https://ramp.com', 'https://mercury.com', 'https://www.jpmorganchase.com'];
+const { data: pages } = await firecrawl.batchScrape(companies, { options: { formats: ['markdown'] } });
+
+const leads = await Promise.all(pages.map(async (page) => {
+    const { answers } = await typesafe.systemOne({
+        state: { homepage: page.markdown ?? '' },
+        questions: {
+            isFintech: noul('The company builds financial technology such as payments, banking, or spend management software'),
+            stage: choice('How established the company appears to be', {
+                startup: 'Early stage, with a small team or a single product',
+                growth: 'Several products or a sizable customer base',
+                enterprise: 'A large, long-established company'
+            })
+        }
+    });
+
+    const { choice: stage, confidence } = answers.stage;
+    const qualified = answers.isFintech.noul > 0.8 && stage !== 'enterprise';
+    const route = qualified && confidence >= 0.6 ? 'crm' : 'review';
+
+    return { url: page.metadata?.sourceURL, stage, confidence, route };
+}));
+
+console.table(leads);
+```
+
+Pour en savoir plus sur les types de questions et leurs options, consultez la [documentation TypeSafe](https://docs.typesafe.ai/).
