@@ -1,0 +1,239 @@
+---
+title: "Firecrawl para plataformas"
+description: "Referência da API para plataformas que criam e gerenciam API keys do Firecrawl para seus usuários"
+og:title: "Firecrawl para plataformas | Firecrawl"
+og:description: "Referência da API para plataformas que criam e gerenciam API keys do Firecrawl para seus usuários"
+---
+
+## Visão geral {#overview}
+
+O Firecrawl for Platforms permite que sua plataforma crie e gerencie API keys do Firecrawl para seus usuários diretamente pelo seu próprio backend. Assim, os usuários começam a usar o Firecrawl sem sair da sua plataforma.
+
+<Note>
+  Você mesmo pode configurar o Firecrawl for Platforms no [painel do Firecrawl](https://www.firecrawl.dev/app/partner-api). Qualquer administrador ou membro de uma organização pode criar uma integração: dê um nome a ela, escolha um tipo de integração, aceite o contrato correspondente e copie a chave da plataforma. A chave é exibida uma única vez. Depois, você pode gerar e revogar chaves em Configurações. Não é preciso fazer nenhuma solicitação nem aguardar aprovação.
+</Note>
+
+Existem dois tipos de integração. Ambos provisionam contas da mesma forma, pelos endpoints abaixo e com a mesma chave da plataforma. A diferença está em quem paga pelo uso do usuário:
+
+* **Standard**: seus usuários pagam o Firecrawl. Cada conta provisionada mantém seu próprio plano e sua própria cobrança no Firecrawl, começa no plano Free e faz upgrade diretamente com o Firecrawl.
+* **Gateway**: sua organização custeia o uso dos seus usuários. As contas criadas pela sua integração são inscritas no Gateway, então o uso elegível delas passa a ser cobrado da sua organização quando os créditos do próprio usuário se esgotam. Consulte [Gateway](#gateway) abaixo.
+
+Você escolhe o tipo de integração ao criá-la. Como não é simples alterá-lo depois, recomendamos avaliar as duas opções com atenção antes de aceitar o contrato. Para uma visão geral, consulte a [página do Firecrawl for Platforms](https://www.firecrawl.dev/firecrawl-for-platforms).
+
+Algumas ofertas de parceiro incluem créditos promocionais para usuários provisionados. Nesses casos, a página [Créditos de parceiro](/pt-BR/partner-credits) descreve o que o usuário recebe.
+
+### Gateway {#gateway}
+
+Gateway é um tipo de integração, não uma API separada. A mesma chave da plataforma e os mesmos endpoints continuam valendo. O que muda em uma integração Gateway:
+
+* As contas são criadas exclusivamente para a sua integração e funcionam apenas via API, sem login próprio no painel. Uma requisição nunca é vinculada a uma conta existente do Firecrawl, mesmo quando o email corresponde ao de uma delas.
+* Os créditos do próprio usuário são usados primeiro. O uso elegível que ultrapassar esses créditos é cobrado da sua organização.
+* As respostas de `POST /partner/v1/accounts` incluem um campo `gatewayStatus`.
+* A integração aceita a versão Gateway do contrato no momento da criação.
+
+## URL base {#base-url}
+
+```
+https://integrations.firecrawl.dev
+```
+
+## Autenticação {#authentication}
+
+Todas as solicitações de API da Platforms exigem um header `Authorization` com a sua chave da plataforma:
+
+```bash
+Authorization: Bearer <platform key>
+```
+
+As chaves da plataforma são diferentes das API keys comuns do Firecrawl. Você pode criá-las e revogá-las em Configurações &gt; Firecrawl for Platforms no [painel do Firecrawl](https://www.firecrawl.dev/app/partner-api).
+
+## Requisitos de segurança {#security-requirements}
+
+* **Somente no servidor**: as chaves da plataforma devem ser usadas apenas em código executado no servidor. Nunca exponha uma chave da plataforma em código de frontend, JavaScript do lado do cliente ou aplicativos móveis.
+* **Termos de Serviço**: antes de chamar `POST /partner/v1/accounts`, sua plataforma deve solicitar que o usuário aceite os [Termos de Serviço](https://www.firecrawl.dev/terms-of-service) do Firecrawl.
+
+***
+
+## Endpoints {#endpoints}
+
+### Criar usuário {#create-user}
+
+Provisiona uma conta do Firecrawl para um dos seus usuários, identificado pelo email, e retorna a API key correspondente.
+
+```
+POST /partner/v1/accounts
+```
+
+#### Comportamento {#behavior}
+
+Com uma integração **Standard**:
+
+* Se o usuário ainda não tiver uma conta no Firecrawl, um novo usuário e uma nova equipe serão criados.
+* Se o usuário já tiver uma conta no Firecrawl, mas nenhuma equipe associada à sua integração, será criada uma nova equipe associada à sua integração.
+* Se o usuário já tiver uma conta no Firecrawl e uma equipe associada à sua integração, a equipe existente será retornada.
+
+Com uma integração **Gateway**:
+
+* Cada conta é criada exclusivamente para a sua integração. Uma requisição nunca é vinculada a uma conta existente do Firecrawl, mesmo que o email corresponda a uma delas. O email é armazenado como endereço de contato da conta e não é usado para buscar contas.
+* Chamadas repetidas com o mesmo email retornam a mesma conta e a respectiva API key.
+
+Se a sua integração incluir créditos promocionais, eles serão aplicados uma única vez, no momento em que a conta for criada.
+
+#### Requisição {#request}
+
+```bash cURL
+curl -X POST "https://integrations.firecrawl.dev/partner/v1/accounts" \
+  -H "Authorization: Bearer <platform key>" \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com"}'
+```
+
+**Corpo**
+
+| Campo   | Tipo   | Obrigatório | Descrição                                                                                                         |
+| ------- | ------ | ----------- | ----------------------------------------------------------------------------------------------------------------- |
+| `email` | string | Sim         | O endereço de e-mail do usuário. Em uma integração Gateway, ele é armazenado como o endereço de contato da conta. |
+
+#### Resposta {#response}
+
+**`200 OK`**
+
+```json
+{
+  "apiKey": "fc-...",
+  "alreadyExisted": false
+}
+```
+
+Em uma integração Gateway, a resposta também inclui o status da inscrição:
+
+```json
+{
+  "apiKey": "fc-...",
+  "alreadyExisted": false,
+  "gatewayStatus": "enrolled"
+}
+```
+
+| Campo            | Tipo    | Descrição                                                                                                                                   |
+| ---------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apiKey`         | string  | A API key do Firecrawl da equipe que sua integração provisionou para este usuário                                                           |
+| `alreadyExisted` | boolean | `true` se sua integração já tiver provisionado uma conta para este email. Isso não indica se o email já existe em outra parte do Firecrawl. |
+| `gatewayStatus`  | string  | Somente para integrações Gateway. `enrolled` na chamada que cria a conta e `already_enrolled` nas chamadas seguintes para o mesmo email.    |
+
+#### Erros {#errors}
+
+| Status | Descrição                                                             |
+| ------ | --------------------------------------------------------------------- |
+| `400`  | Requisição inválida - o `email` está ausente ou em formato inválido   |
+| `401`  | Não autorizado - a chave da plataforma está incorreta ou é inválida   |
+| `500`  | Erro interno do servidor - esses erros são monitorados pelo Firecrawl |
+
+***
+
+### Validar API key {#validate-api-key}
+
+Valida uma API key do Firecrawl e retorna o nome da equipe associada e o endereço de e-mail do usuário. A API key só será considerada válida se tiver sido criada pela sua integração.
+
+```
+POST /partner/v1/api-keys/validate
+```
+
+#### Observações importantes {#important-notes}
+
+* As API keys do Firecrawl não têm permissões nem data de expiração.
+* Os usuários podem excluir API keys manualmente a qualquer momento.
+* As API keys excluídas não passam por exclusão lógica (soft delete). O Firecrawl não consegue distinguir uma chave excluída de uma que nunca existiu.
+
+#### Requisição {#request-2}
+
+```bash cURL
+curl -X POST "https://integrations.firecrawl.dev/partner/v1/api-keys/validate" \
+  -H "Authorization: Bearer <platform key>" \
+  -H "Content-Type: application/json" \
+  -d '{"apiKey": "fc-..."}'
+```
+
+**Corpo**
+
+| Campo    | Tipo   | Obrigatório | Descrição                |
+| -------- | ------ | ----------- | ------------------------ |
+| `apiKey` | string | Sim         | A API key a ser validada |
+
+#### Resposta {#response-2}
+
+**`200 OK`**
+
+```json
+{
+  "teamName": "Example Team",
+  "email": "user@example.com"
+}
+```
+
+| Campo      | Tipo   | Descrição                                                                                                |
+| ---------- | ------ | -------------------------------------------------------------------------------------------------------- |
+| `teamName` | string | O nome da equipe associada a esta API key                                                                |
+| `email`    | string | O email usado no provisionamento da conta. Em contas Gateway, é o endereço de contato que você informou. |
+
+#### Erros {#errors-2}
+
+| Status | Descrição                                                                            |
+| ------ | ------------------------------------------------------------------------------------ |
+| `400`  | Requisição inválida - a API key está mal formatada                                   |
+| `401`  | Não autorizado - a chave da plataforma está incorreta ou é inválida                  |
+| `404`  | API key não identificável - a chave não existe ou não foi criada pela sua integração |
+| `500`  | Erro interno do servidor - esses erros são monitorados pelo Firecrawl                |
+
+***
+
+### Rotacionar API key {#rotate-api-key}
+
+Exclui uma API key existente do Firecrawl e cria uma nova para o mesmo usuário e a mesma equipe.
+
+```
+POST /partner/v1/api-keys/rotate
+```
+
+#### Requisição {#request-3}
+
+```bash cURL
+curl -X POST "https://integrations.firecrawl.dev/partner/v1/api-keys/rotate" \
+  -H "Authorization: Bearer <platform key>" \
+  -H "Content-Type: application/json" \
+  -d '{"apiKey": "fc-..."}'
+```
+
+**Corpo**
+
+| Campo    | Tipo   | Obrigatório | Descrição                              |
+| -------- | ------ | ----------- | -------------------------------------- |
+| `apiKey` | string | Sim         | A API key a ser excluída e substituída |
+
+#### Resposta {#response-3}
+
+**`200 OK`**
+
+```json
+{
+  "apiKey": "fc-..."
+}
+```
+
+| Campo    | Tipo   | Descrição             |
+| -------- | ------ | --------------------- |
+| `apiKey` | string | A nova API key criada |
+
+#### Erros {#errors-3}
+
+| Status | Descrição                                                                            |
+| ------ | ------------------------------------------------------------------------------------ |
+| `401`  | Não autorizado - a chave da plataforma está incorreta ou é inválida                  |
+| `404`  | API key não identificável - a chave não existe ou não foi criada pela sua integração |
+| `500`  | Erro interno do servidor - esses erros são monitorados pela Firecrawl                |
+
+***
+
+## Primeiros passos {#get-started}
+
+Crie sua integração no [painel do Firecrawl](https://www.firecrawl.dev/app/partner-api): faça login, escolha Standard ou Gateway, aceite o contrato e copie sua chave da plataforma. Como não é fácil alterar o tipo de integração depois, confirme sua escolha antes de aceitar o contrato. Em seguida, chame os endpoints acima a partir do seu servidor. Tem dúvidas sobre a sua configuração? Escreva para [help@firecrawl.com](mailto:help@firecrawl.com). Pensando em uma integração maior? Escreva para [partnerships@firecrawl.dev](mailto:partnerships@firecrawl.dev).
