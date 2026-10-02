@@ -42,6 +42,10 @@ import AgentTracePollCURL from "/snippets/v2/agent/trace/poll/curl.mdx";
 import AgentArtifactsPython from "/snippets/v2/agent/artifacts/python.mdx";
 import AgentArtifactsJS from "/snippets/v2/agent/artifacts/js.mdx";
 import AgentArtifactsCURL from "/snippets/v2/agent/artifacts/curl.mdx";
+import AgentCreditLimitPython from "/snippets/v2/agent/credit-limit/python.mdx";
+import AgentCreditLimitJS from "/snippets/v2/agent/credit-limit/js.mdx";
+import AgentCreditLimitCURL from "/snippets/v2/agent/credit-limit/curl.mdx";
+import AgentCreditLimitOutput from "/snippets/v2/agent/credit-limit/output.mdx";
 import PlaygroundCTA from "/snippets/shared/playground-cta-agent.mdx";
 import ChooseDataExtractor from "/snippets/shared/choose-data-extractor/from-agent.mdx";
 
@@ -118,7 +122,7 @@ Agent jobs run asynchronously. When you submit a job, you'll receive a Job ID th
 |--------|-------------|
 | `processing` | The agent is still working on your request |
 | `completed` | Extraction finished successfully |
-| `failed` | An error occurred during extraction, or the job was cancelled (cancelled jobs report `failed` with a cancellation error message) |
+| `failed` | An error occurred during extraction, the run reached its `maxCredits` limit (see [Handling credit-limit stops](#handling-credit-limit-stops)), or the job was cancelled (cancelled jobs report `failed` with a cancellation error message) |
 
 <Note>
 **Cancellation is cooperative.** When you call the cancel endpoint, the request is registered immediately, but any step already in flight (an LLM reasoning step, a tool call, or a browser action) runs to a clean stopping point before the job stops. Credits can continue to accrue during that short window, so the final `creditsUsed` may be higher than the value reported at the moment you clicked cancel. A cancelled job reports status `failed` when polled and emits an `agent.cancelled` webhook event.
@@ -131,6 +135,43 @@ Agent jobs run asynchronously. When you submit a job, you'll receive a Job ID th
 #### Completed Example
 
 <AgentStatusCompleted />
+
+## Handling credit-limit stops
+
+A run that reaches its `maxCredits` limit stops and reports `status: "failed"`. To tell a credit stop apart from other failures, check `stopReason` instead of the `error` text. `stopReason` is `credit_limit_reached` when the run ran out of budget.
+
+`data` is only set on completed runs, never on a failed one. A failed credit-stop run may include what the agent had gathered before it stopped:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `stopReason` | string | Why the run stopped early. Currently only `credit_limit_reached`. |
+| `partial` | any | Best-effort JSON recovered from the incomplete run. It can be missing rows or fields. |
+| `partialSchemaValid` | boolean | Only present when the request included a `schema`. Whether `partial` validates against it. |
+| `message` | string | A short note on what is incomplete, when available. |
+
+These fields only appear once a run has failed. While a run is `processing`, the status response never includes a partial.
+
+<Warning>
+Use `partial` with care. It is incomplete, so don't store it as a finished result, and check `partialSchemaValid` before you parse it with your schema. Not every credit stop returns a `partial`, so handle runs that have only `stopReason`.
+</Warning>
+
+To finish the work, continue the run's thread with a follow-up prompt. The previous `partial` is restored for the agent and labelled incomplete, so the follow-up continues from it instead of starting over. A follow-up inherits the previous turn's `schema` and `urls` but not `maxCredits`, so set a budget for it.
+
+<CodeGroup>
+
+<AgentCreditLimitPython />
+<AgentCreditLimitJS />
+<AgentCreditLimitCURL />
+
+</CodeGroup>
+
+#### Credit-limit Example
+
+<AgentCreditLimitOutput />
+
+When you read a thread with `GET /v2/agent/threads/{threadId}?includeData=true` (`getAgentThread` in Node, `get_agent_thread` in Python), a run that ended with a partial has `status: "credit_limit_reached"` and reports `partial`, `partialSchemaValid` and `stopReason` instead of `data`.
+
+If you started the run with a `webhook`, the [`agent.failed`](/webhooks/events#agentfailed) event carries the same `stopReason`, and `partial`, `partialSchemaValid` and `message` when they are available.
 
 ## Listing agent runs
 
@@ -364,7 +405,7 @@ In `skip` mode there's no pending approval to answer. After the terms are accept
 | `schema` | object | No | Optional JSON schema for structured output |
 | `strictConstrainToURLs` | boolean | No | If `true`, the agent only visits the URLs provided in the `urls` array |
 | `webhook` | object | No | Webhook to receive agent lifecycle events (`agent.started`, `agent.action`, `agent.completed`, `agent.failed`, `agent.cancelled`). See the [webhook payloads](/api-reference/endpoint/webhook-agent-started) |
-| `maxCredits` | number | No | Maximum number of credits to spend on this agent task. Defaults to **2,500** if not set. The dashboard supports values up to **2,500**; for higher limits, set `maxCredits` via the API (values above 2,500 are always treated as paid requests). If the limit is reached, the job fails and **no data is returned**. Failed runs are not billed: credits used for AI reasoning are never charged on failure, any credits used for tool calls during the run (scraping, search, mapping, etc.) are refunded, and the response reports `creditsUsed: 0`. |
+| `maxCredits` | number | No | Maximum number of credits to spend on this agent task. Defaults to **2,500** if not set. The dashboard supports values up to **2,500**; for higher limits, set `maxCredits` via the API (values above 2,500 are always treated as paid requests). If the limit is reached, the job fails with `stopReason: "credit_limit_reached"` and **no `data` is returned**. The response may include a best-effort `partial`; see [Handling credit-limit stops](#handling-credit-limit-stops). Failed runs are not billed: credits used for AI reasoning are never charged on failure, any credits used for tool calls during the run (scraping, search, mapping, etc.) are refunded, and the response reports `creditsUsed: 0`. |
 | `exchange.onTermsRequired` | string | No | What to do when an Alexandria data provider the agent would use needs terms your team has not accepted: `skip` (default) or `ask`. See [Data providers that need terms](#data-providers-that-need-terms) |
 
 ## Agent vs Extract: What's Improved
