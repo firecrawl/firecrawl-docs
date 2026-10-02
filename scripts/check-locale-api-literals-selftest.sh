@@ -36,7 +36,7 @@ via their markdown content, and the snippet lives in snippets/custom.mdx.
 PAGE
 
 # Good: literals kept in English, the feature named as prose, a filename that
-# happens to be identifier-shaped.
+# happens to be identifier-shaped, and a sample-local variable.
 cat >"$work/repo/es/features/change-tracking.mdx" <<'PAGE'
 ---
 title: "Seguimiento de cambios"
@@ -44,6 +44,10 @@ title: "Seguimiento de cambios"
 
 Agrega `changeTracking` a tu array `formats`. El seguimiento de cambios compara
 las páginas por su contenido en markdown, y el fragmento vive en fragmento.mdx.
+
+```js
+const dadosRaspados = await app.scrapeUrl(url);
+```
 PAGE
 
 run_check() (

@@ -34,11 +34,13 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT INT TERM
 
 # Strings that are genuinely localizable, or English prose that happens to be
-# identifier-shaped. Extend this list rather than loosening the checks.
+# identifier-shaped, including sample-local variable names.
+# Extend this list rather than loosening the checks.
 cat >"$work/allow" <<'ALLOWLIST'
 exemplo.com
 ejemplo.com
 exemple.com
+dadosRaspados
 ALLOWLIST
 
 # API vocabulary: enum values and schema property names, restricted to
