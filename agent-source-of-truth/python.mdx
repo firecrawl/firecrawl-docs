@@ -3,7 +3,7 @@ title: "Python Source of Truth"
 description: "Canonical Firecrawl Python source of truth for agents using key endpoints like search, scrape, and interact."
 ---
 
-Canonical Firecrawl Python source of truth for agents. Generated from SDK source (`firecrawl-py` / `firecrawl` **4.22.1**) and the v2 OpenAPI spec. Method names, parameters, and return types match the v2 client in `firecrawl/v2/client.py` unless noted.
+Canonical Firecrawl Python source of truth for agents. Generated from SDK source (`firecrawl-py` / `firecrawl` **4.44.0**) and the v2 OpenAPI spec. Method names, parameters, and return types match the v2 client in `firecrawl/v2/client.py` unless noted.
 
 ## Install
 
@@ -46,6 +46,7 @@ Returns a `SearchData` model with optional lists:
 - `web` — web hits (`SearchResultWeb` or full `Document` when `scrape_options` hydrates content)
 - `news` — news hits (`SearchResultNews` or `Document`)
 - `images` — image hits (`SearchResultImages` or `Document`)
+- `tools` — discovered tools (`Optional[List[DiscoveredTool]]`, present when `domain_tools=True`)
 
 Omitted buckets are `None` when the API did not return that key.
 
@@ -73,6 +74,9 @@ results = client.search(
     location="San Francisco,California,United States",
     ignore_invalid_urls=True,
     timeout=300000,
+    include_domains=["docs.firecrawl.dev"],
+    country="US",
+    highlights=True,
     scrape_options=ScrapeOptions(
         formats=[
             "markdown",
@@ -106,6 +110,7 @@ results = client.search(
     - `"web"`: web index results
     - `"news"`: news results
     - `"images"`: image results
+    - `"alexandria"`: Alexandria knowledge source
     - `Source(type="web" | "news" | "images")`: typed source object form
 
 - `categories`
@@ -115,7 +120,8 @@ results = client.search(
     - `"developer"`: Developer Index results
     - `"research"`: research and academic results
     - `"pdf"`: PDF-focused results
-    - `Category(type="developer" | "research" | "pdf")`: typed category object form
+    - `"github"`: GitHub results
+    - `Category(type="developer" | "research" | "pdf" | "github")`: typed category object form
 
 - `limit`
   - Type: int
@@ -142,6 +148,47 @@ results = client.search(
 - `scrape_options`
   - Type: `ScrapeOptions`
   - Use when: you want to scrape each search result (see Scrape parameters for fields).
+
+- `domain_tools`
+  - Type: bool
+  - Use when: you want Alexandria domain-tool discovery.
+
+- `tool_detail`
+  - Type: Literal["compact", "summary", "full"]
+  - Use when: you want to control the detail level of discovery responses.
+
+- `include_domains`
+  - Type: list of str
+  - Use when: you want to restrict results to specific domains.
+  - Notes: mutually exclusive with `exclude_domains`.
+
+- `exclude_domains`
+  - Type: list of str
+  - Use when: you want to exclude specific domains from results.
+  - Notes: mutually exclusive with `include_domains`.
+
+- `country`
+  - Type: str
+  - Use when: you want results localized to a country.
+  - Notes: ISO 3166-1 alpha-2 country code.
+
+- `highlights`
+  - Type: bool
+  - Use when: you want query-relevant highlights in results.
+  - Notes: server default is `true`.
+
+- `enterprise`
+  - Type: list of str
+  - Use when: you need enterprise search options.
+  - Confirmed values: `"default"`, `"anon"`, `"zdr"`
+
+- `threat_protection`
+  - Type: `ThreatProtectionOptions`
+  - Use when: you need threat protection configuration.
+
+- `integration`
+  - Type: str
+  - Use when: you need to pass an integration identifier.
 
 ## Scrape
 
@@ -310,7 +357,6 @@ doc = client.scrape(
 - `min_age`
   - Type: int
   - Use when: you want cached data only if it is at least this old (milliseconds).
-  - Notes: only on `ScrapeOptions` passed as `scrape_options` to `client.search`. The `client.scrape` method does not accept `min_age`.
 
 - `store_in_cache`
   - Type: bool
@@ -320,6 +366,39 @@ doc = client.scrape(
   - Type: dict with `name` and optional `save_changes` or `saveChanges`
   - Use when: you want a persistent browser profile shared across scrapes and interactions.
 
+- `auto_resume`
+  - Type: bool
+  - Use when: you want the SDK to automatically resume large documents.
+  - Notes: SDK-only feature for auto-resuming large document scrapes.
+
+- `lockdown`
+  - Type: bool
+  - Use when: you want to serve only cached results.
+
+- `threat_protection`
+  - Type: `ThreatProtectionOptions`
+  - Use when: you need threat protection configuration.
+
+- `audit_metadata`
+  - Type: `AuditMetadata`
+  - Use when: you need user attribution for SIEM logging.
+
+- `domain_tools`
+  - Type: bool
+  - Use when: you want Alexandria domain-tool discovery.
+
+- `tool_detail`
+  - Type: Literal["compact", "summary", "full"]
+  - Use when: you want to control the detail level of discovery responses.
+
+- `integration`
+  - Type: str
+  - Use when: you need to pass an integration identifier.
+
+- `use_mock`
+  - Type: str
+  - Use when: you want to enable mock mode.
+
 ## Interact
 
 ### Why use it
@@ -328,7 +407,7 @@ Use interact when a page requires browser actions or code execution after a scra
 
 ### Preferred SDK method
 
-`client.interact(job_id, code=None, *, prompt=None, language="node", timeout=None)`
+`client.interact(job_id, code=None, *, prompt=None, language="node", timeout=None, origin=None)`
 
 `prompt` is keyword-only: call `client.interact(job_id, prompt="...")` or `client.interact(job_id, code="...")`. At least one of `code` or `prompt` must be non-empty (validated in `firecrawl/v2/methods/scrape.py`).
 
@@ -351,6 +430,7 @@ result = client.interact(
     code="print(await page.title())",
     language="python",
     timeout=60,
+    origin="docs-bot",
 )
 ```
 
@@ -382,9 +462,13 @@ result = client.interact(
   - Type: int
   - Use when: you need an execution timeout in seconds.
 
+- `origin`
+  - Type: str
+  - Use when: you want to attach an origin label for execution telemetry.
+
 ### Return value
 
-Returns `BrowserExecuteResponse`: `success`, optional `live_view_url`, `interactive_live_view_url`, `output`, `stdout`, `result`, `stderr`, `exit_code`, `killed`, `error` (API camelCase is normalized to snake_case on the model).
+Returns `BrowserExecuteResponse`: `success`, optional `live_view_url`, `interactive_live_view_url`, `output`, `stdout`, `result`, `stderr`, `exit_code`, `killed`, `error`, `cdp_url`, `truncated` (API camelCase is normalized to snake_case on the model).
 
 ## Ask (Agentic Debugging)
 
@@ -507,7 +591,7 @@ print(response.json()["answer"])
 
 ## Notes
 
-- Deprecated aliases: `scrape_execute` → `interact`; `stop_interactive_browser` and `delete_scrape_browser` → `stop_interaction`.
+- Deprecated aliases: `scrape_url` → `scrape`; `scrape_execute` → `interact`; `stop_interactive_browser` and `delete_scrape_browser` → `stop_interaction`.
 - The top-level `Firecrawl` client exposes v2 methods directly; v1 remains under `client.v1`.
 - The bundled v2 OpenAPI snippet for `POST /v2/scrape/{jobId}/interact` may only document `code`; the Python SDK and server accept either `code` or `prompt` for this endpoint.
 
