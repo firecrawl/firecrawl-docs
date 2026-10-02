@@ -1,6 +1,6 @@
 export const CursorInstallButton = () => {
   const installUrl = `cursor://anysphere.cursor-deeplink/mcp/install?name=firecrawl&config=${btoa(
-    JSON.stringify({ url: "https://mcp.firecrawl.dev/v2/mcp" })
+    JSON.stringify({ url: "https://mcp.firecrawl.dev/v2/mcp-oauth" })
   )}`;
 
   return (
