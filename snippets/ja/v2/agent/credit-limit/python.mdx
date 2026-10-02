@@ -1,0 +1,40 @@
+```python Python
+from firecrawl import Firecrawl
+from pydantic import BaseModel
+from typing import List
+
+app = Firecrawl(api_key="fc-YOUR_API_KEY")
+
+class Company(BaseModel):
+    name: str
+    website: str
+
+class CompaniesSchema(BaseModel):
+    companies: List[Company]
+
+result = app.agent(
+    prompt="Find every company in the YC W24 batch that builds developer tools",
+    schema=CompaniesSchema,
+    max_credits=100
+)
+
+if result.status == "completed":
+    print(result.data)
+elif result.status == "failed" and result.stop_reason == "credit_limit_reached":
+    # 失敗した実行では `data` は設定されません。`partial` はベストエフォートで返されるため、含まれない場合があります。
+    if result.partial is not None:
+        if result.partial_schema_valid is not True:
+            print("The partial result does not match the schema yet.")
+        print(result.message, result.partial)
+
+    # 同じスレッドで続行します。Agent は未完了の結果の続きから処理を再開します。
+    # フォローアップのリクエストはスキーマを引き継ぎますが、max_credits は引き継がないため、改めて上限を設定してください。
+    follow_up = app.agent(
+        thread_id=result.thread_id,
+        prompt="Continue and finish the list.",
+        max_credits=200
+    )
+    print(follow_up.status, follow_up.data)
+else:
+    print(result.error)
+```
