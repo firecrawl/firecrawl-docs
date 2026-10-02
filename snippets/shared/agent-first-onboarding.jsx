@@ -79,7 +79,7 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true } = {})
     },
     {
       id: "claude-code",
-      name: "Claude Code",
+      name: "Claude & Claude Code",
       detail: isHuman ? "Install plugin" : "Run in terminal",
       icon: "/images/agent-clients/claude-code.svg",
       iconClassName: "",

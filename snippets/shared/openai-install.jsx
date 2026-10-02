@@ -19,7 +19,7 @@ export const OpenAIInstallButtons = ({ includeClaude = false } = {}) => (
           rel="noopener noreferrer"
         >
           <img src="/images/agent-clients/claude-ai.svg" width="20" height="20" alt="" />
-          Add to Claude
+          Add to Claude & Claude Code
           <span aria-hidden="true">↗</span>
         </a>
       )}
