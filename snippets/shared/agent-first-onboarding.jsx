@@ -52,17 +52,22 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true } = {})
   const clients = [
     {
       id: "codex",
-      name: "Codex",
-      detail: "Run in terminal",
+      name: "ChatGPT & Codex",
+      detail: isHuman ? "Install plugin" : "Run in terminal",
       icon: "/images/agent-clients/codex.svg",
       iconClassName: "",
+      installUrl: isHuman
+        ? "https://chatgpt.com/plugins/plugin_asdk_app_6a314a73f8ac819195b0d55e36b9c609?q=firecrawl"
+        : undefined,
       command: isHuman
         ? `codex mcp add firecrawl --url ${mcpUrl} && codex mcp login firecrawl`
         : `codex mcp add firecrawl --url ${mcpUrl}`,
-      description: "Run this in your terminal to add Firecrawl as a remote MCP server in Codex.",
+      description: isHuman
+        ? "Install the Firecrawl plugin, or use the command below for a direct MCP connection."
+        : "Run this in your terminal to add Firecrawl as a remote MCP server in Codex CLI.",
       hint: isHuman ? (
         <>
-          Then enter <code>/mcp</code> in Codex and confirm <strong>firecrawl</strong> is
+          Then enter <code>/mcp</code> in Codex CLI and confirm <strong>firecrawl</strong> is
           connected.
         </>
       ) : (
@@ -74,12 +79,15 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true } = {})
     },
     {
       id: "claude-code",
-      name: "Claude Code",
-      detail: "Run in terminal",
+      name: "Claude & Claude Code",
+      detail: isHuman ? "Install plugin" : "Run in terminal",
       icon: "/images/agent-clients/claude-code.svg",
       iconClassName: "",
+      installUrl: isHuman ? "https://claude.com/plugins/firecrawl" : undefined,
       command: `claude mcp add --transport http firecrawl ${mcpUrl}`,
-      description: "Run this in your terminal to add Firecrawl as a remote MCP server in Claude Code.",
+      description: isHuman
+        ? "Install the Firecrawl plugin, or use the command below for a direct MCP connection."
+        : "Run this in your terminal to add Firecrawl as a remote MCP server in Claude Code.",
       hint: isHuman ? (
         <>
           Then enter <code>/mcp</code> in Claude Code and complete the browser sign-in.
@@ -363,8 +371,14 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true } = {})
             >
               <p className="fc-client-description">{client.description}</p>
               {client.installUrl && (
-                <a className="fc-install-button" href={client.installUrl}>
-                  Add to Cursor {arrowIcon()}
+                <a
+                  className="fc-install-button"
+                  href={client.installUrl}
+                  target={client.id === "cursor" ? undefined : "_blank"}
+                  rel={client.id === "cursor" ? undefined : "noopener noreferrer"}
+                >
+                  <img src={client.icon} width="18" height="18" alt="" />
+                  Add to {client.name} {arrowIcon()}
                 </a>
               )}
               {client.command
