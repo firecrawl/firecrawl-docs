@@ -5,7 +5,6 @@ og:title: "Agent | Firecrawl"
 og:description: "Web 上のあらゆる場所に存在するデータを収集します。欲しい内容を伝えれば、あとは /agent がすべて処理します。"
 sidebarTitle: "Agent"
 icon: "magic"
-noindex: true
 
 ---
 
@@ -43,6 +42,10 @@ import AgentTracePollCURL from "/snippets/ja/v2/agent/trace/poll/curl.mdx";
 import AgentArtifactsPython from "/snippets/ja/v2/agent/artifacts/python.mdx";
 import AgentArtifactsJS from "/snippets/ja/v2/agent/artifacts/js.mdx";
 import AgentArtifactsCURL from "/snippets/ja/v2/agent/artifacts/curl.mdx";
+import AgentCreditLimitPython from "/snippets/ja/v2/agent/credit-limit/python.mdx";
+import AgentCreditLimitJS from "/snippets/ja/v2/agent/credit-limit/js.mdx";
+import AgentCreditLimitCURL from "/snippets/ja/v2/agent/credit-limit/curl.mdx";
+import AgentCreditLimitOutput from "/snippets/ja/v2/agent/credit-limit/output.mdx";
 import PlaygroundCTA from "/snippets/ja/shared/playground-cta-agent.mdx";
 import ChooseDataExtractor from "/snippets/ja/shared/choose-data-extractor/from-agent.mdx";
 
@@ -55,16 +58,12 @@ Firecrawl の `/agent` は、検索・ナビゲーション・データ収集を
 
 **`/agent` は、あらゆる場所にあるデータに対する「ディープリサーチ」と考えてください！**
 
-<Info>
-  **Research Preview**: Agent はアーリーアクセス段階です。動作が荒削りな部分がありますが、今後大きく改善されていきます。
-</Info>
-
 Agent は `/extract` の優れた点をすべて引き継ぎつつ、さらに強化しています:
 
-* **URL 不要**: `prompt` パラメータで必要な内容を伝えるだけです。URL の指定は任意です
-* **Deep Web Search**: サイトの奥深くまで自律的に検索・移動して目的のデータを見つけ出します
-* **信頼性と正確性**: 幅広いクエリやユースケースに対応します
-* **高速**: 複数のソースを並列処理し、より早く結果を返します
+* **URL 不要**: 必要な内容を `prompt` パラメータで記述するだけでよく、URL は任意です
+* **ディープ Web 検索**: サイト内を自律的に検索・巡回し、必要なデータを深部まで探索
+* **高い信頼性と正確性**: 幅広い種類のクエリやユースケースで安定して動作
+* **高速**: 複数ソースを並列処理して結果を素早く取得
 
 <PlaygroundCTA />
 
@@ -116,11 +115,11 @@ Agent ジョブは非同期で実行されます。ジョブの実行を開始�
 
 ### 考えられるステータス {#possible-states}
 
-| ステータス        | 説明                                                                             |
-| ------------ | ------------------------------------------------------------------------------ |
-| `processing` | エージェントがリクエストを処理中です                                                             |
-| `completed`  | 抽出が正常に完了しました                                                                   |
-| `failed`     | 抽出中にエラーが発生したか、ジョブがキャンセルされました (キャンセルされたジョブは、キャンセルのエラーメッセージとともに `failed` を報告します) |
+| ステータス        | 説明                                                                                                                                                               |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `processing` | エージェントがリクエストを処理中です                                                                                                                                               |
+| `completed`  | 抽出が正常に完了しました                                                                                                                                                     |
+| `failed`     | 抽出中にエラーが発生した、実行が `maxCredits` の上限に達した ([クレジット上限による停止への対応](#handling-credit-limit-stops) を参照)、またはジョブがキャンセルされました (キャンセルされたジョブは、キャンセルのエラーメッセージとともに `failed` を報告します) |
 
 <Note>
   **キャンセルは協調的に処理されます。** cancel エンドポイントを呼び出すと、リクエストはただちに受け付けられますが、すでに進行中のステップ (LLM の推論ステップ、ツール呼び出し、またはブラウザ操作) は、ジョブが停止する前に、正常に停止できる区切りまで実行されます。その短い間もクレジットが引き続き加算される可能性があるため、最終的な `creditsUsed` は、キャンセルをクリックした時点で表示されていた値より大きくなる場合があります。キャンセルされたジョブは、ポーリング時にステータス `failed` を報告し、`agent.cancelled` webhook イベントを発行します。
@@ -133,6 +132,43 @@ Agent ジョブは非同期で実行されます。ジョブの実行を開始�
 #### 完成例 {#completed-example}
 
 <AgentStatusCompleted />
+
+## クレジット上限による停止への対応 {#handling-credit-limit-stops}
+
+`maxCredits` の上限に達した実行は停止し、`status: "failed"` を返します。クレジット上限による停止を他の失敗と区別するには、`error` のテキストではなく `stopReason` を確認してください。予算を使い切って実行が停止した場合、`stopReason` は `credit_limit_reached` になります。
+
+`data` が設定されるのは完了した実行のみで、失敗した実行には設定されません。クレジット上限で停止した失敗実行には、停止までに Agent が収集した内容が含まれる場合があります。
+
+| フィールド                | 型       | 説明                                                                    |
+| -------------------- | ------- | --------------------------------------------------------------------- |
+| `stopReason`         | string  | 実行が途中で停止した理由。現在は `credit_limit_reached` のみです。                         |
+| `partial`            | any     | 未完了の実行からベストエフォートで復元された JSON。行やフィールドが欠けている可能性があります。                    |
+| `partialSchemaValid` | boolean | リクエストに `schema` が含まれていた場合にのみ存在します。`partial` がそのスキーマの検証を通過するかどうかを示します。 |
+| `message`            | string  | 未完了の内容に関する簡単な説明(利用可能な場合)。                                             |
+
+これらのフィールドは、実行が失敗した後にのみ含まれます。実行が `processing` の間は、ステータスのレスポンスに partial が含まれることはありません。
+
+<Warning>
+  `partial` は慎重に扱ってください。不完全なデータであるため、完成した結果として保存しないでください。また、スキーマで解析する前に `partialSchemaValid` を確認してください。クレジット上限で停止した場合でも必ず `partial` が返されるとは限らないため、`stopReason` しか含まれない実行にも対応できるようにしてください。
+</Warning>
+
+作業を完了させるには、フォローアップのプロンプトを送って実行のスレッドを継続します。以前の `partial` は未完了のラベル付きで Agent に引き渡されるため、フォローアップは最初からやり直すことなく、その続きから処理を進めます。フォローアップは前のターンの `schema` と `urls` を引き継ぎますが、`maxCredits` は引き継がないため、改めて予算を設定してください。
+
+<CodeGroup>
+  <AgentCreditLimitPython />
+
+  <AgentCreditLimitJS />
+
+  <AgentCreditLimitCURL />
+</CodeGroup>
+
+#### クレジット上限の例 {#credit-limit-example}
+
+<AgentCreditLimitOutput />
+
+`GET /v2/agent/threads/{threadId}?includeData=true` (Node では `getAgentThread`、Python では `get_agent_thread`) でスレッドを取得すると、部分的な結果で終了した実行は `status: "credit_limit_reached"` となり、`data` の代わりに `partial`、`partialSchemaValid`、`stopReason` が返されます。
+
+`webhook` を指定して実行を開始した場合、[`agent.failed`](/ja/webhooks/events#agentfailed) イベントには同じ `stopReason` が含まれます。また、`partial`、`partialSchemaValid`、`message` も利用可能であれば含まれます。
 
 ## エージェント実行の一覧取得 {#listing-agent-runs}
 
@@ -358,17 +394,17 @@ curl -X POST https://api.firecrawl.dev/v2/agent \
 
 ## パラメータ {#parameters}
 
-| パラメータ                      | Type    | Required | Description                                                                                                                                                                                                                                                                                                                                            |
-| -------------------------- | ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `prompt`                   | string  | **Yes**  | 抽出したいデータを自然言語で記述した文字列 (最大 10,000 文字)                                                                                                                                                                                                                                                                                                                   |
-| `model`                    | string  | No       | すべての実行で使用されるモデル `spark-2` がデフォルトです。Spark 1 モデルは非推奨であり、`spark-2` にルーティングされます                                                                                                                                                                                                                                                                            |
-| `effort`                   | string  | No       | 推論予算: `low`、`medium`、または `high`。すべての実行は `spark-2` で行われるため、`effort` は `model` の有無にかかわらず送信できます                                                                                                                                                                                                                                                           |
-| `urls`                     | array   | No       | 抽出対象を絞り込むための任意の URL リスト                                                                                                                                                                                                                                                                                                                                |
-| `schema`                   | object  | No       | 構造化された出力のための任意の JSON スキーマ                                                                                                                                                                                                                                                                                                                              |
-| `strictConstrainToURLs`    | boolean | No       | `true` の場合、エージェントは `urls` 配列で指定された URL のみを訪問します                                                                                                                                                                                                                                                                                                        |
-| `webhook`                  | object  | No       | エージェントのライフサイクルイベント (`agent.started`、`agent.action`、`agent.completed`、`agent.failed`、`agent.cancelled`) を受信する webhook。[webhook ペイロード](/ja/api-reference/endpoint/webhook-agent-started)を参照してください                                                                                                                                                           |
-| `maxCredits`               | number  | No       | このエージェントタスクで使用するクレジットの最大数。設定しない場合、デフォルトは **2,500** です。ダッシュボードでは **2,500** までの値をサポートしています。これを超える上限を設定するには、API 経由で `maxCredits` を指定してください (2,500 を超える値は常に有料リクエストとして扱われます)。上限に達するとジョブは失敗し、**データは一切返されません**。失敗した実行には課金されません。AI の推論に使用されたクレジットは失敗時には請求されず、実行中のツール呼び出し (`scraping`、`search`、`mapping` など) に使用されたクレジットは返還され、レスポンスには `creditsUsed: 0` が記録されます。 |
-| `exchange.onTermsRequired` | string  | No       | エージェントが使用する Alexandria データプロバイダーが、Team でまだ同意していない利用規約への同意を必要とする場合の動作: `skip` (デフォルト) または `ask`。[利用規約への同意が必要なデータプロバイダー](#data-providers-that-need-terms)を参照してください                                                                                                                                                                                       |
+| パラメータ                      | 型    | Required | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| -------------------------- | ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `prompt`                   | string  | **Yes**  | 抽出したいデータを自然言語で記述した文字列 (最大 10,000 文字)                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `model`                    | string  | No       | すべての実行で使用されるモデル `spark-2` がデフォルトです。Spark 1 モデルは非推奨であり、`spark-2` にルーティングされます                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `effort`                   | string  | No       | 推論予算: `low`、`medium`、または `high`。すべての実行は `spark-2` で行われるため、`effort` は `model` の有無にかかわらず送信できます                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `urls`                     | array   | No       | 抽出対象を絞り込むための任意の URL リスト                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `schema`                   | object  | No       | 構造化された出力のための任意の JSON スキーマ                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `strictConstrainToURLs`    | boolean | No       | `true` の場合、エージェントは `urls` 配列で指定された URL のみを訪問します                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `webhook`                  | object  | No       | エージェントのライフサイクルイベント (`agent.started`、`agent.action`、`agent.completed`、`agent.failed`、`agent.cancelled`) を受信する webhook。[webhook ペイロード](/ja/api-reference/endpoint/webhook-agent-started)を参照してください                                                                                                                                                                                                                                                                                                                 |
+| `maxCredits`               | number  | No       | このエージェントタスクで使用するクレジットの最大数。設定しない場合、デフォルトは **2,500** です。ダッシュボードでは **2,500** までの値をサポートしています。これを超える上限を設定するには、API 経由で `maxCredits` を指定してください (2,500 を超える値は常に有料リクエストとして扱われます)。上限に達するとジョブは `stopReason: "credit_limit_reached"` で失敗し、**`data` は一切返されません**。レスポンスには、ベストエフォートで取得された `partial` が含まれる場合があります。詳しくは[クレジット上限による停止への対応](#handling-credit-limit-stops)を参照してください。失敗した実行には課金されません。AI の推論に使用されたクレジットは失敗時には請求されず、実行中のツール呼び出し (`scraping`、`search`、`mapping` など) に使用されたクレジットは返還され、レスポンスには `creditsUsed: 0` が記録されます。 |
+| `exchange.onTermsRequired` | string  | No       | エージェントが使用する Alexandria データプロバイダーが、Team でまだ同意していない利用規約への同意を必要とする場合の動作: `skip` (デフォルト) または `ask`。[利用規約への同意が必要なデータプロバイダー](#data-providers-that-need-terms)を参照してください                                                                                                                                                                                                                                                                                                                                             |
 
 ## Agent と Extract：何が改善されたか {#agent-vs-extract-whats-improved}
 
@@ -420,7 +456,7 @@ Firecrawl Agent は、データ抽出リクエストの複雑さに応じてス�
 
 ### Agentの料金の仕組み {#how-agent-pricing-works}
 
-Research Preview期間中、Agentの料金は**動的でクレジットベース**です：
+Agentの料金は**動的でクレジットベース**です：
 
 * **シンプルな抽出** (1ページからの連絡先情報など) は、通常必要なクレジット数が少なく、コストも低くなります
 * **複雑なリサーチタスク** (複数ドメインにわたる競合分析など) は、より多くのクレジットを使用しますが、必要な総工数を反映します
@@ -443,19 +479,15 @@ Spark-2 Fast で複数のエージェントを並列実行する場合、料金�
 
 ### コスト管理 {#managing-costs}
 
-エージェント は高コストになることがありますが、コストを下げる方法がいくつかあります:
+Agent は高コストになることがありますが、コストを下げる方法がいくつかあります:
 
 * **無料実行から始める**: 毎日 5 回の無料リクエストを使って料金感をつかむ
 * **`maxCredits` パラメータを設定する**: 消費してもよいクレジットの最大数を設定して支出を制限します。ダッシュボードでは上限は 2,500 クレジットです。より高い上限を設定するには、API 経由で `maxCredits` パラメータを直接使用してください (注: 2,500 を超える値は常に有料リクエストとして課金されます)
 * **プロンプトを最適化する**: より具体的なプロンプトほど、使用するクレジットが少なくなることが多い
-* **大きなタスクを小さな実行に分割する**: 1 回の エージェント 実行では、構造化データが約 150〜200 行返されます。大規模な抽出ジョブでは、カテゴリ、地域、または URL バッチ (1 回の実行あたり 3〜5 URL) ごとに分割し、結果を結合してください。これにより、各実行を `maxCredits` の上限より十分低く保つこともできます。
+* **大きなタスクを小さな実行に分割する**: 1 回の Agent 実行では、構造化データが約 150〜200 行返されます。大規模な抽出ジョブでは、カテゴリ、地域、または URL バッチ (1 回の実行あたり 3〜5 URL) ごとに分割し、結果を結合してください。これにより、各実行を `maxCredits` の上限より十分低く保つこともできます。
 * **利用状況を監視する**: ダッシュボードを通じて消費量を追跡する
 * **期待値を設定する**: 複数ドメインにわたる複雑なリサーチは、単純な単一ページの抽出よりも多くのクレジットを使用します
 
-Try Agent now at [firecrawl.dev/app/agent](https://www.firecrawl.dev/app/agent) で今すぐ エージェント を試して、あなたの具体的なユースケースでクレジット使用量がどのようにスケールするかを確認してください。
-
-<Note>
-  料金は Research Preview から一般提供へ移行する際に変更される可能性があります。現在のユーザーには、料金変更がある場合は事前に通知されます。
-</Note>
+Try Agent now at [firecrawl.dev/app/agent](https://www.firecrawl.dev/app/agent) で今すぐ Agent を試して、あなたの具体的なユースケースでクレジット使用量がどのようにスケールするかを確認してください。
 
 > Firecrawl API キーが必要な AI エージェント ですか? 自動オンボーディング手順については [firecrawl.dev/agent-onboarding/SKILL.md](https://www.firecrawl.dev/agent-onboarding/SKILL.md) を参照してください。

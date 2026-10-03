@@ -5,7 +5,6 @@ og:title: "代理 | Firecrawl"
 og:description: "从网络上的任意位置获取数据。描述你的需求，剩下的交给 /agent。"
 sidebarTitle: "代理"
 icon: "magic"
-noindex: true
 
 ---
 
@@ -43,6 +42,10 @@ import AgentTracePollCURL from "/snippets/zh/v2/agent/trace/poll/curl.mdx";
 import AgentArtifactsPython from "/snippets/zh/v2/agent/artifacts/python.mdx";
 import AgentArtifactsJS from "/snippets/zh/v2/agent/artifacts/js.mdx";
 import AgentArtifactsCURL from "/snippets/zh/v2/agent/artifacts/curl.mdx";
+import AgentCreditLimitPython from "/snippets/zh/v2/agent/credit-limit/python.mdx";
+import AgentCreditLimitJS from "/snippets/zh/v2/agent/credit-limit/js.mdx";
+import AgentCreditLimitCURL from "/snippets/zh/v2/agent/credit-limit/curl.mdx";
+import AgentCreditLimitOutput from "/snippets/zh/v2/agent/credit-limit/output.mdx";
 import PlaygroundCTA from "/snippets/zh/shared/playground-cta-agent.mdx";
 import ChooseDataExtractor from "/snippets/zh/shared/choose-data-extractor/from-agent.mdx";
 
@@ -55,16 +58,12 @@ Firecrawl `/agent` 是一个魔法般的 API，它可以在最广泛的网站范
 
 **把 `/agent` 想象成：无论数据藏在哪里，它都能替你做深度调研！**
 
-<Info>
-  **Research Preview**：代理目前处于早期访问阶段。可能会有不完善之处，但它会随着时间显著变好。
-</Info>
-
 代理构建于 `/extract` 的全部优势之上，并在此基础上更进一步：
 
-* **无需 URL**：只需通过 `prompt` 参数描述你的需求即可，URL 是可选的
-* **深度网页搜索**：自主搜索并深入站点内部，找到你所需的数据
-* **可靠且准确**：适用于各种各样的查询与用例
-* **更快速**：并行处理多个来源，更快得到结果
+* **无需提供 URL**：只需通过 `prompt` 参数描述你的需求，URL 是可选的。
+* **深度网页搜索**：自主搜索并深入浏览站点以找到所需数据
+* **可靠且准确**：适用于多种类型的查询和使用场景
+* **更快**：并行处理多个数据源以更快返回结果
 
 <PlaygroundCTA />
 
@@ -116,11 +115,11 @@ Firecrawl `/agent` 是一个魔法般的 API，它可以在最广泛的网站范
 
 ### 可能的状态 {#possible-states}
 
-| 状态           | 描述                                               |
-| ------------ | ------------------------------------------------ |
-| `processing` | 代理仍在处理你的请求                                       |
-| `completed`  | 提取已成功完成                                          |
-| `failed`     | 提取过程中发生错误，或任务被取消 (被取消的任务会报告 `failed`，并附带取消错误消息)  |
+| 状态           | 描述                                                                                                                      |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `processing` | 代理仍在处理你的请求                                                                                                              |
+| `completed`  | 提取已成功完成                                                                                                                 |
+| `failed`     | 提取过程中发生错误、运行达到 `maxCredits` 上限 (请参见[处理因额度上限而停止的情况](#handling-credit-limit-stops))，或任务被取消 (被取消的任务会报告 `failed`，并附带取消错误消息) |
 
 <Note>
   **取消是协作式的。** 当你调用取消端点时，请求会立即登记，但任何已经在进行中的步骤 (如 LLM 推理步骤、工具调用或浏览器操作) 都会先运行到可安全停止的节点，然后任务才会停止。在这段短暂时间内，额度仍可能继续累积，因此最终的 `creditsUsed` 可能高于你点击取消时显示的数值。被取消的任务在轮询时会报告状态 `failed`，并触发 `agent.cancelled` Webhook 事件。
@@ -133,6 +132,43 @@ Firecrawl `/agent` 是一个魔法般的 API，它可以在最广泛的网站范
 #### 已完成示例 {#completed-example}
 
 <AgentStatusCompleted />
+
+## 处理因额度上限而停止的情况 {#handling-credit-limit-stops}
+
+运行 达到 `maxCredits` 上限时会停止，并报告 `status: "failed"`。要区分因额度耗尽而停止与其他失败，请检查 `stopReason`，而不是 `error` 文本。运行 用尽预算时，`stopReason` 为 `credit_limit_reached`。
+
+`data` 仅在已完成的 运行 中设置，失败的 运行 中不会有。因额度耗尽而失败的 运行 可能会包含代理在停止前已收集到的内容：
+
+| 字段                   | 类型      | 描述                                                 |
+| -------------------- | ------- | -------------------------------------------------- |
+| `stopReason`         | string  | 运行 提前停止的原因。目前仅有 `credit_limit_reached`。           |
+| `partial`            | any     | 从未完成的 运行 中尽力恢复的 JSON，可能缺少部分行或字段。                  |
+| `partialSchemaValid` | boolean | 仅当请求中包含 `schema` 时出现，表示 `partial` 是否通过该 schema 校验。 |
+| `message`            | string  | 简要说明哪些内容不完整 (如有) 。                                 |
+
+这些字段仅在 运行 失败后才会出现。运行 处于 `processing` 状态时，状态响应中不会包含部分结果。
+
+<Warning>
+  请谨慎使用 `partial`。它并不完整，因此不要将其作为最终结果存储；用你的 schema 解析之前，请先检查 `partialSchemaValid`。并非每次因额度耗尽而停止都会返回 `partial`，因此也要处理只返回 `stopReason` 的 运行。
+</Warning>
+
+要完成剩余工作，请在该 运行 的会话中发送后续 prompt。之前的 `partial` 会为代理恢复并标记为不完整，因此后续请求会在此基础上继续，而不必从头开始。后续请求会继承上一轮的 `schema` 和 `urls`，但不会继承 `maxCredits`，因此请为其单独设置预算。
+
+<CodeGroup>
+  <AgentCreditLimitPython />
+
+  <AgentCreditLimitJS />
+
+  <AgentCreditLimitCURL />
+</CodeGroup>
+
+#### 额度上限示例 {#credit-limit-example}
+
+<AgentCreditLimitOutput />
+
+当你通过 `GET /v2/agent/threads/{threadId}?includeData=true` (Node 中为 `getAgentThread`，Python 中为 `get_agent_thread`) 读取会话时，若某次运行以部分结果结束，其 `status` 为 `"credit_limit_reached"`，并返回 `partial`、`partialSchemaValid` 和 `stopReason`，而非 `data`。
+
+如果你在启动运行时设置了 `webhook`，[`agent.failed`](/zh/webhooks/events#agentfailed) 事件会携带相同的 `stopReason`，并在可用时一并返回 `partial`、`partialSchemaValid` 和 `message`。
 
 ## 列出代理运行记录 {#listing-agent-runs}
 
@@ -358,17 +394,17 @@ curl -X POST https://api.firecrawl.dev/v2/agent \
 
 ## 参数 {#parameters}
 
-| 参数                         | 类型      | 必填    | 描述                                                                                                                                                                                                                                                         |
-| -------------------------- | ------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `prompt`                   | string  | **是** | 用自然语言描述你想要提取的数据 (最多 10,000 个字符)                                                                                                                                                                                                                            |
-| `model`                    | string  | 否     | 默认使用 `spark-2`，所有运行均使用该模型。Spark 1 模型已弃用，并会路由至 `spark-2`                                                                                                                                                                                                    |
-| `effort`                   | string  | 否     | 推理预算：`low`、`medium` 或 `high`。所有运行均使用 `spark-2`，因此无论是否指定 `model`，都可以传入 `effort`                                                                                                                                                                             |
-| `urls`                     | array   | 否     | 可选的 URL 列表，用于聚焦提取                                                                                                                                                                                                                                          |
-| `schema`                   | object  | 否     | 用于结构化输出的可选 JSON schema                                                                                                                                                                                                                                     |
-| `strictConstrainToURLs`    | boolean | 否     | 如果为 `true`，代理仅访问 `urls` array 中提供的 URL                                                                                                                                                                                                                     |
-| `webhook`                  | object  | 否     | 用于接收代理生命周期事件 (`agent.started`、`agent.action`、`agent.completed`、`agent.failed`、`agent.cancelled`) 的 Webhook。请参见 [webhook payloads](/zh/api-reference/endpoint/webhook-agent-started)                                                                           |
-| `maxCredits`               | number  | 否     | 此代理任务中可花费的最大额度数。如果未设置，默认值为 **2,500**。Dashboard 最高支持 **2,500**；如需更高上限，请通过 API 设置 `maxCredits` (高于 2,500 的值始终按付费请求处理) 。如果达到上限，任务会失败，并且**不会返回任何数据**。失败的运行不会计费：用于 AI 推理的额度在失败时绝不会收费，运行期间任何用于工具调用的额度 (scraping、search、mapping 等) 都会退还，并且响应会返回 `creditsUsed: 0`。 |
-| `exchange.onTermsRequired` | string  | 否     | 当代理需要使用的 Alexandria 数据提供商要求接受你的团队尚未接受的条款时，应采取的处理方式：`skip` (默认值) 或 `ask`。请参见[需要接受条款的数据提供商](#data-providers-that-need-terms)                                                                                                                                 |
+| 参数                         | 类型      | 必填    | 描述                                                                                                                                                                                                                                                                                                                                                                            |
+| -------------------------- | ------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prompt`                   | string  | **是** | 用自然语言描述你想要提取的数据 (最多 10,000 个字符)                                                                                                                                                                                                                                                                                                                                               |
+| `model`                    | string  | 否     | 默认使用 `spark-2`，所有运行均使用该模型。Spark 1 模型已弃用，并会路由至 `spark-2`                                                                                                                                                                                                                                                                                                                       |
+| `effort`                   | string  | 否     | 推理预算：`low`、`medium` 或 `high`。所有运行均使用 `spark-2`，因此无论是否指定 `model`，都可以传入 `effort`                                                                                                                                                                                                                                                                                                |
+| `urls`                     | array   | 否     | 可选的 URL 列表，用于聚焦提取                                                                                                                                                                                                                                                                                                                                                             |
+| `schema`                   | object  | 否     | 用于结构化输出的可选 JSON schema                                                                                                                                                                                                                                                                                                                                                        |
+| `strictConstrainToURLs`    | boolean | 否     | 如果为 `true`，代理仅访问 `urls` array 中提供的 URL                                                                                                                                                                                                                                                                                                                                        |
+| `webhook`                  | object  | 否     | 用于接收代理生命周期事件 (`agent.started`、`agent.action`、`agent.completed`、`agent.failed`、`agent.cancelled`) 的 Webhook。请参见 [webhook payloads](/zh/api-reference/endpoint/webhook-agent-started)                                                                                                                                                                                              |
+| `maxCredits`               | number  | 否     | 此代理任务中可花费的最大额度数。如果未设置，默认值为 **2,500**。Dashboard 最高支持 **2,500**；如需更高上限，请通过 API 设置 `maxCredits` (高于 2,500 的值始终按付费请求处理) 。如果达到上限，任务会失败并返回 `stopReason: "credit_limit_reached"`，并且**不会返回任何 `data`**。响应中可能包含尽力生成的 `partial`；请参见[处理额度上限导致的停止](#handling-credit-limit-stops)。失败的运行不会计费：用于 AI 推理的额度在失败时绝不会收费，运行期间任何用于工具调用的额度 (scraping、search、mapping 等) 都会退还，并且响应会返回 `creditsUsed: 0`。 |
+| `exchange.onTermsRequired` | string  | 否     | 当代理需要使用的 Alexandria 数据提供商要求接受你的团队尚未接受的条款时，应采取的处理方式：`skip` (默认值) 或 `ask`。请参见[需要接受条款的数据提供商](#data-providers-that-need-terms)                                                                                                                                                                                                                                                    |
 
 ## Agent 与 Extract：有哪些改进 {#agent-vs-extract-whats-improved}
 
@@ -418,17 +454,17 @@ curl -X POST https://api.firecrawl.dev/v2/support/ask \
 
 Firecrawl Agent 使用 **动态计费** 模式，费用会随你的数据提取请求复杂度而变化。你根据 Agent 实际完成的工作量付费，无论是提取简单的数据点，还是从多个来源获取复杂的结构化信息，都能享受公平的定价。
 
-### Agent 计费方式 {#how-agent-pricing-works}
+### 代理 计费方式 {#how-agent-pricing-works}
 
-在 Research Preview 阶段，Agent 的计费是**动态的、基于 credit 的**：
+代理 的计费是**动态的、基于 额度 的**：
 
-* **简单抽取任务** (例如从单个页面提取联系方式) 通常消耗更少的 credits，成本更低
-* **复杂研究任务** (例如对多个域名进行竞品分析) 会消耗更多 credits，但更能体现整体投入的工作量
-* **用量透明**会清楚展示每个请求具体消耗了多少 credits
-* **Credit 换算**会自动将 Agent 的 credit 使用量换算为 credits，便于计费
+* **简单提取任务** (例如从单个页面提取联系方式) 通常消耗更少的 额度，成本更低
+* **复杂研究任务** (例如对多个域名进行竞品分析) 会消耗更多 额度，但更能体现整体投入的工作量
+* **用量透明**会清楚展示每个请求具体消耗了多少 额度
+* **额度 换算**会自动将 代理 的 额度 使用量换算为 额度，便于计费
 
 <Info>
-  Credit 使用量会因 prompt 的复杂度、处理的数据量以及期望输出的结构而有所不同。大致来说，大多数 Agent 运行会消耗**数百个 credits**，更简单的单页任务可能会用得更少，而复杂的多域名研究可能会用得更多。
+  额度 使用量会因 prompt 的复杂度、处理的数据量以及期望输出的结构而有所不同。大致来说，大多数 代理 运行会消耗**数百个 额度**，更简单的单页任务可能会用得更少，而复杂的多域名研究可能会用得更多。
 </Info>
 
 ### 并行代理计费 {#parallel-agents-pricing}
@@ -450,12 +486,8 @@ Firecrawl Agent 使用 **动态计费** 模式，费用会随你的数据提取�
 * **优化 prompt**：更具体的 prompt 通常会消耗更少的额度
 * **将大型任务拆分为更小的运行**：单次代理运行大约会返回 150-200 行结构化数据。对于大型提取任务，可按类别、地区或 URL 批次 (每次运行 3-5 个 URL) 进行拆分，再合并结果。这也能让每次运行都保持在 `maxCredits` 限制之下。
 * **监控用量**：通过 Dashboard 追踪你的使用情况
-* **设定预期**：跨多个站点/领域的复杂研究会比简单的单页提取消耗更多额度
+* **设定预期**：跨多个域名的复杂研究会比简单的单页提取消耗更多额度
 
 现在访问 [firecrawl.dev/app/agent](https://www.firecrawl.dev/app/agent) 试用代理，看看在你的具体用例下额度的使用如何随规模变化。
-
-<Note>
-  随着我们从 Research Preview 过渡到正式开放，定价可能会发生变化。现有用户将在任何价格更新前提前收到通知。
-</Note>
 
 > 你是需要 Firecrawl API 密钥的 AI 代理吗？请参阅 [firecrawl.dev/agent-onboarding/SKILL.md](https://www.firecrawl.dev/agent-onboarding/SKILL.md) 了解自动化引导说明。
