@@ -46,6 +46,12 @@ import AgentCreditLimitPython from "/snippets/pt-BR/v2/agent/credit-limit/python
 import AgentCreditLimitJS from "/snippets/pt-BR/v2/agent/credit-limit/js.mdx";
 import AgentCreditLimitCURL from "/snippets/pt-BR/v2/agent/credit-limit/curl.mdx";
 import AgentCreditLimitOutput from "/snippets/pt-BR/v2/agent/credit-limit/output.mdx";
+import AgentAlexandriaPython from "/snippets/pt-BR/v2/agent/alexandria/python.mdx";
+import AgentAlexandriaJS from "/snippets/pt-BR/v2/agent/alexandria/js.mdx";
+import AgentAlexandriaCURL from "/snippets/pt-BR/v2/agent/alexandria/curl.mdx";
+import AgentAlexandriaApprovalPython from "/snippets/pt-BR/v2/agent/alexandria-approval/python.mdx";
+import AgentAlexandriaApprovalJS from "/snippets/pt-BR/v2/agent/alexandria-approval/js.mdx";
+import AgentAlexandriaApprovalCURL from "/snippets/pt-BR/v2/agent/alexandria-approval/curl.mdx";
 import PlaygroundCTA from "/snippets/pt-BR/shared/playground-cta-agent.mdx";
 import ChooseDataExtractor from "/snippets/pt-BR/shared/choose-data-extractor/from-agent.mdx";
 
@@ -60,10 +66,10 @@ Seja para obter um único dado ou conjuntos de dados completos em escala, o Fire
 
 agente aproveita tudo o que há de melhor no `/extract` e leva isso além:
 
-* **Nenhuma URL necessária**: Basta descrever o que você precisa via parâmetro `prompt`. URLs são opcionais
-* **Pesquisa aprofundada na web**: Pesquisa e navega autonomamente em profundidade em sites para encontrar seus dados
-* **Confiável e preciso**: Funciona com uma grande variedade de consultas e casos de uso
-* **Mais rápido**: Processa múltiplas fontes em paralelo para resultados mais rápidos
+* **Sem necessidade de URLs**: basta descrever o que você precisa no parâmetro `prompt`. As URLs são opcionais
+* **Busca profunda na web**: busca e navega de forma autônoma até as camadas mais profundas dos sites para encontrar seus dados
+* **Confiável e preciso**: funciona com uma grande variedade de queries e casos de uso
+* **Mais rápido**: processa várias fontes em paralelo para entregar resultados mais rapidamente
 
 <PlaygroundCTA />
 
@@ -282,9 +288,55 @@ O parâmetro `model` é opcional — todas as solicitações usam `spark-2`:
   <AgentWithModelCURL />
 </CodeGroup>
 
+## Use suas ferramentas conectadas do Alexandria {#use-your-connected-alexandria-tools}
+
+O agente pode chamar os providers de dados do [Alexandria](/pt-BR/features/alexandria) da sua equipe durante uma execução, além da web. No [playground](https://www.firecrawl.dev/app/agent), eles já vêm ativados. Pela API e pelos SDKs, uma execução usa apenas a web até que você envie um object `exchange`; portanto, uma requisição sem ele nunca usa seus providers.
+
+Envie `exchange` com `enabled: true` para permitir que o agente use todos os providers disponíveis para sua equipe, ou fixe até cinco com `toolkits`:
+
+<CodeGroup>
+  <AgentAlexandriaPython />
+
+  <AgentAlexandriaJS />
+
+  <AgentAlexandriaCURL />
+</CodeGroup>
+
+| Campo                | O que faz                                                                                                                                                                                        |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `enabled`            | Permite que o agente chame providers. O padrão é `true` assim que você envia `exchange`, então um object vazio também os ativa. Envie `false` para desativá-los em um único turno de uma thread. |
+| `toolkits`           | Até 5 slugs de providers, como `["apollo"]`. O agente usa apenas esses. Se vazio ou omitido, o agente usa todos os providers disponíveis para sua equipe.                                        |
+| `maxCalls`           | Número máximo de chamadas a providers que o agente pode fazer em um turno, de 1 a 30. O padrão é 16.                                                                                             |
+| `requireApproval`    | Interrompe o turno antes de qualquer chamada paga a um provider e o encerra com um `pendingApproval` para você responder. Exige `mode: "chat"` na mesma requisição. O padrão é `false`.          |
+| `approve`, `decline` | Respondem ao `pendingApproval` do turno anterior no próximo turno da thread. Veja [Aprovar chamadas pagas antes de serem executadas](#approve-paid-calls-before-they-run).                       |
+| `onTermsRequired`    | O que fazer quando um provider exige termos de dados que sua equipe ainda não aceitou. Veja [Providers de dados que exigem termos](#data-providers-that-need-terms).                             |
+
+O object `exchange` da resposta de status informa o que a execução fez: `enabled`, os `toolkits` e o `requireApproval` usados na execução, `paidCalls` (chamadas pagas a providers realizadas) e `creditsUsed` (quanto essas chamadas custaram, ou `null` quando nenhuma foi registrada).
+
+### Turnos subsequentes {#follow-up-turns}
+
+Um turno subsequente de uma thread (uma requisição com `threadId`) que omite `exchange` mantém a configuração do turno anterior. Se ele enviar um object `exchange`, `toolkits` e `onTermsRequired` continuam sendo herdados quando omitidos, mas `enabled`, `maxCalls` e `requireApproval` voltam aos valores padrão, a menos que você os envie novamente.
+
+### Aprove chamadas pagas antes da execução {#approve-paid-calls-before-they-run}
+
+Com `requireApproval: true`, o agente para antes da primeira chamada paga a um provider, e o turno termina com um `pendingApproval` do tipo `kind: "calls"`. Ele contém um `id`, o `reason` do agente e as `calls` que ele pretende fazer, cada uma com `id`, `provider`, `capability`, `input` e `creditsEstimate`. Mostre essas chamadas ao usuário e responda no turno seguinte da mesma thread:
+
+* `exchange.approve: { "approvalId": "<pendingApproval.id>" }` executa as chamadas. Adicione `callIds` para executar apenas algumas delas ou `always: true` para não pedir mais aprovação até o fim da thread.
+* `exchange.decline: { "approvalId": "<pendingApproval.id>" }` ignora as chamadas, e o agente responde sem elas.
+
+Envie `requireApproval: true` novamente no turno de resposta para que as próximas chamadas pagas continuem aguardando aprovação. Os dois turnos exigem `mode: "chat"`.
+
+<CodeGroup>
+  <AgentAlexandriaApprovalPython />
+
+  <AgentAlexandriaApprovalJS />
+
+  <AgentAlexandriaApprovalCURL />
+</CodeGroup>
+
 ## Providers de dados que exigem aceite de termos {#data-providers-that-need-terms}
 
-O Agent pode chamar providers de dados do [Alexandria](/pt-BR/features/alexandria) durante uma execução, mas apenas aqueles cujos termos de dados sua equipe já aceitou. Um provider cujos termos você não aceitou nunca é chamado, independentemente do valor de `exchange.onTermsRequired`. A execução continua com os providers que pode usar, e a resposta de status informa o que foi ignorado.
+Quando uma execução usa providers de dados do [Alexandria](/pt-BR/features/alexandria), ela chama apenas aqueles cujos termos de dados sua equipe já aceitou. Um provider cujos termos você não aceitou nunca é chamado, independentemente do valor de `exchange.onTermsRequired`. A execução continua com os providers que pode usar, e a resposta de status informa o que foi ignorado.
 
 Não existe modo de aceite automático. Aceitar os termos de um provider sempre exige que uma pessoa concorde com eles, seja no [painel](https://www.firecrawl.dev/app/settings?tab=data-sources) ou por meio de uma chamada `terms/accept` feita pela sua aplicação depois que o usuário tiver concordado explicitamente. Se você criar um agente com base no Firecrawl, ele deve pedir a confirmação do usuário antes de chamar `terms/accept`. Uma solicitação de dados não equivale a consentimento com os termos de um provider.
 
@@ -404,6 +456,15 @@ No modo `skip`, não há aprovação pendente a ser respondida. Depois que os te
 | `strictConstrainToURLs`    | boolean | Não         | Se `true`, o agente visita apenas as URLs fornecidas no array `urls`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `webhook`                  | object  | Não         | Webhook para receber eventos do ciclo de vida do agente (`agent.started`, `agent.action`, `agent.completed`, `agent.failed`, `agent.cancelled`). Consulte os [payloads de webhook](/pt-BR/api-reference/endpoint/webhook-agent-started)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `maxCredits`               | number  | Não         | Número máximo de créditos a serem usados nesta tarefa de agente. O padrão é **2.500** se não for definido. O painel suporta valores de até **2.500**; para limites mais altos, defina `maxCredits` via API (valores acima de 2.500 são sempre tratados como requisições pagas). Se o limite for atingido, o job falha com `stopReason: "credit_limit_reached"` e **nenhum `data` é retornado**. A resposta pode incluir um `partial` gerado por melhor esforço; consulte [Tratamento de interrupções por limite de créditos](#handling-credit-limit-stops). Execuções com falha não são cobradas: créditos usados para raciocínio de IA nunca são cobrados em caso de falha, quaisquer créditos usados para chamadas de ferramentas durante a execução (scraping, busca, mapeamento etc.) são reembolsados, e a resposta informa `creditsUsed: 0`. |
+| `threadId`                 | string  | Não         | Continua uma thread existente: informe o `threadId` retornado por uma execução anterior. As configurações omitidas de `urls`, `schema`, `effort`, `mode` e `exchange` são herdadas do turno anterior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `mode`                     | string  | Não         | `extract` (padrão) retorna o resultado estruturado completo em `data` a cada turno. `chat` permite que uma mensagem de acompanhamento que não pede novos dados receba uma resposta curta em `message`. Obrigatório para `exchange.requireApproval`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `exchange`                 | object  | Não         | Permite que o agente chame os providers de dados da Alexandria da sua equipe. Sem ele, a execução usa apenas a web. Consulte [Use suas ferramentas conectadas da Alexandria](#use-your-connected-alexandria-tools)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `exchange.enabled`         | boolean | Não         | Permite que o agente chame providers. O padrão é `true` quando `exchange` é enviado                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `exchange.toolkits`        | array   | Não         | Até 5 slugs de providers a fixar. Se vazio ou omitido, todos os providers que sua equipe pode usar ficam disponíveis                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `exchange.maxCalls`        | integer | Não         | Número máximo de chamadas a providers por turno, de 1 a 30. O padrão é 16                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `exchange.requireApproval` | boolean | Não         | Encerra o turno com um `pendingApproval` antes de qualquer chamada paga a um provider. Requer `mode: "chat"`. O padrão é `false`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `exchange.approve`         | object  | Não         | `{ approvalId, callIds?, always? }`: aprova o `pendingApproval` do turno anterior. Requer `threadId`. Consulte [Aprove chamadas pagas antes de serem executadas](#approve-paid-calls-before-they-run)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `exchange.decline`         | object  | Não         | `{ approvalId }`: recusa o `pendingApproval` do turno anterior. Requer `threadId`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `exchange.onTermsRequired` | string  | Não         | O que fazer quando um provider de dados da Alexandria que o agente usaria exige termos que sua equipe ainda não aceitou: `skip` (padrão) ou `ask`. Consulte [Providers de dados que exigem termos](#data-providers-that-need-terms)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 ## Agent vs Extract: O que melhorou {#agent-vs-extract-whats-improved}

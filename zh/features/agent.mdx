@@ -46,6 +46,12 @@ import AgentCreditLimitPython from "/snippets/zh/v2/agent/credit-limit/python.md
 import AgentCreditLimitJS from "/snippets/zh/v2/agent/credit-limit/js.mdx";
 import AgentCreditLimitCURL from "/snippets/zh/v2/agent/credit-limit/curl.mdx";
 import AgentCreditLimitOutput from "/snippets/zh/v2/agent/credit-limit/output.mdx";
+import AgentAlexandriaPython from "/snippets/zh/v2/agent/alexandria/python.mdx";
+import AgentAlexandriaJS from "/snippets/zh/v2/agent/alexandria/js.mdx";
+import AgentAlexandriaCURL from "/snippets/zh/v2/agent/alexandria/curl.mdx";
+import AgentAlexandriaApprovalPython from "/snippets/zh/v2/agent/alexandria-approval/python.mdx";
+import AgentAlexandriaApprovalJS from "/snippets/zh/v2/agent/alexandria-approval/js.mdx";
+import AgentAlexandriaApprovalCURL from "/snippets/zh/v2/agent/alexandria-approval/curl.mdx";
 import PlaygroundCTA from "/snippets/zh/shared/playground-cta-agent.mdx";
 import ChooseDataExtractor from "/snippets/zh/shared/choose-data-extractor/from-agent.mdx";
 
@@ -60,10 +66,10 @@ Firecrawl `/agent` 是一个魔法般的 API，它可以在最广泛的网站范
 
 代理构建于 `/extract` 的全部优势之上，并在此基础上更进一步：
 
-* **无需提供 URL**：只需通过 `prompt` 参数描述你的需求，URL 是可选的。
-* **深度网页搜索**：自主搜索并深入浏览站点以找到所需数据
-* **可靠且准确**：适用于多种类型的查询和使用场景
-* **更快**：并行处理多个数据源以更快返回结果
+* **无需提供 URL**：只需通过 `prompt` 参数描述你的需求即可，URL 为可选项
+* **深度网页搜索**：自主搜索并深入网站内部，找到你需要的数据
+* **可靠准确**：适用于各类查询和使用场景
+* **速度更快**：并行处理多个来源，更快获得结果
 
 <PlaygroundCTA />
 
@@ -282,9 +288,55 @@ Firecrawl 代理使用 **Spark 2**，相比早期的 Spark 1 模型成本更低�
   <AgentWithModelCURL />
 </CodeGroup>
 
+## 使用已连接的 Alexandria 工具 {#use-your-connected-alexandria-tools}
+
+在一次运行中，代理 除了使用网页外，还可以调用您团队的 [Alexandria](/zh/features/alexandria) 数据提供商。[playground](https://www.firecrawl.dev/app/agent) 会自动为您启用这些提供商。通过 API 和 SDKs 发起的运行，在您发送 `exchange` object 之前只会使用网页，因此不含该 object 的请求绝不会使用您的提供商。
+
+发送 `exchange` 并设置 `enabled: true`，即可让代理使用您团队可用的所有提供商；也可以通过 `toolkits` 指定最多五个提供商：
+
+<CodeGroup>
+  <AgentAlexandriaPython />
+
+  <AgentAlexandriaJS />
+
+  <AgentAlexandriaCURL />
+</CodeGroup>
+
+| 字段                  | 作用                                                                                         |
+| ------------------- | ------------------------------------------------------------------------------------------ |
+| `enabled`           | 允许代理调用提供商。发送 `exchange` 后默认值为 `true`，因此发送空 object 也会启用提供商。发送 `false` 可在会话的某一轮中关闭提供商。       |
+| `toolkits`          | 最多 5 个提供商标识，例如 `["apollo"]`。代理只会使用这些提供商。为空或省略时，表示使用您团队可用的所有提供商。                            |
+| `maxCalls`          | 代理在一轮中最多可调用提供商的次数，范围为 1 到 30。默认值为 16。                                                      |
+| `requireApproval`   | 在发起任何付费提供商调用之前暂停当前轮次，并以 `pendingApproval` 结束，等待您答复。需要在同一请求中设置 `mode: "chat"`。默认值为 `false`。 |
+| `approve`、`decline` | 在会话的下一轮中答复上一轮的 `pendingApproval`。请参见[在付费调用执行前进行审批](#approve-paid-calls-before-they-run)。   |
+| `onTermsRequired`   | 当提供商要求您团队接受尚未接受的数据条款时，应如何处理。请参见[需要接受条款的数据提供商](#data-providers-that-need-terms)。            |
+
+状态响应中的 `exchange` object 会反映本次运行的实际情况：`enabled`、运行时使用的 `toolkits` 和 `requireApproval`、`paidCalls` (已发起的付费提供商调用次数) 以及 `creditsUsed` (这些调用的成本；若无调用记录，则为 `null`) 。
+
+### 后续轮次 {#follow-up-turns}
+
+在会话的后续轮次中 (即带有 `threadId` 的请求) ，如果省略 `exchange`，则沿用上一轮的设置。如果发送了 `exchange` object，未提供的 `toolkits` 和 `onTermsRequired` 仍会沿用上一轮的值，但 `enabled`、`maxCalls` 和 `requireApproval` 若未再次发送，则会恢复为默认值。
+
+### 在付费调用执行前进行审批 {#approve-paid-calls-before-they-run}
+
+设置 `requireApproval: true` 后，代理会在首次调用付费提供商之前暂停，本轮以一个 `kind: "calls"` 的 `pendingApproval` 结束。其中包含 `id`、代理给出的 `reason`，以及代理计划执行的 `calls`；每个调用都带有 `id`、`provider`、`capability`、`input` 和 `creditsEstimate`。将这些信息展示给用户，然后在同一会话的下一轮中给出答复：
+
+* `exchange.approve: { "approvalId": "<pendingApproval.id>" }` 会执行这些调用。添加 `callIds` 可仅执行其中部分调用；添加 `always: true` 则在本会话剩余的轮次中不再请求审批。
+* `exchange.decline: { "approvalId": "<pendingApproval.id>" }` 会跳过这些调用，代理将在不执行它们的情况下直接作答。
+
+如需让后续的付费调用继续等待审批，请在答复的那一轮中再次发送 `requireApproval: true`。两轮都需要设置 `mode: "chat"`。
+
+<CodeGroup>
+  <AgentAlexandriaApprovalPython />
+
+  <AgentAlexandriaApprovalJS />
+
+  <AgentAlexandriaApprovalCURL />
+</CodeGroup>
+
 ## 需要接受条款的数据提供商 {#data-providers-that-need-terms}
 
-代理在运行期间可以调用 [Alexandria](/zh/features/alexandria) 数据提供商，但仅限于你的团队已接受其数据条款的提供商。对于尚未接受条款的提供商，无论 `exchange.onTermsRequired` 如何设置，都不会被调用。运行会继续使用可用的提供商，状态响应中会列出被跳过的提供商。
+当运行使用 [Alexandria](/zh/features/alexandria) 数据提供商时，只会调用你的团队已接受其数据条款的提供商。对于尚未接受条款的提供商，无论 `exchange.onTermsRequired` 如何设置，都不会被调用。运行会继续使用可用的提供商，状态响应中会列出被跳过的提供商。
 
 不支持自动接受模式。接受提供商的条款必须由人来确认：可以在 [Dashboard](https://www.firecrawl.dev/app/settings?tab=data-sources) 中操作，也可以由你的应用在用户明确同意后调用 `terms/accept`。如果你基于 Firecrawl 构建代理，该代理必须先征得用户同意，再调用 `terms/accept`。请求数据并不代表同意提供商的条款。
 
@@ -403,7 +455,16 @@ curl -X POST https://api.firecrawl.dev/v2/agent \
 | `schema`                   | object  | 否     | 用于结构化输出的可选 JSON schema                                                                                                                                                                                                                                                                                                                                                        |
 | `strictConstrainToURLs`    | boolean | 否     | 如果为 `true`，代理仅访问 `urls` array 中提供的 URL                                                                                                                                                                                                                                                                                                                                        |
 | `webhook`                  | object  | 否     | 用于接收代理生命周期事件 (`agent.started`、`agent.action`、`agent.completed`、`agent.failed`、`agent.cancelled`) 的 Webhook。请参见 [webhook payloads](/zh/api-reference/endpoint/webhook-agent-started)                                                                                                                                                                                              |
-| `maxCredits`               | number  | 否     | 此代理任务中可花费的最大额度数。如果未设置，默认值为 **2,500**。Dashboard 最高支持 **2,500**；如需更高上限，请通过 API 设置 `maxCredits` (高于 2,500 的值始终按付费请求处理) 。如果达到上限，任务会失败并返回 `stopReason: "credit_limit_reached"`，并且**不会返回任何 `data`**。响应中可能包含尽力生成的 `partial`；请参见[处理额度上限导致的停止](#handling-credit-limit-stops)。失败的运行不会计费：用于 AI 推理的额度在失败时绝不会收费，运行期间任何用于工具调用的额度 (scraping、search、mapping 等) 都会退还，并且响应会返回 `creditsUsed: 0`。 |
+| `maxCredits`               | number  | 否     | 此代理任务中可花费的最大额度数。如果未设置，默认值为 **2,500**。Dashboard 最高支持 **2,500**；如需更高上限，请通过 API 设置 `maxCredits` (高于 2,500 的值始终按付费请求处理) 。如果达到上限，任务会失败并返回 `stopReason: "credit_limit_reached"`，并且**不会返回任何 `data`**。响应中可能包含尽力生成的 `partial`；请参见[处理因额度上限而停止的情况](#handling-credit-limit-stops)。失败的运行不会计费：用于 AI 推理的额度在失败时绝不会收费，运行期间任何用于工具调用的额度 (scraping、search、mapping 等) 都会退还，并且响应会返回 `creditsUsed: 0`。 |
+| `threadId`                 | string  | 否     | 继续现有会话：传入之前某次运行返回的 `threadId`。未传入的 `urls`、`schema`、`effort`、`mode` 和 `exchange` 设置将沿用上一轮的值                                                                                                                                                                                                                                                                                    |
+| `mode`                     | string  | 否     | `extract` (默认值) 每轮都会在 `data` 中返回完整的结构化结果。使用 `chat` 时，若后续提问不需要新数据，则会在 `message` 中返回简短回复。使用 `exchange.requireApproval` 时必须设置此项                                                                                                                                                                                                                                                  |
+| `exchange`                 | object  | 否     | 允许代理调用你团队的 Alexandria 数据提供商。未传入时，运行仅使用网页数据。请参见[使用已连接的 Alexandria 工具](#use-your-connected-alexandria-tools)                                                                                                                                                                                                                                                                    |
+| `exchange.enabled`         | boolean | 否     | 允许代理调用提供商。传入 `exchange` 后默认为 `true`                                                                                                                                                                                                                                                                                                                                           |
+| `exchange.toolkits`        | array   | 否     | 最多指定 5 个提供商标识。为空或不传入时，表示使用你团队可用的所有提供商                                                                                                                                                                                                                                                                                                                                      |
+| `exchange.maxCalls`        | integer | 否     | 每轮提供商调用次数上限，范围为 1 到 30。默认值为 16                                                                                                                                                                                                                                                                                                                                                |
+| `exchange.requireApproval` | boolean | 否     | 在发起任何付费提供商调用之前，先以 `pendingApproval` 结束本轮。需要设置 `mode: "chat"`。默认值为 `false`                                                                                                                                                                                                                                                                                                     |
+| `exchange.approve`         | object  | 否     | `{ approvalId, callIds?, always? }`：批准上一轮的 `pendingApproval`。需要提供 `threadId`。请参见[在付费调用执行前进行审批](#approve-paid-calls-before-they-run)                                                                                                                                                                                                                                           |
+| `exchange.decline`         | object  | 否     | `{ approvalId }`：拒绝上一轮的 `pendingApproval`。需要提供 `threadId`                                                                                                                                                                                                                                                                                                                     |
 | `exchange.onTermsRequired` | string  | 否     | 当代理需要使用的 Alexandria 数据提供商要求接受你的团队尚未接受的条款时，应采取的处理方式：`skip` (默认值) 或 `ask`。请参见[需要接受条款的数据提供商](#data-providers-that-need-terms)                                                                                                                                                                                                                                                    |
 
 ## Agent 与 Extract：有哪些改进 {#agent-vs-extract-whats-improved}
