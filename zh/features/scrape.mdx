@@ -142,7 +142,7 @@ Firecrawl 可将网页转换为 markdown，非常适合 LLM 应用。
 
 因此，可靠的做法是：先确认请求成功 (HTTP `200` + `success: true`) ，再检查 `data.metadata.statusCode`，了解页面的实际结果。Firecrawl 将 2xx 或 `304` 的 `statusCode` 视为页面加载正常；其他状态则表示页面未能正常加载。当页面返回错误状态时，`data.metadata.error` 可能会包含更多详细信息。
 
-如果该 URL 的数据由第三方数据提供商提供，响应中会包含 `data.metadata.provider`：`id` 表示返回数据的提供商，`creditsCost` 表示此次访问消耗的额度，`steps` 则按尝试顺序列出每个提供商及其状态 (`matched`、`not_found`、`error`) 和消耗的额度。
+如果该 URL 的数据由第三方数据提供商提供 (请参见[经提供商路由的 URL](#provider-routed-urls)) ，响应中会包含 `data.metadata.provider`：`id` 表示返回数据的提供商，`creditsCost` 表示此次访问消耗的额度，`steps` 则按尝试顺序列出每个提供商及其状态 (`matched`、`not_found`、`error`) 和消耗的额度。
 
 ## 抓取格式 {#scrape-formats}
 
@@ -659,6 +659,18 @@ Firecrawl 允许你在抓取页面内容之前对网页执行各种 actions。�
 * 部分提供商要求组织管理员先接受其条款，否则请求会失败并返回 [`THIRD_PARTY_DATA_TERMS_REQUIRED`](/zh/api-reference/errors)。
 
 如需查找适用于所抓取页面的工具，请在普通的 URL 抓取中添加 `domainTools: true`，匹配的工具会通过 `data.tools` 返回。有关定价和访问权限，请参见 [Alexandria](/zh/features/alexandria#pricing-and-access)。
+
+## 经由提供商路由的 URL {#provider-routed-urls}
+
+Firecrawl 不会抓取 LinkedIn。对 LinkedIn 个人主页 (`linkedin.com/in/<handle>`) 或公司主页 (`linkedin.com/company/<slug>`) 发起的抓取请求，将由第三方数据提供商返回结果。`uk.linkedin.com`、`m.linkedin.com` 等国家/地区子域名和移动端子域名也采用相同的路由方式。响应是一个普通的抓取文档：`markdown` 包含提供商返回的记录，[`data.metadata.provider`](#response-metadata-and-status-codes) 标明提供该记录的提供商。批量抓取也以相同方式路由这些 URL。
+
+* **配置方式**：由组织管理员在 Dashboard 的 enrichment 设置中开启 enrichment，并按顺序选择提供商。部分提供商还需先接受其条款 ([`THIRD_PARTY_DATA_TERMS_REQUIRED`](/zh/api-reference/errors)) 。
+* **首个匹配生效**：系统按保存的顺序依次尝试各提供商。第一个返回记录的提供商负责响应该请求，其余提供商不再运行。若某个提供商没有该 URL 的记录，则交由下一个提供商处理。若所有提供商都没有记录，请求将失败并返回 `THIRD_PARTY_DATA_NOT_FOUND` (404) 。
+* **仅限页面本身**：仅支持个人主页或公司主页的根页面，不支持其下级页面。`/in/<handle>/details/experience`、`/company/<slug>/jobs` 等子页面会失败并返回 `THIRD_PARTY_DATA_UNSUPPORTED_URL` (400) 。
+* **会关闭路由的选项**：这些 URL 不支持与 `actions`、`profile`、`minAge`、`zeroDataRetention`、`lockdown`、`redactPII` 一起使用，也不支持 `markdown`、`html`、`rawHtml`、`links`、`images`、`json`、`summary`、`question`、`highlights` 和 `query` 以外的任何格式。此类请求会失败并返回 `THIRD_PARTY_DATA_UNSUPPORTED_OPTION` (400) ，`error` 会指明具体是哪个选项。移除该选项后重新发送请求即可。如果你的团队策略强制启用零数据保留，则无法处理这些 URL。对于这些 URL，`headers`、`waitFor`、`mobile`、`location`、`proxy`、`includeTags` 和 `excludeTags` 等页面渲染选项将被忽略。
+* **计费**：请求的成本为各提供商步骤所扣额度之和 (`metadata.provider.creditsCost`，明细见 `steps`) ，不再收取 1 额度的抓取基础费用。没有记录的提供商不收费，因此请求通常只按匹配到的提供商的价格计费。`json` 等格式的附加费用仍照常收取。由于 `x-request-id` 不会重放 URL 抓取，每个请求都会计费。价格请参见[计费](/zh/billing#provider-routed-urls)。
+
+如果 enrichment 未开启，或已保存的提供商均无法处理该 URL，请求将失败并返回 `THIRD_PARTY_DATA_ENRICHMENT_NOT_ENABLED` (403) 。完整错误码请参见 [Errors](/zh/api-reference/errors)。
 
 <div id="batch-scraping-multiple-urls">
   ## 批量抓取多个 URL {#batch-scraping-multiple-urls}
