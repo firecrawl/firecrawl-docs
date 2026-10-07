@@ -140,7 +140,7 @@ There are two separate status layers in a scrape response, and it helps to keep 
 
 So the reliable pattern is: first confirm the request succeeded (HTTP `200` + `success: true`), then check `data.metadata.statusCode` for the actual page outcome. Firecrawl treats a `statusCode` of 2xx or `304` as a clean page load; anything else means the page did not load cleanly. When a page returns an error status, `data.metadata.error` may carry additional detail.
 
-`data.metadata.provider` is set when a third-party data provider served the URL: `id` is the provider that returned the data, `creditsCost` is what that access cost, and `steps` lists each provider tried, in order, with its status (`matched`, `not_found`, `error`) and credits.
+`data.metadata.provider` is set when a third-party data provider served the URL (see [Provider-routed URLs](#provider-routed-urls)): `id` is the provider that returned the data, `creditsCost` is what that access cost, and `steps` lists each provider tried, in order, with its status (`matched`, `not_found`, `error`) and credits.
 
 ## Scrape Formats
 
@@ -626,6 +626,18 @@ curl -X POST https://api.firecrawl.dev/v2/scrape \
 - Some providers need an org admin to accept their terms first. Then the request fails with [`THIRD_PARTY_DATA_TERMS_REQUIRED`](/api-reference/errors).
 
 To find tools for the page that you scrape, add `domainTools: true` to an ordinary URL scrape. Matching tools come back in `data.tools`. See [Alexandria](/features/alexandria#pricing-and-access) for pricing and access.
+
+## Provider-routed URLs
+
+Firecrawl doesn't scrape LinkedIn. Instead, a scrape of a LinkedIn person profile (`linkedin.com/in/<handle>`) or company page (`linkedin.com/company/<slug>`) is answered by third-party data providers. Country and mobile subdomains such as `uk.linkedin.com` and `m.linkedin.com` route the same way. The response is an ordinary scrape document: `markdown` holds the provider's record, and [`data.metadata.provider`](#response-metadata-and-status-codes) names the provider that served it. Batch scrape routes these URLs the same way.
+
+- **Setup**: an org admin turns on enrichment and chooses providers, in order, in the dashboard's enrichment settings. Some providers also need their terms accepted first ([`THIRD_PARTY_DATA_TERMS_REQUIRED`](/api-reference/errors)).
+- **First match wins**: providers are tried in the saved order. The first one that returns a record answers the request, and the rest don't run. A provider with no record for the URL passes to the next one. When none has a record, the request fails with `THIRD_PARTY_DATA_NOT_FOUND` (404).
+- **Only the page itself**: a profile or company root page is served, not the pages under it. Sub-pages such as `/in/<handle>/details/experience` or `/company/<slug>/jobs` fail with `THIRD_PARTY_DATA_UNSUPPORTED_URL` (400).
+- **Options that turn routing off**: these URLs can't be served with `actions`, `profile`, `minAge`, `zeroDataRetention`, `lockdown`, `redactPII`, or any format other than `markdown`, `html`, `rawHtml`, `links`, `images`, `json`, `summary`, `question`, `highlights` and `query`. Such a request fails with `THIRD_PARTY_DATA_UNSUPPORTED_OPTION` (400), and `error` names the option. Remove it and send the request again. If your team's policy enforces zero data retention, these URLs can't be served. Page rendering options such as `headers`, `waitFor`, `mobile`, `location`, `proxy`, `includeTags` and `excludeTags` are ignored for these URLs.
+- **Billing**: the request costs the sum of the credits its provider steps charged (`metadata.provider.creditsCost`, broken down in `steps`), in place of the 1-credit scrape base. A provider with no record charges nothing, so a request normally costs the price of the provider that matched. Format surcharges such as `json` still apply. Every request is charged, because `x-request-id` doesn't replay URL scrapes. See [Billing](/billing#provider-routed-urls) for prices.
+
+If enrichment is off, or none of the saved providers can serve the URL, the request fails with `THIRD_PARTY_DATA_ENRICHMENT_NOT_ENABLED` (403). See [Errors](/api-reference/errors) for every code.
 
 ## Batch scraping multiple URLs
 
