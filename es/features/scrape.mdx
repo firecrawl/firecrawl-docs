@@ -144,7 +144,7 @@ Hay dos niveles de estado independientes en una respuesta de scraping, y convien
 
 Por tanto, el patrón fiable es: primero, confirme que la solicitud se completó correctamente (HTTP `200` + `success: true`) y, después, revise `data.metadata.statusCode` para conocer el resultado real de la página. Firecrawl considera que un `statusCode` de 2xx o `304` indica que la página se cargó correctamente; cualquier otro valor significa que no fue así. Cuando una página devuelve un estado de error, `data.metadata.error` puede incluir información adicional.
 
-`data.metadata.provider` se rellena cuando un provider de datos externo sirvió la URL: `id` es el provider que devolvió los datos, `creditsCost` es lo que costó ese acceso y `steps` enumera, en orden, cada provider que se probó, junto con su estado (`matched`, `not_found`, `error`) y sus créditos.
+`data.metadata.provider` se rellena cuando un provider de datos externo sirvió la URL (consulte [URL enrutadas por provider](#provider-routed-urls)): `id` es el provider que devolvió los datos, `creditsCost` es lo que costó ese acceso y `steps` enumera, en orden, cada provider que se probó, junto con su estado (`matched`, `not_found`, `error`) y sus créditos.
 
 ## Formatos de scraping {#scrape-formats}
 
@@ -661,6 +661,18 @@ Scraping también puede ejecutar una herramienta de datos de [Alexandria](/es/fe
 * Algunos providers requieren que un administrador de la organización acepte primero sus términos. De lo contrario, la solicitud falla con [`THIRD_PARTY_DATA_TERMS_REQUIRED`](/es/api-reference/errors).
 
 Para encontrar herramientas relacionadas con la página de la que estás haciendo scraping, añade `domainTools: true` a un scraping de URL normal. Las herramientas coincidentes se devuelven en `data.tools`. Consulta [Alexandria](/es/features/alexandria#pricing-and-access) para obtener información sobre precios y acceso.
+
+## URL enrutadas a providers {#provider-routed-urls}
+
+Firecrawl no hace scraping de LinkedIn. En su lugar, el scrape de un perfil personal de LinkedIn (`linkedin.com/in/<handle>`) o de una página de empresa (`linkedin.com/company/<slug>`) lo resuelven providers de datos externos. Los subdominios de país y móviles, como `uk.linkedin.com` y `m.linkedin.com`, se enrutan del mismo modo. La respuesta es un documento de scrape normal: `markdown` contiene el registro del provider y [`data.metadata.provider`](#response-metadata-and-status-codes) indica qué provider lo sirvió. La extracción por lotes enruta estas URL de la misma forma.
+
+* **Configuración**: un administrador de la organización activa el enriquecimiento y selecciona los providers, por orden, en la configuración de enriquecimiento del Dashboard. Algunos providers exigen además aceptar antes sus términos ([`THIRD_PARTY_DATA_TERMS_REQUIRED`](/es/api-reference/errors)).
+* **Gana la primera coincidencia**: los providers se prueban en el orden guardado. El primero que devuelve un registro responde a la solicitud y el resto no se ejecuta. Si un provider no tiene registro para la URL, se pasa al siguiente. Cuando ninguno tiene un registro, la solicitud falla con `THIRD_PARTY_DATA_NOT_FOUND` (404).
+* **Solo la propia página**: se sirve la página raíz del perfil o de la empresa, no las páginas que cuelgan de ella. Las subpáginas como `/in/<handle>/details/experience` o `/company/<slug>/jobs` fallan con `THIRD_PARTY_DATA_UNSUPPORTED_URL` (400).
+* **Opciones que desactivan el enrutamiento**: estas URL no se pueden servir con `actions`, `profile`, `minAge`, `zeroDataRetention`, `lockdown`, `redactPII` ni con ningún formato distinto de `markdown`, `html`, `rawHtml`, `links`, `images`, `json`, `summary`, `question`, `highlights` y `query`. En ese caso, la solicitud falla con `THIRD_PARTY_DATA_UNSUPPORTED_OPTION` (400) y `error` indica la opción. Elimínala y vuelve a enviar la solicitud. Si la política de tu equipo exige retención de datos cero, estas URL no se pueden servir. Las opciones de renderizado de página como `headers`, `waitFor`, `mobile`, `location`, `proxy`, `includeTags` y `excludeTags` se ignoran para estas URL.
+* **Facturación**: la solicitud cuesta la suma de los créditos cobrados por sus pasos de provider (`metadata.provider.creditsCost`, desglosados en `steps`), en lugar del costo base de scrape de 1 crédito. Un provider sin registro no cobra nada, por lo que normalmente una solicitud cuesta el precio del provider que coincidió. Los recargos por formato, como `json`, se siguen aplicando. Se cobra cada solicitud, ya que `x-request-id` no reproduce los scrapes de URL. Consulta [Facturación](/es/billing#provider-routed-urls) para ver los precios.
+
+Si el enriquecimiento está desactivado o ninguno de los providers guardados puede servir la URL, la solicitud falla con `THIRD_PARTY_DATA_ENRICHMENT_NOT_ENABLED` (403). Consulta [Errores](/es/api-reference/errors) para ver todos los códigos.
 
 <div id="batch-scraping-multiple-urls">
   ## Raspado por lotes de múltiples URL {#batch-scraping-multiple-urls}

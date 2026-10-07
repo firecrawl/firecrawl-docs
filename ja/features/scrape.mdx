@@ -142,7 +142,7 @@ SDK はデータオブジェクトを直接返します。cURL は以下のと�
 
 したがって、信頼できる確認手順は次のとおりです。まずリクエストが成功したこと (HTTP `200` + `success: true`) を確認し、次に実際のページの結果として `data.metadata.statusCode` を確認します。Firecrawl では、`statusCode` が 2xx または `304` の場合、ページは正常に読み込まれたと見なします。それ以外の場合は、ページが正常に読み込まれなかったことを意味します。ページがエラーステータスを返した場合、`data.metadata.error` に追加の詳細が含まれることがあります。
 
-`data.metadata.provider` は、サードパーティのデータプロバイダーがその URL のデータを提供した場合に設定されます。`id` はデータを返したプロバイダー、`creditsCost` はそのアクセスにかかったコストです。`steps` には、試行された各プロバイダーが試行順に、ステータス (`matched`、`not_found`、`error`) とクレジットとともに一覧で示されます。
+`data.metadata.provider` は、サードパーティのデータプロバイダーがその URL のデータを提供した場合に設定されます ([プロバイダー経由の URL](#provider-routed-urls) を参照)。`id` はデータを返したプロバイダー、`creditsCost` はそのアクセスにかかったコストです。`steps` には、試行された各プロバイダーが試行順に、ステータス (`matched`、`not_found`、`error`) とクレジットとともに一覧で示されます。
 
 ## スクレイピングのフォーマット {#scrape-formats}
 
@@ -661,6 +661,18 @@ Firecrawl を使うと、スクレイピングの前に Web ページ上でさ�
 * 一部のプロバイダーでは、事前に組織の管理者が利用規約に同意しておく必要があります。同意していない場合、リクエストは [`THIRD_PARTY_DATA_TERMS_REQUIRED`](/ja/api-reference/errors) で失敗します。
 
 スクレイピングするページに対応したツールを探すには、通常の URL スクレイピングに `domainTools: true` を追加します。一致するツールは `data.tools` に返されます。料金とアクセスについては [Alexandria](/ja/features/alexandria#pricing-and-access) を参照してください。
+
+## プロバイダー経由のURL {#provider-routed-urls}
+
+Firecrawl は LinkedIn をスクレイピングしません。LinkedIn の個人プロフィール (`linkedin.com/in/<handle>`) や企業ページ (`linkedin.com/company/<slug>`) へのスクレイピングには、代わりにサードパーティのデータプロバイダーが応答します。`uk.linkedin.com` や `m.linkedin.com` といった国別・モバイル用サブドメインも同様にルーティングされます。レスポンスは通常のスクレイピングドキュメントと同じ形式です。`markdown` にはプロバイダーのレコードが格納され、[`data.metadata.provider`](#response-metadata-and-status-codes) には応答したプロバイダー名が入ります。バッチスクレイプでも、これらのURLは同じようにルーティングされます。
+
+* **セットアップ**: 組織の管理者がダッシュボードのエンリッチメント設定でエンリッチメントを有効にし、使用するプロバイダーを優先順に選択します。一部のプロバイダーでは、事前に利用規約への同意も必要です ([`THIRD_PARTY_DATA_TERMS_REQUIRED`](/ja/api-reference/errors)) 。
+* **最初に一致したものを採用**: プロバイダーは保存された順に試行されます。最初にレコードを返したプロバイダーがリクエストに応答し、残りのプロバイダーは実行されません。URLに対応するレコードを持たないプロバイダーは、次のプロバイダーに処理を引き継ぎます。どのプロバイダーにもレコードがない場合、リクエストは `THIRD_PARTY_DATA_NOT_FOUND` (404) で失敗します。
+* **対象はページ本体のみ**: 処理されるのはプロフィールまたは企業のルートページのみで、その配下のページは対象外です。`/in/<handle>/details/experience` や `/company/<slug>/jobs` などのサブページは `THIRD_PARTY_DATA_UNSUPPORTED_URL` (400) で失敗します。
+* **ルーティングを無効にするオプション**: `actions`、`profile`、`minAge`、`zeroDataRetention`、`lockdown`、`redactPII` を指定した場合や、`markdown`、`html`、`rawHtml`、`links`、`images`、`json`、`summary`、`question`、`highlights`、`query` 以外のフォーマットを指定した場合、これらのURLは処理できません。このようなリクエストは `THIRD_PARTY_DATA_UNSUPPORTED_OPTION` (400) で失敗し、`error` に該当するオプション名が示されます。そのオプションを外してから、リクエストを再送信してください。また、Team のポリシーでゼロデータ保持が強制されている場合も、これらのURLは処理できません。`headers`、`waitFor`、`mobile`、`location`、`proxy`、`includeTags`、`excludeTags` などのページレンダリングオプションは、これらのURLでは無視されます。
+* **課金**: リクエストのコストは、スクレイピングの基本料金である1クレジットではなく、プロバイダーの各ステップで課金されたクレジットの合計 (`metadata.provider.creditsCost`、内訳は `steps`) になります。レコードを持たないプロバイダーには課金が発生しないため、通常は一致したプロバイダーの料金がそのままリクエストのコストになります。`json` などのフォーマット追加料金は引き続き適用されます。`x-request-id` ではURLスクレイピングのリプレイが行われないため、リクエストはすべて課金対象です。料金については[課金](/ja/billing#provider-routed-urls)を参照してください。
+
+エンリッチメントが無効な場合、または保存されたプロバイダーのいずれもURLを処理できない場合、リクエストは `THIRD_PARTY_DATA_ENRICHMENT_NOT_ENABLED` (403) で失敗します。すべてのエラーコードについては [Errors](/ja/api-reference/errors) を参照してください。
 
 <div id="batch-scraping-multiple-urls">
   ## 複数のURLのバッチスクレイピング {#batch-scraping-multiple-urls}
