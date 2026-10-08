@@ -46,6 +46,12 @@ import AgentCreditLimitPython from "/snippets/ja/v2/agent/credit-limit/python.md
 import AgentCreditLimitJS from "/snippets/ja/v2/agent/credit-limit/js.mdx";
 import AgentCreditLimitCURL from "/snippets/ja/v2/agent/credit-limit/curl.mdx";
 import AgentCreditLimitOutput from "/snippets/ja/v2/agent/credit-limit/output.mdx";
+import AgentAlexandriaPython from "/snippets/ja/v2/agent/alexandria/python.mdx";
+import AgentAlexandriaJS from "/snippets/ja/v2/agent/alexandria/js.mdx";
+import AgentAlexandriaCURL from "/snippets/ja/v2/agent/alexandria/curl.mdx";
+import AgentAlexandriaApprovalPython from "/snippets/ja/v2/agent/alexandria-approval/python.mdx";
+import AgentAlexandriaApprovalJS from "/snippets/ja/v2/agent/alexandria-approval/js.mdx";
+import AgentAlexandriaApprovalCURL from "/snippets/ja/v2/agent/alexandria-approval/curl.mdx";
 import PlaygroundCTA from "/snippets/ja/shared/playground-cta-agent.mdx";
 import ChooseDataExtractor from "/snippets/ja/shared/choose-data-extractor/from-agent.mdx";
 
@@ -60,10 +66,10 @@ Firecrawl の `/agent` は、検索・ナビゲーション・データ収集を
 
 Agent は `/extract` の優れた点をすべて引き継ぎつつ、さらに強化しています:
 
-* **URL 不要**: 必要な内容を `prompt` パラメータで記述するだけでよく、URL は任意です
-* **ディープ Web 検索**: サイト内を自律的に検索・巡回し、必要なデータを深部まで探索
-* **高い信頼性と正確性**: 幅広い種類のクエリやユースケースで安定して動作
-* **高速**: 複数ソースを並列処理して結果を素早く取得
+* **URL 不要**: `prompt` パラメータで必要な内容を記述するだけです。URL の指定は任意です
+* **ディープな Web 検索**: サイトの奥深くまで自律的に検索・移動し、データを見つけ出します
+* **高い信頼性と精度**: 多種多様なクエリやユースケースに対応します
+* **高速**: 複数のソースを並列で処理し、すばやく結果を返します
 
 <PlaygroundCTA />
 
@@ -282,11 +288,57 @@ Firecrawl Agent は **Spark 2** で動作します。Spark 2 は、同等の精�
   <AgentWithModelCURL />
 </CodeGroup>
 
+## 接続済みの Alexandria ツールを使用する {#use-your-connected-alexandria-tools}
+
+Agent は実行中、Web に加えて Team の [Alexandria](/ja/features/alexandria) データプロバイダーを呼び出せます。[Playground](https://www.firecrawl.dev/app/agent) では自動的に有効になります。API および SDKs からの実行では、`exchange` オブジェクトを送信しない限り Web のみが使用されます。そのため、`exchange` を含まないリクエストでプロバイダーが使用されることはありません。
+
+`exchange` を `enabled: true` で送信すると、Agent は Team で利用可能なすべてのプロバイダーを使用できます。`toolkits` で最大 5 つまでに絞り込むこともできます。
+
+<CodeGroup>
+  <AgentAlexandriaPython />
+
+  <AgentAlexandriaJS />
+
+  <AgentAlexandriaCURL />
+</CodeGroup>
+
+| フィールド                | 説明                                                                                                                            |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`            | Agent によるプロバイダーの呼び出しを許可します。`exchange` を送信するとデフォルトで `true` になるため、空のオブジェクトを送信するだけでも有効になります。スレッドの特定のターンだけ無効にするには `false` を送信します。 |
+| `toolkits`           | `["apollo"]` のようなプロバイダーのスラッグ (最大 5 つ) 。Agent は指定されたプロバイダーのみを使用します。空または省略した場合は、Team で利用可能なすべてのプロバイダーが対象になります。                  |
+| `maxCalls`           | Agent が 1 ターンで行えるプロバイダー呼び出しの上限 (1〜30) 。デフォルトは 16 です。                                                                          |
+| `requireApproval`    | 有料のプロバイダー呼び出しの前にターンを停止し、回答待ちの `pendingApproval` を返して終了します。同じリクエストで `mode: "chat"` を指定する必要があります。デフォルトは `false` です。             |
+| `approve`, `decline` | 前のターンで返された `pendingApproval` に、スレッドの次のターンで回答します。[有料呼び出しを実行前に承認する](#approve-paid-calls-before-they-run)を参照してください。              |
+| `onTermsRequired`    | Team がまだ同意していないデータ利用規約への同意をプロバイダーが求める場合の動作。[規約への同意が必要なデータプロバイダー](#data-providers-that-need-terms)を参照してください。                   |
+
+ステータスレスポンスの `exchange` オブジェクトには、実行の内容が含まれます。具体的には、`enabled`、実行時の `toolkits` と `requireApproval`、`paidCalls` (実行された有料プロバイダー呼び出し) 、`creditsUsed` (それらの呼び出しのコスト。記録がない場合は `null`) です。
+
+### フォローアップターン {#follow-up-turns}
+
+スレッドのフォローアップターン (`threadId` を指定したリクエスト) で `exchange` を省略すると、前のターンの設定がそのまま引き継がれます。`exchange` オブジェクトを送信した場合も、`toolkits` と `onTermsRequired` は省略すれば引き継がれます。ただし、`enabled`、`maxCalls`、`requireApproval` は改めて送信しない限りデフォルト値に戻ります。
+
+### 有料呼び出しを実行前に承認する {#approve-paid-calls-before-they-run}
+
+`requireApproval: true` を指定すると、Agent は最初の有料プロバイダー呼び出しの直前で停止し、そのターンは `kind: "calls"` の `pendingApproval` を返して終了します。`pendingApproval` には `id`、Agent の `reason`、Agent が実行しようとしている `calls` が含まれます。各呼び出しには `id`、`provider`、`capability`、`input`、`creditsEstimate` が含まれます。これらをユーザーに提示したうえで、同じスレッドの次のターンで応答してください。
+
+* `exchange.approve: { "approvalId": "<pendingApproval.id>" }` を送ると、呼び出しが実行されます。一部の呼び出しだけを実行する場合は `callIds` を、スレッド内で以降の確認を省略する場合は `always: true` を追加します。
+* `exchange.decline: { "approvalId": "<pendingApproval.id>" }` を送ると、呼び出しはスキップされ、Agent はそれらを使わずに回答します。
+
+以降の有料呼び出しも引き続き承認待ちにするには、応答するターンでも `requireApproval: true` を指定してください。どちらのターンでも `mode: "chat"` が必要です。
+
+<CodeGroup>
+  <AgentAlexandriaApprovalPython />
+
+  <AgentAlexandriaApprovalJS />
+
+  <AgentAlexandriaApprovalCURL />
+</CodeGroup>
+
 ## 利用規約への同意が必要なデータプロバイダー {#data-providers-that-need-terms}
 
-Agent は実行中に [Alexandria](/ja/features/alexandria) のデータプロバイダーを呼び出せますが、対象となるのは Team がデータ利用規約に同意済みのプロバイダーのみです。規約に同意していないプロバイダーは、`exchange.onTermsRequired` の設定にかかわらず呼び出されません。実行は利用可能なプロバイダーで継続され、スキップされたプロバイダーはステータスのレスポンスで確認できます。
+実行で [Alexandria](/ja/features/alexandria) のデータプロバイダーを使用する場合、呼び出されるのは Team がデータ利用規約に同意済みのプロバイダーのみです。規約に同意していないプロバイダーは、`exchange.onTermsRequired` の設定にかかわらず呼び出されません。実行は利用可能なプロバイダーで継続され、スキップされたプロバイダーはステータスのレスポンスで確認できます。
 
-自動同意モードはありません。プロバイダーの規約への同意には、必ず人による承諾が必要です。承諾は [ダッシュボード](https://www.firecrawl.dev/app/settings?tab=data-sources) で行うか、ユーザーが明示的に同意した後にアプリケーションから `terms/accept` を呼び出して行います。Firecrawl 上にエージェントを構築する場合、そのエージェントは `terms/accept` を呼び出す前に必ずユーザーの確認を得る必要があります。データをリクエストしただけでは、プロバイダーの規約に同意したことにはなりません。
+自動同意モードはありません。プロバイダーの規約への同意には、必ず人による承諾が必要です。承諾は [ダッシュボード](https://www.firecrawl.dev/app/settings?tab=data-sources) で行うか、ユーザーが明示的に同意した後にアプリケーションから `terms/accept` を呼び出して行います。Firecrawl 上にAgentを構築する場合、そのAgentは `terms/accept` を呼び出す前に必ずユーザーの確認を得る必要があります。データをリクエストしただけでは、プロバイダーの規約に同意したことにはなりません。
 
 | `onTermsRequired` | 動作                                                                                                                                   |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
@@ -394,17 +446,26 @@ curl -X POST https://api.firecrawl.dev/v2/agent \
 
 ## パラメータ {#parameters}
 
-| パラメータ                      | 型    | Required | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| -------------------------- | ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `prompt`                   | string  | **Yes**  | 抽出したいデータを自然言語で記述した文字列 (最大 10,000 文字)                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `model`                    | string  | No       | すべての実行で使用されるモデル `spark-2` がデフォルトです。Spark 1 モデルは非推奨であり、`spark-2` にルーティングされます                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `effort`                   | string  | No       | 推論予算: `low`、`medium`、または `high`。すべての実行は `spark-2` で行われるため、`effort` は `model` の有無にかかわらず送信できます                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `urls`                     | array   | No       | 抽出対象を絞り込むための任意の URL リスト                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `schema`                   | object  | No       | 構造化された出力のための任意の JSON スキーマ                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `strictConstrainToURLs`    | boolean | No       | `true` の場合、エージェントは `urls` 配列で指定された URL のみを訪問します                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `webhook`                  | object  | No       | エージェントのライフサイクルイベント (`agent.started`、`agent.action`、`agent.completed`、`agent.failed`、`agent.cancelled`) を受信する webhook。[webhook ペイロード](/ja/api-reference/endpoint/webhook-agent-started)を参照してください                                                                                                                                                                                                                                                                                                                 |
-| `maxCredits`               | number  | No       | このエージェントタスクで使用するクレジットの最大数。設定しない場合、デフォルトは **2,500** です。ダッシュボードでは **2,500** までの値をサポートしています。これを超える上限を設定するには、API 経由で `maxCredits` を指定してください (2,500 を超える値は常に有料リクエストとして扱われます)。上限に達するとジョブは `stopReason: "credit_limit_reached"` で失敗し、**`data` は一切返されません**。レスポンスには、ベストエフォートで取得された `partial` が含まれる場合があります。詳しくは[クレジット上限による停止への対応](#handling-credit-limit-stops)を参照してください。失敗した実行には課金されません。AI の推論に使用されたクレジットは失敗時には請求されず、実行中のツール呼び出し (`scraping`、`search`、`mapping` など) に使用されたクレジットは返還され、レスポンスには `creditsUsed: 0` が記録されます。 |
-| `exchange.onTermsRequired` | string  | No       | エージェントが使用する Alexandria データプロバイダーが、Team でまだ同意していない利用規約への同意を必要とする場合の動作: `skip` (デフォルト) または `ask`。[利用規約への同意が必要なデータプロバイダー](#data-providers-that-need-terms)を参照してください                                                                                                                                                                                                                                                                                                                                             |
+| パラメータ                      | 型       | Required | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------------------- | ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prompt`                   | string  | **Yes**  | 抽出したいデータを自然言語で記述した文字列 (最大 10,000 文字)                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `model`                    | string  | No       | すべての実行で使用されるモデル `spark-2` がデフォルトです。Spark 1 モデルは非推奨であり、`spark-2` にルーティングされます                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `effort`                   | string  | No       | 推論予算: `low`、`medium`、または `high`。すべての実行は `spark-2` で行われるため、`effort` は `model` の有無にかかわらず送信できます                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `urls`                     | array   | No       | 抽出対象を絞り込むための任意の URL リスト                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `schema`                   | object  | No       | 構造化された出力のための任意の JSON スキーマ                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `strictConstrainToURLs`    | boolean | No       | `true` の場合、Agentは `urls` 配列で指定された URL のみを訪問します                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `webhook`                  | object  | No       | Agentのライフサイクルイベント (`agent.started`、`agent.action`、`agent.completed`、`agent.failed`、`agent.cancelled`) を受信する webhook。[webhook ペイロード](/ja/api-reference/endpoint/webhook-agent-started)を参照してください                                                                                                                                                                                                                                                                                                                  |
+| `maxCredits`               | number  | No       | このAgentタスクで使用するクレジットの最大数。設定しない場合、デフォルトは **2,500** です。ダッシュボードでは **2,500** までの値をサポートしています。これを超える上限を設定するには、API 経由で `maxCredits` を指定してください (2,500 を超える値は常に有料リクエストとして扱われます)。上限に達するとジョブは `stopReason: "credit_limit_reached"` で失敗し、**`data` は一切返されません**。レスポンスには、ベストエフォートで取得された `partial` が含まれる場合があります。詳しくは[クレジット上限による停止への対応](#handling-credit-limit-stops)を参照してください。失敗した実行には課金されません。AI の推論に使用されたクレジットは失敗時には請求されず、実行中のツール呼び出し (`scraping`、`search`、`mapping` など) に使用されたクレジットは返還され、レスポンスには `creditsUsed: 0` が記録されます。 |
+| `threadId`                 | string  | No       | 既存のスレッドを継続します。以前の実行で返された `threadId` を指定します。省略した `urls`、`schema`、`effort`、`mode`、`exchange` の設定は前のターンから引き継がれます                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `mode`                     | string  | No       | `extract` (デフォルト) は、毎ターン完全な構造化結果を `data` で返します。`chat` では、新しいデータを求めないフォローアップに対して `message` で短い返答を返せます。`exchange.requireApproval` を使用する場合は必須です                                                                                                                                                                                                                                                                                                                                                                  |
+| `exchange`                 | object  | No       | Agentが Team の Alexandria データプロバイダーを呼び出せるようにします。指定しない場合、実行では web のみが使用されます。[接続済みの Alexandria ツールを使用する](#use-your-connected-alexandria-tools)を参照してください                                                                                                                                                                                                                                                                                                                                                         |
+| `exchange.enabled`         | boolean | No       | Agentがプロバイダーを呼び出せるようにします。`exchange` を送信した場合のデフォルトは `true` です                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `exchange.toolkits`        | array   | No       | 固定するプロバイダーのスラッグ (最大 5 個)。空または省略した場合は、Team が使用できるすべてのプロバイダーが対象になります                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `exchange.maxCalls`        | integer | No       | 1 ターンあたりのプロバイダー呼び出しの最大回数 (1〜30)。デフォルトは 16 です                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `exchange.requireApproval` | boolean | No       | 有料のプロバイダー呼び出しを行う前に、`pendingApproval` を返してターンを終了します。`mode: "chat"` が必要です。デフォルトは `false` です                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `exchange.approve`         | object  | No       | `{ approvalId, callIds?, always? }`: 前のターンの `pendingApproval` を承認します。`threadId` が必要です。[実行前に有料呼び出しを承認する](#approve-paid-calls-before-they-run)を参照してください                                                                                                                                                                                                                                                                                                                                                         |
+| `exchange.decline`         | object  | No       | `{ approvalId }`: 前のターンの `pendingApproval` を拒否します。`threadId` が必要です                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `exchange.onTermsRequired` | string  | No       | Agentが使用する Alexandria データプロバイダーが、Team でまだ同意していない利用規約への同意を必要とする場合の動作: `skip` (デフォルト) または `ask`。[利用規約への同意が必要なデータプロバイダー](#data-providers-that-need-terms)を参照してください                                                                                                                                                                                                                                                                                                                                              |
 
 ## Agent と Extract：何が改善されたか {#agent-vs-extract-whats-improved}
 

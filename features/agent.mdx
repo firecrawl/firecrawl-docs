@@ -46,6 +46,12 @@ import AgentCreditLimitPython from "/snippets/v2/agent/credit-limit/python.mdx";
 import AgentCreditLimitJS from "/snippets/v2/agent/credit-limit/js.mdx";
 import AgentCreditLimitCURL from "/snippets/v2/agent/credit-limit/curl.mdx";
 import AgentCreditLimitOutput from "/snippets/v2/agent/credit-limit/output.mdx";
+import AgentAlexandriaPython from "/snippets/v2/agent/alexandria/python.mdx";
+import AgentAlexandriaJS from "/snippets/v2/agent/alexandria/js.mdx";
+import AgentAlexandriaCURL from "/snippets/v2/agent/alexandria/curl.mdx";
+import AgentAlexandriaApprovalPython from "/snippets/v2/agent/alexandria-approval/python.mdx";
+import AgentAlexandriaApprovalJS from "/snippets/v2/agent/alexandria-approval/js.mdx";
+import AgentAlexandriaApprovalCURL from "/snippets/v2/agent/alexandria-approval/curl.mdx";
 import PlaygroundCTA from "/snippets/shared/playground-cta-agent.mdx";
 import ChooseDataExtractor from "/snippets/shared/choose-data-extractor/from-agent.mdx";
 
@@ -284,9 +290,55 @@ The `model` parameter is optional — every request runs `spark-2`:
 
 </CodeGroup>
 
+## Use your connected Alexandria tools
+
+Agent can call your team's [Alexandria](/features/alexandria) data providers during a run, alongside the web. The [playground](https://www.firecrawl.dev/app/agent) turns them on for you. From the API and the SDKs, a run uses the web only until you send an `exchange` object, so a request without one never uses your providers.
+
+Send `exchange` with `enabled: true` to let the agent use every provider your team can use, or pin up to five with `toolkits`:
+
+<CodeGroup>
+
+<AgentAlexandriaPython />
+<AgentAlexandriaJS />
+<AgentAlexandriaCURL />
+
+</CodeGroup>
+
+| Field | What it does |
+|---|---|
+| `enabled` | Lets the agent call providers. Defaults to `true` once you send `exchange`, so an empty object also turns them on. Send `false` to turn them off for one turn of a thread. |
+| `toolkits` | Up to 5 provider slugs, such as `["apollo"]`. The agent uses only those. Empty or left out means every provider your team can use. |
+| `maxCalls` | The most provider calls the agent may make in one turn, from 1 to 30. Defaults to 16. |
+| `requireApproval` | Stops the turn before any paid provider call and ends it with a `pendingApproval` for you to answer. Needs `mode: "chat"` on the same request. Defaults to `false`. |
+| `approve`, `decline` | Answer the previous turn's `pendingApproval` on the next turn of the thread. See [Approve paid calls before they run](#approve-paid-calls-before-they-run). |
+| `onTermsRequired` | What to do when a provider needs data terms your team hasn't accepted. See [Data providers that need terms](#data-providers-that-need-terms). |
+
+The status response's `exchange` object reports what the run did: `enabled`, the `toolkits` and `requireApproval` it ran with, `paidCalls` (paid provider calls it made) and `creditsUsed` (what those calls cost, `null` when none were recorded).
+
+### Follow-up turns
+
+A follow-up turn of a thread (a request with `threadId`) that leaves out `exchange` keeps the previous turn's settings. If it sends an `exchange` object, `toolkits` and `onTermsRequired` still carry over when left out, but `enabled`, `maxCalls` and `requireApproval` go back to their defaults unless you send them again.
+
+### Approve paid calls before they run
+
+With `requireApproval: true`, the agent stops before its first paid provider call and the turn ends with a `pendingApproval` of `kind: "calls"`. It carries an `id`, the agent's `reason`, and the `calls` it wants to make, each with an `id`, `provider`, `capability`, `input` and `creditsEstimate`. Show them to your user, then answer on the next turn of the same thread:
+
+- `exchange.approve: { "approvalId": "<pendingApproval.id>" }` runs the calls. Add `callIds` to run only some of them, or `always: true` to stop asking for the rest of the thread.
+- `exchange.decline: { "approvalId": "<pendingApproval.id>" }` skips them, and the agent answers without them.
+
+Send `requireApproval: true` again on the answering turn to keep later paid calls waiting for approval. Both turns need `mode: "chat"`.
+
+<CodeGroup>
+
+<AgentAlexandriaApprovalPython />
+<AgentAlexandriaApprovalJS />
+<AgentAlexandriaApprovalCURL />
+
+</CodeGroup>
+
 ## Data providers that need terms
 
-Agent can call [Alexandria](/features/alexandria) data providers during a run, but only the ones whose data terms your team has accepted. A provider whose terms you haven't accepted is never called, whatever `exchange.onTermsRequired` is set to. The run carries on with the providers it can use, and the status response reports what it skipped.
+When a run uses [Alexandria](/features/alexandria) data providers, it only calls the ones whose data terms your team has accepted. A provider whose terms you haven't accepted is never called, whatever `exchange.onTermsRequired` is set to. The run carries on with the providers it can use, and the status response reports what it skipped.
 
 There is no auto-accept mode. Accepting a provider's terms always needs a person to agree to them, either in the [dashboard](https://www.firecrawl.dev/app/settings?tab=data-sources) or through a `terms/accept` call your application makes after its user has explicitly agreed. If you build an agent on top of Firecrawl, it must ask its user before calling `terms/accept`. A request for data isn't consent to a provider's terms.
 
@@ -406,6 +458,15 @@ In `skip` mode there's no pending approval to answer. After the terms are accept
 | `strictConstrainToURLs` | boolean | No | If `true`, the agent only visits the URLs provided in the `urls` array |
 | `webhook` | object | No | Webhook to receive agent lifecycle events (`agent.started`, `agent.action`, `agent.completed`, `agent.failed`, `agent.cancelled`). See the [webhook payloads](/api-reference/endpoint/webhook-agent-started) |
 | `maxCredits` | number | No | Maximum number of credits to spend on this agent task. Defaults to **2,500** if not set. The dashboard supports values up to **2,500**; for higher limits, set `maxCredits` via the API (values above 2,500 are always treated as paid requests). If the limit is reached, the job fails with `stopReason: "credit_limit_reached"` and **no `data` is returned**. The response may include a best-effort `partial`; see [Handling credit-limit stops](#handling-credit-limit-stops). Failed runs are not billed: credits used for AI reasoning are never charged on failure, any credits used for tool calls during the run (scraping, search, mapping, etc.) are refunded, and the response reports `creditsUsed: 0`. |
+| `threadId` | string | No | Continue an existing thread: the `threadId` an earlier run returned. Left-out `urls`, `schema`, `effort`, `mode` and `exchange` settings carry over from the previous turn |
+| `mode` | string | No | `extract` (default) returns the full structured result in `data` every turn. `chat` lets a follow-up that asks for no new data get a short reply in `message`. Required for `exchange.requireApproval` |
+| `exchange` | object | No | Lets the agent call your team's Alexandria data providers. Without it the run uses the web only. See [Use your connected Alexandria tools](#use-your-connected-alexandria-tools) |
+| `exchange.enabled` | boolean | No | Lets the agent call providers. Defaults to `true` once `exchange` is sent |
+| `exchange.toolkits` | array | No | Up to 5 provider slugs to pin. Empty or left out means every provider your team can use |
+| `exchange.maxCalls` | integer | No | The most provider calls per turn, from 1 to 30. Defaults to 16 |
+| `exchange.requireApproval` | boolean | No | Ends the turn with a `pendingApproval` before any paid provider call. Needs `mode: "chat"`. Defaults to `false` |
+| `exchange.approve` | object | No | `{ approvalId, callIds?, always? }`: approves the previous turn's `pendingApproval`. Needs `threadId`. See [Approve paid calls before they run](#approve-paid-calls-before-they-run) |
+| `exchange.decline` | object | No | `{ approvalId }`: declines the previous turn's `pendingApproval`. Needs `threadId` |
 | `exchange.onTermsRequired` | string | No | What to do when an Alexandria data provider the agent would use needs terms your team has not accepted: `skip` (default) or `ask`. See [Data providers that need terms](#data-providers-that-need-terms) |
 
 ## Agent vs Extract: What's Improved
