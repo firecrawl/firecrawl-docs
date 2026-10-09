@@ -18,7 +18,7 @@
           <img src="/logo/light.svg" alt="Firecrawl" class="firecrawl-cta-logo firecrawl-cta-logo-light" /><img src="/logo/dark.svg" alt="Firecrawl" class="firecrawl-cta-logo firecrawl-cta-logo-dark" />
           <h3 class="firecrawl-cta-title">Ready to build?</h3>
           <p class="firecrawl-cta-description">
-            Start getting web data for free and scale seamlessly as your project expands. <strong>No credit card needed.</strong>
+            Search, scrape, and interact with the web for free, and scale seamlessly as your project expands. <strong>No credit card needed.</strong>
           </p>
           <div class="firecrawl-cta-buttons">
             <a href="https://www.firecrawl.dev/signin?utm_source=firecrawl_docs&utm_medium=docs_card&utm_content=start_for_free" class="firecrawl-cta-btn-primary">Start for free</a>
