@@ -404,6 +404,34 @@ curl -s -X DELETE "https://api.firecrawl.dev/v2/scrape/$SCRAPE_ID/interact" \
   通过 API 创建的 Profiles 可能暂时还不会显示在 Dashboard &gt; Interact &gt; Profiles 中。Dashboard 目前尚未提供通过 API 创建的持久化 Profiles 的完整列表。
 </Info>
 
+## 零数据保留 (ZDR) {#zero-data-retention-zdr}
+
+交互功能支持零数据保留 (ZDR) ，适用于对数据处理有严格要求的团队。启用后，会话结束后 Firecrawl 将不会持久化任何页面内容或执行输出。
+
+要启用 ZDR，请在首次调用交互时设置 `zeroDataRetention: true`：
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/scrape/YOUR_SCRAPE_ID/interact \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY" \
+  -d '{
+    "prompt": "Click the pricing tab and summarize the plans",
+    "zeroDataRetention": true
+  }'
+```
+
+使用 [`POST /v2/interact`](/zh/api-reference/endpoint/browser-create) 创建独立会话时，也可以传入 `zeroDataRetention: true`。如果要交互的抓取本身是以 `zeroDataRetention: true` 发起的，系统会自动开始一个 ZDR 会话。保留策略存储在会话中，因此后续对同一会话的调用即使省略该选项，也会保持 ZDR 模式。
+
+ZDR 仅适用于企业版套餐，且需要为你的团队单独启用。未启用 ZDR 的团队如果发送设置了 `zeroDataRetention: true` 的请求，将返回 `403`。请访问 [firecrawl.dev/enterprise](https://www.firecrawl.dev/enterprise) 开始使用。
+
+<Note>
+  * ZDR 模式不支持会话录制和持久化配置文件。同时设置 `zeroDataRetention: true` 与 `recordSession` 或 `profile` 的请求将返回 `400`。
+  * 未以 ZDR 模式开始的现有会话无法切换为 ZDR 模式。对此类会话请求 ZDR 将返回 `409`：请停止该会话，并使用 `zeroDataRetention: true` 开始一个新会话。
+  * ZDR 抓取不会保留已抓取的 URL，因此 Firecrawl 可能无法基于原始抓取重建浏览器。如果 interact 返回 `409` 并提示重放上下文不可用，请在请求中传入 `url`，以便在新的 ZDR 会话中打开该页面。原始抓取的 actions 不会被重放。
+</Note>
+
+ZDR 会话的成本请参见[定价](#pricing)。
+
 ## 何时使用什么 {#when-to-use-what}
 
 | 使用场景         | 推荐                         | 原因                  |
@@ -423,6 +451,7 @@ curl -s -X DELETE "https://api.firecrawl.dev/v2/scrape/$SCRAPE_ID/interact" \
 * **仅代码** (无 `prompt`): 每个会话分钟 2 个额度
 * **使用 AI prompts**: 每个会话分钟 7 个额度
 * **抓取**: 单独计费 (每次抓取 1 个额度，外加任何特定格式的费用) 。
+* **零数据保留**：ZDR 会话每个会话分钟额外收取 2 个额度，因此仅代码会话按每分钟 4 个额度计费，使用 AI prompts 的会话按每分钟 9 个额度计费，最低计费时长同样为一分钟。ZDR 抓取仍会单独产生 [ZDR 成本](/zh/features/scrape#zero-data-retention-zdr)，即每页额外 1 个额度。
 
 ## API 参考 {#api-reference}
 
@@ -431,13 +460,15 @@ curl -s -X DELETE "https://api.firecrawl.dev/v2/scrape/$SCRAPE_ID/interact" \
 
 ### 请求体 (POST) {#request-body-post}
 
-| 字段         | 类型       | 默认值      | 描述                                                                  |
-| ---------- | -------- | -------- | ------------------------------------------------------------------- |
-| `prompt`   | `string` | None     | 提供给 AI 代理的自然语言任务。若未设置 `code`，则此项必填。最多 10,000 个字符。                   |
-| `code`     | `string` | None     | 要执行的代码 (Node.js、Python 或 Bash) 。若未设置 `prompt`，则此项必填。最多 100,000 个字符。 |
-| `language` | `string` | `"node"` | `"node"`、`"python"` 或 `"bash"`。仅在使用 `code` 时生效。                     |
-| `timeout`  | `number` | `30`     | 超时时间，单位为秒 (1–300) 。                                                 |
-| `origin`   | `string` | None     | 用于活动追踪的调用方标识符。                                                      |
+| 字段                  | 类型        | 默认值      | 描述                                                                  |
+| ------------------- | --------- | -------- | ------------------------------------------------------------------- |
+| `prompt`            | `string`  | None     | 提供给 AI 代理的自然语言任务。若未设置 `code`，则此项必填。最多 10,000 个字符。                   |
+| `code`              | `string`  | None     | 要执行的代码 (Node.js、Python 或 Bash) 。若未设置 `prompt`，则此项必填。最多 100,000 个字符。 |
+| `language`          | `string`  | `"node"` | `"node"`、`"python"` 或 `"bash"`。仅在使用 `code` 时生效。                     |
+| `timeout`           | `number`  | `30`     | 超时时间，单位为秒 (1–300) 。                                                 |
+| `origin`            | `string`  | None     | 用于活动追踪的调用方标识符。                                                      |
+| `zeroDataRetention` | `boolean` | `false`  | 以[零数据保留](#zero-data-retention-zdr)模式运行该会话。需要你的团队已启用 ZDR。            |
+| `url`               | `string`  | None     | 原始抓取的上下文不可用时 (例如进行 ZDR 抓取后) ，要在新会话中打开的页面。                           |
 
 ### 响应 {#response}
 

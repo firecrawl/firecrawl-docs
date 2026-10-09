@@ -404,6 +404,34 @@ La deuxième réponse Interact devrait afficher `localStorage` avec la valeur `"
   Les profils créés via l’API peuvent ne pas encore apparaître dans Dashboard &gt; Interact &gt; Profiles. Le dashboard ne fournit pas encore un inventaire complet des profils persistants créés via l’API.
 </Info>
 
+## Aucune Conservation des Données (ZDR) {#zero-data-retention-zdr}
+
+Interact prend en charge le mode Aucune Conservation des Données (ZDR) pour les équipes soumises à des exigences strictes en matière de traitement des données. Lorsque ce mode est activé, Firecrawl ne fait persister aucun contenu de page ni aucune sortie d&#39;exécution au-delà de la durée de vie de la session.
+
+Pour activer le mode ZDR, définissez `zeroDataRetention: true` lors de votre premier appel à interact :
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/scrape/YOUR_SCRAPE_ID/interact \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY" \
+  -d '{
+    "prompt": "Click the pricing tab and summarize the plans",
+    "zeroDataRetention": true
+  }'
+```
+
+Vous pouvez également passer `zeroDataRetention: true` lors de la création d&#39;une session autonome avec [`POST /v2/interact`](/fr/api-reference/endpoint/browser-create). Toute interaction avec une extraction elle-même effectuée avec `zeroDataRetention: true` démarre automatiquement une session ZDR. La politique de conservation est enregistrée au niveau de la session : les appels ultérieurs à cette même session restent donc en mode ZDR, même s&#39;ils omettent l&#39;option.
+
+ZDR est disponible avec les offres Enterprise et doit être activé pour votre équipe. Les requêtes qui définissent `zeroDataRetention: true` depuis une équipe pour laquelle ZDR n&#39;est pas activé renvoient une erreur `403`. Rendez-vous sur [firecrawl.dev/enterprise](https://www.firecrawl.dev/enterprise) pour commencer.
+
+<Note>
+  * Les enregistrements de session et les profils persistants ne sont pas disponibles en mode ZDR. Les requêtes qui combinent `zeroDataRetention: true` avec `recordSession` ou `profile` renvoient une erreur `400`.
+  * Une session existante démarrée sans ZDR ne peut pas basculer en mode ZDR. Toute demande de ZDR sur cette session renvoie une erreur `409` : arrêtez la session et démarrez-en une nouvelle avec `zeroDataRetention: true`.
+  * Les extractions ZDR ne conservent pas l&#39;URL extraite ; il est donc possible que Firecrawl ne puisse pas reconstruire le navigateur à partir de l&#39;extraction d&#39;origine. Si interact renvoie une erreur `409` indiquant que le contexte de relecture n&#39;est pas disponible, passez `url` dans la requête pour ouvrir cette page dans une nouvelle session ZDR. Les actions de l&#39;extraction d&#39;origine ne sont pas rejouées.
+</Note>
+
+Voir [Tarification](#pricing) pour le coût des sessions ZDR.
+
 ## Quand utiliser chaque option {#when-to-use-what}
 
 | Cas d’usage                                       | Recommandé                    | Pourquoi                                     |
@@ -420,9 +448,10 @@ La deuxième réponse Interact devrait afficher `localStorage` avec la valeur `"
 
 ## Tarification {#pricing}
 
-* **Code uniquement** (sans `prompt`): 2 credits par minute de session
-* **Avec des prompts IA**: 7 credits par minute de session
-* **Scrape**: facturé séparément (1 credit par scrape, plus les coûts spécifiques au format)
+* **Code uniquement** (sans `prompt`): 2 crédits par minute de session
+* **Avec des prompts IA**: 7 crédits par minute de session
+* **Extraction**: facturée séparément (1 crédit par extraction, plus les coûts spécifiques au format)
+* **Aucune Conservation des Données** : les sessions ZDR ajoutent 2 crédits par minute de session ; les sessions en code uniquement sont donc facturées 4 crédits par minute et les sessions avec des prompts IA 9 crédits, avec le même minimum d&#39;une minute. Une extraction ZDR reste soumise à son propre [coût ZDR](/fr/features/scrape#zero-data-retention-zdr) de 1 crédit supplémentaire par page.
 
 ## Référence de l’API {#api-reference}
 
@@ -431,13 +460,15 @@ La deuxième réponse Interact devrait afficher `localStorage` avec la valeur `"
 
 ### Corps de la requête (POST) {#request-body-post}
 
-| Champ      | Type     | Par défaut | Description                                                                                                      |
-| ---------- | -------- | ---------- | ---------------------------------------------------------------------------------------------------------------- |
-| `prompt`   | `string` | Aucune     | Tâche en langage naturel pour l’agent d’IA. Obligatoire si `code` n’est pas défini. Maximum 10 000 caractères.   |
-| `code`     | `string` | Aucune     | Code à exécuter (Node.js, Python ou Bash). Obligatoire si `prompt` n’est pas défini. Maximum 100 000 caractères. |
-| `language` | `string` | `"node"`   | `"node"`, `"python"` ou `"bash"`. Utilisé uniquement avec `code`.                                                |
-| `timeout`  | `number` | `30`       | timeout en secondes (1–300).                                                                                     |
-| `origin`   | `string` | Aucune     | Identifiant de l’appelant pour le suivi de l’activité.                                                           |
+| Champ               | Type      | Par défaut | Description                                                                                                                                           |
+| ------------------- | --------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prompt`            | `string`  | Aucune     | Tâche en langage naturel pour l’agent d’IA. Obligatoire si `code` n’est pas défini. Maximum 10 000 caractères.                                        |
+| `code`              | `string`  | Aucune     | Code à exécuter (Node.js, Python ou Bash). Obligatoire si `prompt` n’est pas défini. Maximum 100 000 caractères.                                      |
+| `language`          | `string`  | `"node"`   | `"node"`, `"python"` ou `"bash"`. Utilisé uniquement avec `code`.                                                                                     |
+| `timeout`           | `number`  | `30`       | timeout en secondes (1–300).                                                                                                                          |
+| `origin`            | `string`  | Aucune     | Identifiant de l’appelant pour le suivi de l’activité.                                                                                                |
+| `zeroDataRetention` | `boolean` | `false`    | Exécute la session en mode [Aucune Conservation des Données](#zero-data-retention-zdr). Nécessite que la ZDR soit activée pour votre équipe.          |
+| `url`               | `string`  | Aucune     | Page à ouvrir dans une nouvelle session lorsque le contexte de l’extraction d’origine n’est plus disponible, par exemple après une extraction en ZDR. |
 
 ### Réponse {#response}
 

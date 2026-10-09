@@ -404,6 +404,34 @@ curl -s -X DELETE "https://api.firecrawl.dev/v2/scrape/$SCRAPE_ID/interact" \
   API 経由で作成したプロファイルは、まだ Dashboard &gt; Interact &gt; Profiles に表示されない場合があります。現在、Dashboard では API で作成された永続プロファイルの完全な一覧は確認できません。
 </Info>
 
+## データ保持ゼロ (ZDR) {#zero-data-retention-zdr}
+
+Interact は、厳格なデータ取り扱い要件があるTeam向けにデータ保持ゼロ (ZDR) をサポートしています。有効にすると、Firecrawl はページのコンテンツや実行の出力を、セッション終了後に永続化しません。
+
+ZDR を有効にするには、最初の interact 呼び出しで `zeroDataRetention: true` を設定します。
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/scrape/YOUR_SCRAPE_ID/interact \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY" \
+  -d '{
+    "prompt": "Click the pricing tab and summarize the plans",
+    "zeroDataRetention": true
+  }'
+```
+
+[`POST /v2/interact`](/ja/api-reference/endpoint/browser-create) でスタンドアロンのセッションを作成する際にも、`zeroDataRetention: true` を指定できます。`zeroDataRetention: true` を指定して実行したスクレイピングに対して Interact を行うと、ZDR セッションが自動的に開始されます。保持ポリシーはセッション単位で保存されるため、同じセッションへの以降の呼び出しでは、このオプションを省略しても ZDR モードが維持されます。
+
+ZDR はエンタープライズプランで利用でき、Teamで有効化されている必要があります。ZDR が有効化されていないTeamから `zeroDataRetention: true` を指定してリクエストを送信すると、`403` が返されます。利用を開始するには [firecrawl.dev/enterprise](https://www.firecrawl.dev/enterprise) にアクセスしてください。
+
+<Note>
+  * ZDR モードでは、セッションの録画と永続化されたプロファイルは利用できません。`zeroDataRetention: true` を `recordSession` または `profile` と併用したリクエストには `400` が返されます。
+  * ZDR なしで開始した既存のセッションを ZDR に切り替えることはできません。そのセッションで ZDR を指定すると `409` が返されます。セッションを停止し、`zeroDataRetention: true` を指定して新しいセッションを開始してください。
+  * ZDR のスクレイピングではスクレイピング対象の URL が保持されないため、Firecrawl が元のスクレイピングからブラウザーを再構築できない場合があります。リプレイコンテキストを利用できない旨の `409` が Interact から返された場合は、リクエストに `url` を指定すると、新しい ZDR セッションでそのページを開けます。なお、元のスクレイピングのアクションは再実行されません。
+</Note>
+
+ZDR セッションのコストについては、[料金](#pricing)を参照してください。
+
 ## 使い分けの目安 {#when-to-use-what}
 
 | ユースケース              | 推奨                         | 理由                    |
@@ -423,6 +451,7 @@ curl -s -X DELETE "https://api.firecrawl.dev/v2/scrape/$SCRAPE_ID/interact" \
 * **コードのみ** (`prompt` なし): セッション1分あたり2 credits
 * **AI プロンプト あり**: セッション1分あたり7 credits
 * **スクレイピング**: スクレイピング自体の請求は別途行われます (スクレイピング1回あたり1 credit に加え、format ごとのコスト) 。
+* **データ保持ゼロ**: ZDR セッションではセッション1分あたり2 credits が追加されます。そのため、コードのみのセッションは1分あたり4 credits、AI プロンプトありのセッションは1分あたり9 credits で課金されます (最低課金時間は同じく1分) 。ZDR スクレイピングには、これとは別に [ZDR コスト](/ja/features/scrape#zero-data-retention-zdr) として1ページあたり1 credit が追加でかかります。
 
 ## API リファレンス {#api-reference}
 
@@ -431,13 +460,15 @@ curl -s -X DELETE "https://api.firecrawl.dev/v2/scrape/$SCRAPE_ID/interact" \
 
 ### リクエスト本文 (POST) {#request-body-post}
 
-| フィールド      | 型        | デフォルト    | 説明                                                                        |
-| ---------- | -------- | -------- | ------------------------------------------------------------------------- |
-| `prompt`   | `string` | なし       | AIエージェント向けの自然言語タスクです。`code` が設定されていない場合は必須です。最大10,000文字。                  |
-| `code`     | `string` | なし       | 実行するコード (Node.js、Python、または Bash) 。`prompt` が設定されていない場合は必須です。最大100,000文字。 |
-| `language` | `string` | `"node"` | `"node"`、`"python"`、または `"bash"`。`code` を使用する場合にのみ指定します。                  |
-| `timeout`  | `number` | `30`     | タイムアウト時間 (秒)  (1～300) 。                                                   |
-| `origin`   | `string` | なし       | アクティビティ追跡用の呼び出し元識別子。                                                      |
+| フィールド               | 型         | デフォルト    | 説明                                                                        |
+| ------------------- | --------- | -------- | ------------------------------------------------------------------------- |
+| `prompt`            | `string`  | なし       | AIエージェント向けの自然言語タスクです。`code` が設定されていない場合は必須です。最大10,000文字。                  |
+| `code`              | `string`  | なし       | 実行するコード (Node.js、Python、または Bash) 。`prompt` が設定されていない場合は必須です。最大100,000文字。 |
+| `language`          | `string`  | `"node"` | `"node"`、`"python"`、または `"bash"`。`code` を使用する場合にのみ指定します。                  |
+| `timeout`           | `number`  | `30`     | タイムアウト時間 (秒)  (1～300) 。                                                   |
+| `origin`            | `string`  | なし       | アクティビティ追跡用の呼び出し元識別子。                                                      |
+| `zeroDataRetention` | `boolean` | `false`  | [データ保持ゼロ](#zero-data-retention-zdr)でセッションを実行します。TeamでZDRが有効になっている必要があります。 |
+| `url`               | `string`  | なし       | ZDRスクレイピング後など、元のスクレイピングのコンテキストを利用できない場合に、新しいセッションで開くページ。                  |
 
 ### レスポンス {#response}
 
