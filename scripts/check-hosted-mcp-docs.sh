@@ -286,7 +286,7 @@ for quickstart in amp antigravity cursor gemini-cli opencode windsurf; do
   require "$file" "/mcp-server/keyless#add-an-api-key"
   forbid "$file" "FIRECRAWL_API_KEY"
 done
-for quickstart in claude-code codex-cli; do
+for quickstart in claude-code codex-cli grok-build; do
   file="quickstarts/${quickstart}.mdx"
   require "$file" "/mcp-server/keyless#try-keyless"
   require "$file" "/mcp-server/keyless#add-an-api-key"
@@ -295,6 +295,8 @@ require quickstarts/claude-code.mdx "claude mcp add --transport http firecrawl h
 require quickstarts/codex-cli.mdx "codex mcp login firecrawl"
 forbid quickstarts/claude-code.mdx "-e FIRECRAWL_API_KEY="
 forbid quickstarts/codex-cli.mdx 'FIRECRAWL_API_KEY = "'
+require quickstarts/grok-build.mdx "grok mcp add --transport http firecrawl https://mcp.firecrawl.dev/v2/mcp-oauth"
+forbid quickstarts/grok-build.mdx "-e FIRECRAWL_API_KEY="
 
 # Generic English links enter through the canonical MCP URL rather than silently
 # choosing one audience.
@@ -332,7 +334,7 @@ if [ -n "$raw_key_paths" ]; then
   exit 1
 fi
 
-versioned_mcp_docs="$(printf '%s\n' "$english_docs" | grep -E '^(mcp-server/local\.mdx|developer-guides/llm-sdks-and-frameworks/google-adk\.mdx|quickstarts/(amp|antigravity|claude-code|codex-cli|cursor|gemini-cli|opencode|windsurf)\.mdx)$' || true)"
+versioned_mcp_docs="$(printf '%s\n' "$english_docs" | grep -E '^(mcp-server/local\.mdx|developer-guides/llm-sdks-and-frameworks/google-adk\.mdx|quickstarts/(amp|antigravity|claude-code|codex-cli|cursor|gemini-cli|grok-build|opencode|windsurf)\.mdx)$' || true)"
 wrong_mcp_versions="$(printf '%s\n' "$versioned_mcp_docs" | xargs grep -nE 'firecrawl-mcp@[0-9]+\.[0-9]+\.[0-9]+' 2>/dev/null | grep -v "firecrawl-mcp@${reviewed_mcp_version}" || true)"
 if [ -n "$wrong_mcp_versions" ]; then
   echo "English docs contain an unreviewed firecrawl-mcp version:" >&2
