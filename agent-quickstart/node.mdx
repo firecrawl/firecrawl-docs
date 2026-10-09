@@ -1,0 +1,254 @@
+---
+title: "Node.js Agent Quickstart"
+description: "Canonical Firecrawl Node.js quickstart for external agents using search, scrape, and interact."
+---
+
+# Firecrawl Node.js Agent Quickstart
+
+This file is the canonical quickstart for external agents integrating Firecrawl via the Node.js/TypeScript SDK. It is generated from SDK source (`@mendable/firecrawl-js` v4.38.0) and the Firecrawl OpenAPI spec.
+
+## Install
+
+```bash
+npm install @mendable/firecrawl-js
+```
+
+Requires Node.js >= 22.
+
+## Authenticate
+
+```typescript
+import Firecrawl from "@mendable/firecrawl-js";
+
+const client = new Firecrawl("fc-YOUR_API_KEY");
+// Or: new Firecrawl({ apiKey: "fc-YOUR_API_KEY" })
+// Or omit the key to use the free tier (rate-limited per IP)
+```
+
+The key can also be set via `FIRECRAWL_API_KEY` environment variable. The base URL defaults to `https://api.firecrawl.dev` and can be overridden with `apiUrl` or `FIRECRAWL_API_URL`.
+
+## When To Use What
+
+- **`search`**: Start with a text query and need to discover relevant URLs and content across the web.
+- **`scrape`**: Already have a URL and want to extract page content (markdown, HTML, structured JSON, screenshots, etc.).
+- **`interact`**: The page needs post-scrape browser actions — clicking buttons, filling forms, executing JavaScript in the live browser session.
+
+## Search
+
+### Why use it
+
+Search lets you find relevant web pages, news, or images from a query string. Optionally scrape each result in the same call.
+
+### Preferred SDK method
+
+```typescript
+client.search(query, options?)
+```
+
+### Example
+
+```typescript
+const results = await client.search("latest firecrawl features", {
+  limit: 5,
+  scrapeOptions: { formats: ["markdown"] },
+});
+
+for (const page of results.web ?? []) {
+  console.log(page.title, page.url);
+  console.log(page.markdown?.slice(0, 200));
+}
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|---|---|---|
+| `query` | `string` | The search query (required, first positional argument). Max 500 characters. |
+| `sources` | `Array<"web" \| "news" \| "images" \| { type: ... }>` | Sources to search. Determines which arrays appear in the response. Default: `["web"]`. |
+| `categories` | `Array<"github" \| "research" \| "pdf" \| "developer" \| { type: ... }>` | Category filters. `"research"` filters by domain, not a paper index. `"developer"` returns developer-index results. |
+| `includeDomains` | `string[]` | Restrict results to these domains. Cannot combine with `excludeDomains`. |
+| `excludeDomains` | `string[]` | Exclude results from these domains. Cannot combine with `includeDomains`. |
+| `limit` | `number` | Max results to return (per source type). Must be positive. Server default: 10. |
+| `tbs` | `string` | Time-based search filter. Examples: `"qdr:d"` (past day), `"qdr:w"` (past week), `"sbd:1"` (sort by date). |
+| `location` | `string` | Geographic location for results (e.g. `"San Francisco,California,United States"`). |
+| `ignoreInvalidURLs` | `boolean` | Exclude invalid URLs from results. |
+| `timeout` | `number` | Timeout in ms. Must be positive. Server default: 60000. |
+| `highlights` | `boolean` | Generate query-relevant highlights. Default: `true`. |
+| `scrapeOptions` | `ScrapeOptions` | Options applied when scraping each search result page. See Scrape parameters. |
+| `enterprise` | `Array<"default" \| "anon" \| "zdr">` | Enterprise zero data retention options. |
+| `threatProtection` | `ThreatProtectionOptions` | Per-request threat protection override (enterprise). |
+| `integration` | `string` | Integration identifier. |
+| `origin` | `string` | Origin tag for telemetry. |
+
+### Response shape
+
+Returns `SearchData` with optional arrays depending on requested sources:
+
+- `web` — `Array<{ url, title?, description?, position?, category?, markdown?, ... }>`
+- `news` — `Array<{ title?, url?, snippet?, date?, imageUrl?, position? }>`
+- `images` — `Array<{ title?, imageUrl?, imageWidth?, imageHeight?, url?, position? }>`
+
+## Scrape
+
+### Why use it
+
+Scrape fetches a single URL and returns its content in one or more formats: markdown, HTML, structured JSON, screenshots, audio/video extraction, and more.
+
+### Preferred SDK method
+
+```typescript
+client.scrape(url, options?)
+```
+
+### Example
+
+```typescript
+const doc = await client.scrape("https://example.com", {
+  formats: ["markdown", "links"],
+  onlyMainContent: true,
+  timeout: 30000,
+});
+
+console.log(doc.markdown);
+console.log(doc.links);
+```
+
+#### JSON extraction example
+
+```typescript
+const doc = await client.scrape("https://example.com/product", {
+  formats: [
+    {
+      type: "json",
+      schema: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          price: { type: "number" },
+        },
+      },
+    },
+  ],
+});
+
+console.log(doc.json);
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|---|---|---|
+| `url` | `string` | The URL to scrape (required, first positional argument). |
+| `formats` | `FormatOption[]` | Output formats. Strings: `"markdown"`, `"html"`, `"rawHtml"`, `"links"`, `"images"`, `"screenshot"`, `"summary"`, `"changeTracking"`, `"json"`, `"attributes"`, `"branding"`, `"product"`, `"menu"`, `"audio"`, `"video"`. Or config objects like `{ type: "json", schema, prompt }`, `{ type: "screenshot", fullPage, quality, viewport }`, `{ type: "question", question }`, `{ type: "highlights", query }`. Default: `["markdown"]`. |
+| `headers` | `Record<string, string>` | Custom HTTP headers to send with the request. |
+| `includeTags` | `string[]` | HTML tags to include in the output. |
+| `excludeTags` | `string[]` | HTML tags to exclude from the output. |
+| `onlyMainContent` | `boolean` | Only return main content, excluding headers/navs/footers. Server default: `true`. |
+| `timeout` | `number` | Timeout in ms. Min: 1000, Max: 300000. Server default: 60000. |
+| `waitFor` | `number` | Extra delay in ms before fetching content. Server default: 0. |
+| `mobile` | `boolean` | Emulate a mobile device. Server default: `false`. |
+| `parsers` | `Array<string \| PDFParser>` | Parser configs. `PDFParser`: `{ type: "pdf", mode?: "fast" \| "auto" \| "ocr", maxPages?, pages?, blocks?, pageMarkers? }`. |
+| `actions` | `ActionOption[]` | Browser actions to perform before grabbing content. Types: `wait`, `screenshot`, `click`, `write`, `press`, `scroll`, `scrape`, `executeJavascript`, `pdf`. |
+| `location` | `{ country?: string, languages?: string[] }` | Geolocation settings. Country is ISO 3166-1 alpha-2. |
+| `skipTlsVerification` | `boolean` | Skip TLS certificate verification. |
+| `removeBase64Images` | `boolean` | Remove base64 images from markdown. Server default: `true`. |
+| `fastMode` | `boolean` | Quick scrape mode. |
+| `blockAds` | `boolean` | Block ads and cookie popups. Server default: `true`. |
+| `proxy` | `"basic" \| "stealth" \| "enhanced" \| "auto" \| string` | Proxy type. `"auto"` retries with enhanced if basic fails. Server default: `"auto"`. |
+| `maxAge` | `number` | Use cached result if younger than this many ms. Server default: 172800000 (2 days). `0` to bypass cache. |
+| `minAge` | `number` | Cache-only mode. Value in ms specifies minimum cache age. Set to `1` to accept any cached data. |
+| `storeInCache` | `boolean` | Whether to cache the result. Server default: `true`. |
+| `lockdown` | `boolean` | Serve only cached results, never make outbound requests. |
+| `redactPII` | `boolean \| RedactPIIOptions` | Redact PII from markdown. `RedactPIIOptions`: `{ mode?: "accurate" \| "aggressive" \| "fast", entities?: RedactPIIEntity[], replaceStyle?: "tag" \| "mask" \| "remove" }`. |
+| `profile` | `{ name: string, saveChanges?: boolean }` | Persistent browser storage across scrape/interact sessions. |
+| `auditMetadata` | `{ username: string }` | User attribution for SIEM logging. |
+| `autoResume` | `boolean` | SDK-only. Automatically retry on `processing_continues` for large PDFs. Max 5 resumes / 20 min. Default: `true`. |
+| `threatProtection` | `ThreatProtectionOptions` | Per-request threat protection override (enterprise). |
+| `integration` | `string` | Integration identifier. |
+| `origin` | `string` | Origin tag for telemetry. |
+
+## Interact
+
+### Why use it
+
+Interact lets you execute code or natural-language prompts in a live browser session tied to a previous scrape job. Use it for clicking elements, filling forms, navigating multi-step flows, or extracting dynamic content.
+
+### Preferred SDK method
+
+```typescript
+client.interact(jobId, args)
+```
+
+To end the session:
+
+```typescript
+client.stopInteraction(jobId)
+```
+
+### Example
+
+```typescript
+// First, scrape a page with actions to get a jobId
+const doc = await client.scrape("https://example.com/login", {
+  formats: ["markdown"],
+});
+const jobId = doc.metadata?.jobId;
+
+// Interact with the live browser session
+const result = await client.interact(jobId, {
+  code: "document.querySelector('#submit').click();",
+  language: "node",
+  timeout: 30,
+});
+
+console.log(result.stdout);
+console.log(result.liveViewUrl);
+
+// When done, stop the session
+await client.stopInteraction(jobId);
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|---|---|---|
+| `jobId` | `string` | The scrape job ID (required, first positional argument). |
+| `code` | `string` | Code to execute in the browser sandbox. One of `code` or `prompt` is required. Max 100000 characters. |
+| `prompt` | `string` | Natural-language prompt for the AI agent to execute. One of `code` or `prompt` is required. |
+| `language` | `"python" \| "node" \| "bash"` | Language of the code. Default: `"node"`. |
+| `timeout` | `number` | Execution timeout in seconds. Min: 1, Max: 300. Server default: 30. |
+| `origin` | `string` | Origin tag for telemetry. |
+
+### Response
+
+Returns `ScrapeExecuteResponse`:
+
+| Field | Type | Description |
+|---|---|---|
+| `success` | `boolean` | Whether execution succeeded. |
+| `cdpUrl` | `string?` | Chrome DevTools Protocol WebSocket URL. |
+| `liveViewUrl` | `string?` | Read-only live view URL. |
+| `interactiveLiveViewUrl` | `string?` | Interactive live view URL. |
+| `output` | `string?` | AI agent response (when using `prompt`). |
+| `stdout` | `string?` | Standard output from code execution. |
+| `result` | `string?` | Alias for stdout. |
+| `stderr` | `string?` | Standard error output. |
+| `exitCode` | `number?` | Exit code of the executed process. |
+| `killed` | `boolean?` | Whether the process was killed due to timeout. |
+| `error` | `string?` | Error message if execution failed. |
+
+## Notes
+
+- **Naming style**: All parameters use camelCase (e.g. `onlyMainContent`, `includeTags`, `skipTlsVerification`).
+- **Deprecated aliases**: `scrapeUrl()` → use `scrape()`. `scrapeExecute()` → use `interact()`. `stopInteractiveBrowser()` / `deleteScrapeBrowser()` → use `stopInteraction()`. All deprecated aliases still work but are marked for removal.
+- **Search response**: Access results via `.web`, `.news`, `.images`. The old `.data` accessor throws an error directing you to the new properties.
+- **autoResume**: The SDK automatically handles large-PDF continuation by default. Set `autoResume: false` to surface timeout errors immediately.
+
+## Source Of Truth
+
+- `firecrawl/apps/js-sdk/firecrawl/src/index.ts`
+- `firecrawl/apps/js-sdk/firecrawl/src/v2/client.ts`
+- `firecrawl/apps/js-sdk/firecrawl/src/v2/types.ts`
+- `firecrawl/apps/js-sdk/firecrawl/src/v2/methods/scrape.ts`
+- `firecrawl/apps/js-sdk/firecrawl/src/v2/methods/search.ts`
+- `firecrawl-docs/api-reference/v2-openapi.json`
