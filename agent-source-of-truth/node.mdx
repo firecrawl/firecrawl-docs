@@ -3,7 +3,7 @@ title: "Node.js Source of Truth"
 description: "Canonical Firecrawl Node.js source of truth for agents using key endpoints like search, scrape, and interact."
 ---
 
-Canonical Firecrawl Node.js source of truth for agents. Aligned with `firecrawl` **v4.18.2** (`firecrawl/apps/js-sdk/firecrawl`) and the v2 OpenAPI spec. Method names, parameters, and types match the SDK public API.
+Canonical Firecrawl Node.js source of truth for agents. Aligned with `@mendable/firecrawl-js` **v4.46.0** (`firecrawl/apps/js-sdk/firecrawl`) and the v2 OpenAPI spec. Method names, parameters, and types match the SDK public API.
 
 ## Install
 
@@ -21,6 +21,14 @@ const client = new Firecrawl({
   // apiUrl: "https://api.firecrawl.dev" // optional; falls back to FIRECRAWL_API_URL or cloud default
 });
 ```
+
+Constructor accepts a string (API key) or a `FirecrawlClientOptions` object:
+
+- `apiKey`: string — falls back to `FIRECRAWL_API_KEY` env var. Omit for keyless free tier (rate-limited per IP).
+- `apiUrl`: string — falls back to `FIRECRAWL_API_URL` env var, then `"https://api.firecrawl.dev"`.
+- `timeoutMs`: number — per-request timeout in milliseconds.
+- `maxRetries`: number — max automatic retries for transient failures.
+- `backoffFactor`: number — exponential backoff factor for retries.
 
 ## When To Use What
 
@@ -55,8 +63,11 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
   limit: 10,
   tbs: "qdr:m",
   location: "San Francisco,California,United States",
+  country: "US",
   ignoreInvalidURLs: true,
+  highlights: true,
   timeout: 60000,
+  includeDomains: ["docs.firecrawl.dev"],
   scrapeOptions: {
     formats: [
       "markdown",
@@ -78,8 +89,11 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
 - `web`: web index hits
 - `news`: news hits
 - `images`: image hits
+- `tools`: discovered tools (when `domainTools` or `sources` includes `"alexandria"`)
+- `warning`: optional warning string
+- `agent_hints`: optional hints array
 
-**Wrong turn to avoid:** `search()` does not return `{ data: [...] }`. Do not access `result.data`. Web results are in `result.web`, news in `result.news`, images in `result.images`.
+**Wrong turn to avoid:** `search()` does not return `{ data: [...] }`. Accessing `.data` throws an error. Web results are in `result.web`, news in `result.news`, images in `result.images`.
 
 ### Parameters
 
@@ -98,7 +112,8 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
     - `"web"`: web index results
     - `"news"`: news results
     - `"images"`: image results
-    - `{ type: "web" | "news" | "images" }`: typed source object form
+    - `"alexandria"`: Alexandria source results
+    - `{ type: "web" | "news" | "images" | "alexandria" }`: typed source object form
 
 - `options.categories`
   - Type: array of category names or typed category objects
@@ -106,12 +121,21 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
   - Confirmed values:
     - `"developer"`: Developer Index results
     - `"gov"`: Firecrawl Government Index results
-    - `"research"`: research and academic results
-    - `"pdf"`: PDF-focused results
-    - `{ type: "developer" | "gov" | "research" | "pdf" }`: typed category object form
+    - `"research"`: research and academic results (~14 academic website domains, NOT the paper index)
+    - `"pdf"`: PDF-focused results (filetype:pdf filter)
+    - `"github"`: site:github.com filter
+    - `{ type: "developer" | "gov" | "research" | "pdf" | "github" }`: typed category object form
+
+- `options.includeDomains`
+  - Type: array of strings
+  - Use when: you want to restrict results to specific domains. Cannot be combined with `excludeDomains`.
+
+- `options.excludeDomains`
+  - Type: array of strings
+  - Use when: you want to exclude specific domains from results. Cannot be combined with `includeDomains`.
 
 - `options.limit`
-  - Type: number
+  - Type: number (must be positive)
   - Use when: you want to cap results.
 
 - `options.tbs`
@@ -122,17 +146,51 @@ const results = await client.search("site:docs.firecrawl.dev crawl webhooks", {
   - Type: string
   - Use when: you want localized results.
 
+- `options.country`
+  - Type: string
+  - Use when: you want ISO 3166-1 alpha-2 geo-targeting for search results.
+
 - `options.ignoreInvalidURLs`
   - Type: boolean
   - Use when: you want to drop URLs that cannot be scraped by other endpoints.
 
+- `options.highlights`
+  - Type: boolean
+  - Use when: you want query-relevant highlights for search results.
+  - Notes: defaults to `true`.
+
 - `options.timeout`
-  - Type: number
+  - Type: number (must be positive)
   - Use when: you need a request timeout in milliseconds.
 
 - `options.scrapeOptions`
-  - Type: `ScrapeOptions`
-  - Use when: you want to scrape each search result (see Scrape parameters for fields). The SDK runs the same validation as for `scrape` (for example plain string `"json"` in `formats` is rejected).
+  - Type: `ScrapeOptions` (minus `toolDetail`)
+  - Use when: you want to scrape each search result (see Scrape parameters for fields).
+
+- `options.domainTools`
+  - Type: boolean
+  - Use when: you want domain-matched Alexandria tools alongside semantic matches.
+
+- `options.toolDetail`
+  - Type: `"compact" | "summary" | "full"`
+  - Use when: you want to control tool discovery detail level. Compact by default; summary adds metadata, full includes contracts.
+
+- `options.enterprise`
+  - Type: array of `"default" | "anon" | "zdr"`
+  - Use when: you need enterprise search options. `"zdr"` = zero data retention, `"anon"` = anonymized search. Must be enabled for your team.
+
+- `options.threatProtection`
+  - Type: `ThreatProtectionOptions`
+  - Use when: you need enterprise per-request threat protection override.
+  - Fields: `mode` (`"off" | "manual-only" | "normal" | "zscaler"`), `riskScoreThreshold` (0-100), `blacklist`, `whitelist`, `blockedTlds`, `failurePolicy` (`"open" | "closed"`).
+
+- `options.integration`
+  - Type: string
+  - Use when: you need an integration identifier for server-side tracking.
+
+- `options.origin`
+  - Type: string
+  - Use when: you need an origin identifier for request attribution.
 
 ## Scrape
 
@@ -181,7 +239,6 @@ const doc = await client.scrape("https://example.com/pricing", {
   blockAds: true,
   proxy: "auto",
   maxAge: 86400000,
-  minAge: 1,
   storeInCache: true,
   profile: { name: "docs-session", saveChanges: true }
 });
@@ -207,6 +264,8 @@ const doc = await client.scrape("https://example.com/pricing", {
     - `"changeTracking"`: change tracking output (for options like `modes`, use `{ type: "changeTracking", modes: [...] }` — `modes` is required on that object in typings)
     - `"attributes"`: attribute extraction (use `{ type: "attributes", selectors: [...] }` when passing selectors)
     - `"branding"`: branding profile output
+    - `"product"`: product profile output
+    - `"menu"`: menu profile output
     - `"audio"`: audio extraction
     - `"video"`: video extraction
   - Object-only format types (at minimum `type` as shown):
@@ -255,7 +314,8 @@ const doc = await client.scrape("https://example.com/pricing", {
   - Use when: you need file parsing controls (for example PDF parsing).
   - Confirmed values:
     - `"pdf"`: enable PDF parsing
-    - `{ type: "pdf", mode?: "fast" | "auto" | "ocr", maxPages?: number }`: PDF parser options
+    - `{ type: "pdf", mode?: "fast" | "auto" | "ocr", maxPages?: number, pages?: boolean, pageMarkers?: boolean, blocks?: boolean }`: PDF parser options. `pages` returns per-page markdown; `blocks` returns per-page typed layout blocks.
+    - `{ type: "image" }`: image parser
 
 - `options.actions`
   - Type: array of action objects
@@ -303,7 +363,7 @@ const doc = await client.scrape("https://example.com/pricing", {
 
 - `options.maxAge`
   - Type: number
-  - Use when: you want cached data up to a maximum age (milliseconds).
+  - Use when: you want cached data up to a maximum age (milliseconds). Set to 0 to bypass index reuse.
 
 - `options.minAge`
   - Type: number
@@ -313,9 +373,47 @@ const doc = await client.scrape("https://example.com/pricing", {
   - Type: boolean
   - Use when: you want Firecrawl to cache the result.
 
+- `options.lockdown`
+  - Type: boolean
+  - Use when: you want to serve only previously cached results and never make outbound requests. Returns 404 on cache miss.
+
+- `options.checkPromptInjection`
+  - Type: boolean
+  - Use when: you want to scan page content for prompt injection before LLM-backed formats run. Adds 4 credits.
+
+- `options.redactPII`
+  - Type: boolean or `RedactPIIOptions`
+  - Use when: you want to redact personally identifiable information from output.
+  - `RedactPIIOptions` fields: `mode` (`"accurate" | "aggressive" | "fast"`), `entities` (array of `"PERSON" | "EMAIL" | "PHONE" | "LOCATION" | "FINANCIAL" | "SECRET"`), `replaceStyle` (`"tag" | "mask" | "remove"`).
+
+- `options.threatProtection`
+  - Type: `ThreatProtectionOptions`
+  - Use when: you need enterprise per-request threat protection override.
+
+- `options.auditMetadata`
+  - Type: `AuditMetadata` with `username: string`
+  - Use when: you need metadata included in SIEM logging events.
+
 - `options.profile`
   - Type: object with `name` and optional `saveChanges`
   - Use when: you want a persistent browser profile shared across scrapes and interactions.
+
+- `options.domainTools`
+  - Type: boolean
+  - Use when: you want domain-matched Alexandria tools for this URL included in `tools`.
+
+- `options.toolDetail`
+  - Type: `"compact" | "summary" | "full"`
+  - Use when: you want to control tool discovery detail level.
+
+- `options.autoResume`
+  - Type: boolean (SDK-only, never sent to API)
+  - Use when: you want to control automatic resumption for large documents that outlive the request window. Bounded to at most 5 resumes / 20 minutes total wait. Set `false` to surface timeout error immediately.
+  - Notes: defaults to `true` implicitly.
+
+- `options.integration`
+  - Type: string
+  - Use when: you need an integration identifier for server-side tracking.
 
 ## Interact
 
@@ -375,6 +473,10 @@ const result = await client.interact("<scrapeJobId>", {
   - Type: number
   - Use when: you need an execution timeout in seconds.
 
+- `args.origin`
+  - Type: string
+  - Use when: you need an origin label for execution telemetry.
+
 ### Return value (`interact`)
 
 `ScrapeExecuteResponse` matches `BrowserExecuteResponse`. Confirmed fields include:
@@ -386,6 +488,8 @@ const result = await client.interact("<scrapeJobId>", {
 - `stderr`: string
 - `exitCode`: number
 - `killed`: boolean
+- `truncated`: boolean
+- `cdpUrl`: string
 - `liveViewUrl`: string
 - `interactiveLiveViewUrl`: string
 - `error`: string
@@ -395,7 +499,7 @@ const result = await client.interact("<scrapeJobId>", {
 `client.stopInteraction(jobId)` → `Promise<ScrapeBrowserDeleteResponse>`
 
 - `jobId`: scrape job id (same id used for `interact`).
-- Response fields in typings include `success`, `sessionDurationMs`, `creditsBilled`, `error`.
+- Response fields in typings include `success`, `status`, `sessionDurationMs`, `creditsBilled`, `error`.
 
 ## Ask (Agentic Debugging)
 
@@ -527,10 +631,11 @@ console.log(result.answer);
 
 ## Notes
 
-- Deprecated client aliases: `scrapeExecute` → `interact`; `stopInteractiveBrowser` and `deleteScrapeBrowser` → `stopInteraction`.
+- Deprecated client aliases: `scrapeUrl` → `scrape`; `scrapeExecute` → `interact`; `stopInteractiveBrowser` and `deleteScrapeBrowser` → `stopInteraction`.
 - The default `Firecrawl` export is the v2 client; v1 remains under `client.v1`.
 - Zod schemas passed to `formats` (for `json` or `changeTracking`) are converted to JSON Schema by the SDK.
 - The package declares **Node.js >= 22** in `engines`.
+- No API key is required; scrape, search, and interact fall back to the keyless free tier (rate-limited per IP).
 
 ## Source Of Truth
 
@@ -538,7 +643,6 @@ console.log(result.answer);
 - `firecrawl/apps/js-sdk/firecrawl/src/index.ts`
 - `firecrawl/apps/js-sdk/firecrawl/src/v2/client.ts`
 - `firecrawl/apps/js-sdk/firecrawl/src/v2/types.ts`
-- `firecrawl/apps/js-sdk/firecrawl/src/v2/utils/validation.ts`
 - `firecrawl/apps/js-sdk/firecrawl/src/v2/methods/search.ts`
 - `firecrawl/apps/js-sdk/firecrawl/src/v2/methods/scrape.ts`
 - `firecrawl-docs/api-reference/v2-openapi.json`
