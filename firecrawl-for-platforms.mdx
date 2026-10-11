@@ -15,8 +15,8 @@ Set up Firecrawl for Platforms yourself in the [Firecrawl dashboard](https://www
 
 There are two integration types. Both provision accounts the same way through the endpoints below, with the same platform key; they differ in who pays for the user's usage:
 
-- **Standard**: your users pay Firecrawl. Each provisioned account keeps its own Firecrawl plan and billing, starts on the Free plan, and upgrades with Firecrawl directly.
-- **Gateway**: your organization funds your users. Accounts your integration creates are enrolled in Gateway, so their eligible usage bills to your organization once the user's own credits are used. See [Gateway](#gateway) below.
+- **Standard**: your users pay Firecrawl. Each provisioned account keeps its own Firecrawl plan and billing and upgrades with Firecrawl directly. Whether a new account starts with free credits depends on your platform's standing; see [Credits for provisioned accounts](#credits-for-provisioned-accounts).
+- **Gateway**: your organization funds your users. Accounts your integration creates are enrolled in Gateway, so their eligible usage bills to your organization. See [Gateway](#gateway) below.
 
 You choose the integration type when you create the integration. It is not easy to change afterwards, so we recommend reviewing both options carefully before you accept the agreement. See the [Firecrawl for Platforms page](https://www.firecrawl.dev/firecrawl-for-platforms) for an overview.
 
@@ -27,7 +27,7 @@ Some partner offers include promotional credits for provisioned users; when they
 Gateway is an integration type, not a separate API. The same platform key and the same endpoints apply. What changes for a Gateway integration:
 
 - Accounts are created for your integration alone and are API-only, with no dashboard login of their own. A request never attaches to an existing Firecrawl account, even when the email matches one.
-- A user's own credits are used first. Eligible usage beyond that bills to your organization.
+- Eligible usage bills to your organization. Accounts created under a signed partner agreement also carry the Free plan's monthly credits, which are used first; see [Credits for provisioned accounts](#credits-for-provisioned-accounts).
 - Responses from `POST /partner/v1/accounts` carry a `gatewayStatus` field.
 - The integration accepts the Gateway version of the agreement when it is created.
 
@@ -51,6 +51,28 @@ Platform keys are distinct from standard Firecrawl API keys. You create and revo
 
 - **Server-side only**: Platform keys must only be used in server-side code. Never expose a platform key in frontend code, client-side JavaScript, or mobile applications.
 - **Terms of Service**: Before calling `POST /partner/v1/accounts`, your platform must prompt the user to accept Firecrawl's [Terms of Service](https://www.firecrawl.dev/terms-of-service).
+
+## Credits for provisioned accounts
+
+Firecrawl does not grant free credits to every account a platform creates. What a new account starts with depends on whether Firecrawl has verified your platform:
+
+| Your platform | Standard account | Gateway account |
+|---|---|---|
+| Verified by Firecrawl, or under a signed partner agreement | Starts on the Free plan with its monthly credits | Carries the Free plan's monthly credits, which are used before your organization is billed |
+| Not yet verified | Starts with no included credits. The user can add a payment method or pick a plan in the Firecrawl dashboard at any time | Every credit bills to your organization, from the first one |
+
+Verification is a manual step on Firecrawl's side. Once your integration is live and has real users, write to [partnerships@firecrawl.dev](mailto:partnerships@firecrawl.dev) with your integration ID. Verification also moves the accounts you have already created onto the Free plan. An account never loses credits it already has when your platform's status changes.
+
+## Limits
+
+Account creation is limited per integration. The limits protect the program from abuse and never affect accounts you have already created.
+
+- **Accounts per integration.** Each integration can create a bounded number of accounts. The bound depends on your organization's standing with Firecrawl: a free organization gets a small allowance for building and testing, a payment method on file raises it, a paid Firecrawl plan raises it further, and a signed partner agreement removes it. Standing is read live, so adding a payment method or upgrading in the [Firecrawl dashboard](https://www.firecrawl.dev/app/settings) takes effect on your next request. A repeated call for a user you have already provisioned returns the existing account and does not count.
+- **Request rate.** `POST /partner/v1/accounts` accepts 30 requests per minute per integration, across all of its keys. Over that, requests return `429` until the next minute.
+- **Email addresses.** On a Standard integration the address you send becomes the user's Firecrawl login, so it has to be one the user can receive mail at: disposable-mail domains, addresses Firecrawl has banned and addresses on Firecrawl's own domains are rejected.
+- **Suspension.** If Firecrawl suspends your organization, your integration stops creating accounts. Write to [help@firecrawl.com](mailto:help@firecrawl.com).
+
+Need more room than your standing allows? Write to [partnerships@firecrawl.dev](mailto:partnerships@firecrawl.dev).
 
 ---
 
@@ -127,6 +149,10 @@ For a Gateway integration the response also carries the enrollment status:
 |--------|-------------|
 | `400`  | Bad request - `email` is missing or malformed |
 | `401`  | Unauthorized - the platform key is incorrect or invalid |
+| `403`  | Refused - the body's `error.code` says why: `partner_account_cap_reached` (the integration is at its account limit), `partner_provisioning_email_rejected` (the address is disposable, banned or reserved) or `partner_integration_suspended`. See [Limits](#limits) |
+| `429`  | Too many requests - `rate_limit_exceeded`; retry after the current minute |
+| `502`  | Firecrawl could not reach its billing provider while setting the account up - retry the request |
+| `503`  | Firecrawl could not check the rate limit - retry shortly |
 | `500`  | Internal server error - these errors are monitored by Firecrawl |
 
 ---
