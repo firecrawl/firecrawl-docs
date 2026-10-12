@@ -76,6 +76,7 @@ curl -X POST "https://api.firecrawl.dev/v2/search" \
 Successful responses include `success`, `data`, optional `warning`, `id`, and `creditsUsed`.
 
 - `data.web`, `data.images`, `data.news`: result arrays; which keys appear depends on `sources` (by default only `data.web` is populated).
+- `data.tools`: discovered tool contracts (when `domainTools` or `alexandria` source is enabled).
 - Web and news items include fields such as `title`, `url`, and (when `scrapeOptions` / formats request it) `markdown`, `html`, `rawHtml`, `links`, `screenshot`, `audio`, `video`, and `metadata`.
 - Image items include fields such as `imageUrl`, `url`, and dimensions when available.
 - `warning`: optional human-readable notice.
@@ -96,6 +97,7 @@ Successful responses include `success`, `data`, optional `warning`, `id`, and `c
     - `{ "type": "web" }` with optional per-source `tbs` and `location`
     - `{ "type": "news" }`
     - `{ "type": "images" }`
+    - `{ "type": "alexandria" }`: Alexandria catalogue tools (free, not counted in creditsUsed)
 
 - `categories`
   - Type: array of typed category objects
@@ -136,6 +138,35 @@ Successful responses include `success`, `data`, optional `warning`, `id`, and `c
   - Values:
     - `"zdr"`: end-to-end zero data retention
     - `"anon"`: anonymized zero data retention
+
+- `includeDomains`
+  - Type: array of strings
+  - Use when: you want to restrict results to specific domains. Notes: hostnames only, no protocol/path. Cannot be combined with `excludeDomains`.
+
+- `excludeDomains`
+  - Type: array of strings
+  - Use when: you want to exclude results from specific domains. Notes: hostnames only, no protocol/path. Cannot be combined with `includeDomains`.
+
+- `highlights`
+  - Type: boolean (default true)
+  - Use when: you want query-relevant highlights on results. Set false to return provider descriptions without highlighting.
+
+- `safe`
+  - Type: boolean
+  - Use when: you want SafeSearch to filter explicit content.
+
+- `domainTools`
+  - Type: boolean
+  - Use when: you want Alexandria domain-tool discovery in results. Notes: free, no credit cost.
+
+- `toolDetail`
+  - Type: string (default `"compact"`)
+  - Use when: you want to control detail level for discovered tools.
+  - Confirmed values: `"compact"`, `"summary"`, `"full"`
+
+- `threatProtection`
+  - Type: object
+  - Use when: you need per-request threat protection overrides (enterprise feature).
 
 - `scrapeOptions`
   - Type: object
@@ -229,11 +260,17 @@ Successful responses include `success` and `data`. Common `data` fields (dependi
     - `"changeTracking"`: change tracking output
     - `"json"`: JSON extraction
     - `"branding"`: branding profile output
-    - `"audio"`: audio extraction
-    - `"video"`: video extraction
+    - `"product"`: product data extraction
+    - `"menu"`: menu extraction
+    - `"audio"`: audio extraction (MP3 from video URLs)
+    - `"video"`: video extraction (from video URLs)
+    - `"rawBase64"`: base64-encoded original HTTP response body
   - Format object fields:
-    - `type`: one of the format strings above
+    - `type`: one of the format strings above, or `"question"`, `"highlights"`, `"attributes"`
     - `prompt`, `schema`: JSON extraction options for `type: "json"`
+    - `question`: question string for `type: "question"` (question-answer extraction)
+    - `query`: query string for `type: "highlights"` (relevant source-text extraction)
+    - `selectors`: array of `{ "selector": "...", "attribute": "..." }` for `type: "attributes"`
     - `modes`, `schema`, `prompt`, `tag`: change tracking options for `type: "changeTracking"`
     - `fullPage`, `quality`, `viewport`: screenshot options for `type: "screenshot"`
 
@@ -268,7 +305,7 @@ Successful responses include `success` and `data`. Common `data` fields (dependi
 - `parsers`
   - Type: array of objects
   - Use when: you need file parsing controls.
-  - Confirmed shape: `{ "type": "pdf", "mode": "fast" | "auto" | "ocr", "maxPages": number }` (`type` required; other fields optional with defaults per spec)
+  - Confirmed shape: `{ "type": "pdf", "mode": "fast" | "auto" | "ocr", "maxPages": number, "pages": boolean, "blocks": boolean, "pageMarkers": boolean }` (`type` required; other fields optional with defaults per spec)
 
 - `actions`
   - Type: array of action objects
@@ -325,6 +362,38 @@ Successful responses include `success` and `data`. Common `data` fields (dependi
   - Type: boolean
   - Use when: you want zero data retention for this scrape.
 
+- `lockdown`
+  - Type: boolean (default false)
+  - Use when: you want to serve only cached results, never making outbound requests. Notes: treated as zero data retention. Default maxAge extended to 2 years.
+
+- `checkPromptInjection`
+  - Type: boolean (default false)
+  - Use when: you want to scan page content for prompt injection before LLM formats run. Notes: fails with 403 if detected. Adds 4 credits.
+
+- `redactPII`
+  - Type: boolean or object (default false)
+  - Use when: you want to redact PII from returned markdown. Notes: when an object, accepts `mode` (`"accurate"`, `"aggressive"`, `"fast"`), `entities` (array of `"PERSON"`, `"EMAIL"`, `"PHONE"`, `"LOCATION"`, `"FINANCIAL"`, `"SECRET"`), and `replaceStyle` (`"tag"`, `"mask"`, `"remove"`).
+
+- `onlyCleanContent`
+  - Type: boolean (default false)
+  - Use when: you want LLM-based boilerplate removal. Notes: beta. Not supported on ZDR requests.
+
+- `threatProtection`
+  - Type: object
+  - Use when: you need per-request threat protection overrides (enterprise feature).
+
+- `auditMetadata`
+  - Type: object with `username` (string, required)
+  - Use when: you want user attribution for SIEM logging.
+
+- `domainTools`
+  - Type: boolean (default false)
+  - Use when: you want Alexandria domain-tool discovery for the scraped domain. Notes: free, no credit cost.
+
+- `alexandria`
+  - Type: object or array of objects
+  - Use when: you want to execute catalogued provider tools instead of scraping a URL. Notes: cannot be combined with `url`. Max 10 items.
+
 ## Interact
 
 ### Why use it
@@ -377,6 +446,10 @@ curl -X POST "https://api.firecrawl.dev/v2/scrape/<jobId>/interact" \
 - `timeout` (JSON body)
   - Type: integer (seconds; minimum 1, maximum 300, default 30)
   - Use when: you need an execution timeout.
+
+- `origin` (JSON body)
+  - Type: string
+  - Use when: you need an origin label for execution telemetry.
 
 ### Response
 
@@ -490,4 +563,4 @@ curl -X POST "https://api.firecrawl.dev/v2/support/docs-search" \
 - `firecrawl-docs/api-reference/v2-openapi.json`
 - `firecrawl/apps/js-sdk/firecrawl/src/v2/types.ts`
 - `firecrawl/apps/python-sdk/firecrawl/v2/types.py`
-- `firecrawl/apps/rust-sdk/src/v2/scrape.rs`
+- `firecrawl/apps/rust-sdk/src/scrape.rs`
