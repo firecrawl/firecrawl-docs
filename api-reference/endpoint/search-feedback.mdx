@@ -6,6 +6,35 @@ openapi: '/api-reference/v2-openapi.json POST /search/{jobId}/feedback'
 
 Use search feedback after a `search` result is used or fails to help. Feedback improves result quality and can refund 1 credit for the first feedback submission on a search job, subject to team limits.
 
+<Warning>
+Feedback must be submitted within **120 seconds** of the search completing. After that, the endpoint returns `409` with `feedbackErrorCode: "FEEDBACK_WINDOW_EXPIRED"` and no credit is refunded. Send feedback as soon as you have judged the results, in the same step as the search, rather than after a later task finishes.
+</Warning>
+
+### Request body rules
+
+Every request needs a `rating`, plus at least one field that supports it. Requests that fail these rules return `400` with `feedbackErrorCode: "INVALID_BODY"`.
+
+| `rating` | Must include |
+| --- | --- |
+| `good` | At least one `valuableSources` entry |
+| `partial` | At least one `valuableSources` or `missingContent` entry |
+| `bad` | At least one `missingContent` entry, or `querySuggestions` |
+
+- `querySuggestions` is a single string (up to 2,000 characters), not an array. It can be sent with any rating, but it only satisfies the rule above for `bad`. For example, `{"rating": "good", "querySuggestions": "..."}` with no `valuableSources` is rejected.
+- `valuableSources` takes up to 50 `{ "url", "reason" }` objects; `missingContent` takes up to 20 `{ "topic", "description" }` objects.
+- Unknown fields are rejected, at the top level and inside `valuableSources` and `missingContent` entries.
+
+### Errors
+
+| Status | `feedbackErrorCode` | Meaning |
+| --- | --- | --- |
+| `400` | `INVALID_BODY` | The body breaks one of the rules above. |
+| `404` | `SEARCH_NOT_FOUND` | No search with this ID exists for your team. |
+| `409` | `FEEDBACK_WINDOW_EXPIRED` | More than 120 seconds have passed since the search completed. |
+| `409` | `SEARCH_FAILED` | The search did not succeed, so feedback cannot be recorded. |
+
+Only the first feedback for a search can refund a credit; later submissions return `alreadySubmitted: true`. Refunds are also capped per team per day, reported as `dailyCapReached`, `creditsRefundedToday` and `dailyRefundCap` in the response.
+
 ### Example Request
 
 ```bash
