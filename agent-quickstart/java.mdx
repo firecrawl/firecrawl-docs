@@ -1,0 +1,241 @@
+---
+title: "Java Agent Quickstart"
+description: "Canonical Firecrawl Java quickstart for external agents using search, scrape, and interact."
+---
+
+# Firecrawl Java Agent Quickstart
+
+Canonical quickstart for external agents. Generated from SDK source (`com.firecrawl:firecrawl-java` **1.15.0**) and the v2 OpenAPI spec. Method names, parameters, and types match the SDK public API.
+
+## Install
+
+Maven:
+
+```xml
+<dependency>
+  <groupId>com.firecrawl</groupId>
+  <artifactId>firecrawl-java</artifactId>
+  <version>1.15.0</version>
+</dependency>
+```
+
+Gradle:
+
+```gradle
+implementation("com.firecrawl:firecrawl-java:1.15.0")
+```
+
+Requires Java 11+.
+
+## Authenticate
+
+```java
+import com.firecrawl.client.FirecrawlClient;
+
+FirecrawlClient client = FirecrawlClient.builder()
+    .apiKey(System.getenv("FIRECRAWL_API_KEY"))
+    .build();
+
+// Or from environment:
+// FirecrawlClient client = FirecrawlClient.fromEnv();
+```
+
+Builder options: `apiKey` (String, falls back to `FIRECRAWL_API_KEY` env or `firecrawl.apiKey` system property), `apiUrl` (String, default `"https://api.firecrawl.dev"`), `timeoutMs` (long, default 300000), `maxRetries` (int, default 3), `backoffFactor` (double, default 0.5), `asyncExecutor` (Executor), `httpClient` (OkHttpClient). A null or blank key enables the keyless free tier.
+
+## When To Use What
+
+- `search`: use when you start with a query and need discovery.
+- `scrape`: use when you already have a URL and want page content.
+- `interact`: use when the page needs clicks, forms, or post-scrape browser actions.
+
+## Search
+
+### Why use it
+
+Use search to discover relevant pages from a query, then pick URLs to scrape or interact with. Constrain results to a site with `site:`, for example `site:docs.firecrawl.dev crawl webhooks`.
+
+### Preferred SDK method
+
+- `client.search(query)` → `SearchData`
+- `client.search(query, options)` → `SearchData`
+
+### Example
+
+```java
+import com.firecrawl.models.SearchOptions;
+import com.firecrawl.models.ScrapeOptions;
+import com.firecrawl.models.SearchData;
+import java.util.List;
+import java.util.Map;
+
+SearchOptions options = SearchOptions.builder()
+    .sources(List.of("web", "news"))
+    .limit(10)
+    .tbs("qdr:m")
+    .scrapeOptions(
+        ScrapeOptions.builder()
+            .formats(List.of("markdown"))
+            .onlyMainContent(true)
+            .build()
+    )
+    .build();
+
+SearchData results = client.search("site:docs.firecrawl.dev crawl webhooks", options);
+List<Map<String, Object>> web = results.getWeb();
+```
+
+**Wrong turn to avoid:** `search()` returns `SearchData` with `getWeb()`, `getNews()`, and `getImages()` — do not treat it as a directly iterable list.
+
+### Parameters
+
+- `query` — String (required). The search query. Use `site:example.com` to limit results to a domain.
+- `options.sources` — `List<Object>`. Values: `"web"`, `"news"`, `"images"` or `{type: "web" | "news" | "images"}` maps.
+- `options.categories` — `List<Object>`. Values: `"github"`, `"research"`, `"pdf"`.
+- `options.includeDomains` — `List<String>`. Domains to include.
+- `options.excludeDomains` — `List<String>`. Domains to exclude.
+- `options.limit` — Integer. Maximum number of results.
+- `options.tbs` — String. Time-based filter (e.g. `qdr:d`, `qdr:w`, `sbd:1,qdr:m`).
+- `options.location` — String. Location for localized results.
+- `options.ignoreInvalidURLs` — Boolean. Drop URLs that cannot be scraped.
+- `options.timeout` — Integer. Request timeout in milliseconds.
+- `options.highlights` — Boolean. Generate query-relevant highlights. Defaults to true.
+- `options.scrapeOptions` — `ScrapeOptions`. Options for scraping each search result (see Scrape parameters).
+- `options.integration` — String. Integration identifier.
+
+## Scrape
+
+### Why use it
+
+Use scrape when you already have a URL and want structured content in one or more formats.
+
+### Preferred SDK method
+
+- `client.scrape(url)` → `Document`
+- `client.scrape(url, options)` → `Document`
+
+### Example
+
+```java
+import com.firecrawl.models.ScrapeOptions;
+import com.firecrawl.models.JsonFormat;
+import com.firecrawl.models.Document;
+import java.util.List;
+
+ScrapeOptions options = ScrapeOptions.builder()
+    .formats(List.of(
+        "markdown",
+        "links",
+        JsonFormat.builder().prompt("Extract plan names and prices.").build()
+    ))
+    .onlyMainContent(true)
+    .waitFor(1000)
+    .build();
+
+Document doc = client.scrape("https://example.com/pricing", options);
+System.out.println(doc.getMarkdown());
+System.out.println(doc.getJson());
+```
+
+### Parameters
+
+- `url` — String (required). The URL to scrape.
+- `options.formats` — `List<Object>`. Format strings or format objects.
+  - String formats: `"markdown"`, `"html"`, `"rawHtml"`, `"links"`, `"images"`, `"screenshot"`, `"summary"`, `"changeTracking"`, `"json"`, `"attributes"`, `"branding"`, `"audio"`, `"video"`.
+  - Object formats: `JsonFormat.builder().prompt(...).schema(...).build()`, `QuestionFormat`, `HighlightsFormat`, or `Map` with `type` and options.
+- `options.headers` — `Map<String, String>`. Custom request headers.
+- `options.includeTags` — `List<String>`. HTML tags to include.
+- `options.excludeTags` — `List<String>`. HTML tags to exclude.
+- `options.onlyMainContent` — Boolean. Strip nav, footer, and boilerplate.
+- `options.timeout` — Integer. Timeout in milliseconds.
+- `options.waitFor` — Integer. Wait for page to render (milliseconds).
+- `options.mobile` — Boolean. Use mobile viewport.
+- `options.parsers` — `List<Object>`. Values: `"pdf"` or `PdfParser` with `maxPages`, `pages`, `blocks`, `pageMarkers`.
+- `options.actions` — `List<Map<String, Object>>`. Pre-scrape browser actions. Types: `wait`, `screenshot`, `click`, `write`, `press`, `scroll`, `scrape`, `executeJavascript`, `pdf`.
+- `options.location` — `LocationConfig` with `country` and `languages`.
+- `options.skipTlsVerification` — Boolean. Skip TLS verification.
+- `options.removeBase64Images` — Boolean. Drop base64 images from markdown.
+- `options.blockAds` — Boolean. Ad and cookie popup blocking.
+- `options.proxy` — String. `"basic"`, `"stealth"`, `"enhanced"`, `"auto"`, or custom URL.
+- `options.maxAge` — Long. Use cached data up to a maximum age (milliseconds).
+- `options.storeInCache` — Boolean. Cache the result.
+- `options.lockdown` — Boolean. Serve only previously cached results.
+- `options.redactPII` — Boolean. Redact PII.
+- `options.auditMetadata` — `AuditMetadata` with `username`. Metadata for SIEM logging.
+- `options.integration` — String. Integration identifier.
+
+## Interact
+
+### Why use it
+
+Use interact when a page requires browser actions or code execution after a scrape starts.
+
+### Preferred SDK method
+
+- `client.interact(jobId, code)` — uses default language `"node"` and default timeout
+- `client.interact(jobId, code, language, timeout)` — `timeout` is seconds (1–300), or null for default
+- `client.interact(jobId, code, language, timeout, origin)` — optional `origin` for attribution
+
+### Example
+
+```java
+import com.firecrawl.models.BrowserExecuteResponse;
+import com.firecrawl.models.Document;
+import com.firecrawl.models.ScrapeOptions;
+import java.util.List;
+import java.util.Map;
+
+// First scrape to get a job ID
+Document doc = client.scrape(
+    "https://example.com",
+    ScrapeOptions.builder().formats(List.of("markdown")).build()
+);
+Map<String, Object> metadata = doc.getMetadata();
+String jobId = (String) metadata.get("scrapeId");
+
+// Code-based interaction
+BrowserExecuteResponse result = client.interact(
+    jobId,
+    "console.log(await page.title());",
+    "node",
+    60
+);
+System.out.println(result.getStdout());
+
+// Stop the session when done
+client.stopInteractiveBrowser(jobId);
+```
+
+### Parameters
+
+- `jobId` — String (required). The scrape job ID.
+- `code` — String (required). Code to run in the browser session.
+- `language` — String. `"python"`, `"node"`, or `"bash"`. Default: `"node"`.
+- `timeout` — Integer. Execution timeout in seconds (1–300). Null uses the API default (30).
+- `origin` — String. Optional origin label for attribution.
+
+### Stop session
+
+`client.stopInteractiveBrowser(jobId)` → `BrowserDeleteResponse` — ends the browser session. Response: `isSuccess()`, `getSessionDurationMs()`, `getCreditsBilled()`, `getError()`.
+
+### Async variants
+
+All methods have `*Async` variants returning `CompletableFuture<T>`: `scrapeAsync`, `searchAsync`, `interactAsync`, `stopInteractiveBrowserAsync`.
+
+## Notes
+
+- The Java SDK exposes code-based interactions only — there is no `prompt` parameter on `interact` (unlike JS, Python, and Rust SDKs).
+- Deprecated aliases: `scrapeExecute` → `interact`; `deleteScrapeBrowser` → `stopInteractiveBrowser`.
+- All options classes use the Builder pattern (`ScrapeOptions.builder()...build()`).
+- Method overloading is used instead of optional/keyword arguments.
+- All parameter names use camelCase (standard Java convention).
+- `ScrapeOptions` supports `toBuilder()` for copying and modifying existing options.
+
+## Source Of Truth
+
+- `firecrawl/apps/java-sdk/build.gradle.kts`
+- `firecrawl/apps/java-sdk/src/main/java/com/firecrawl/client/FirecrawlClient.java`
+- `firecrawl/apps/java-sdk/src/main/java/com/firecrawl/models/ScrapeOptions.java`
+- `firecrawl/apps/java-sdk/src/main/java/com/firecrawl/models/SearchOptions.java`
+- `firecrawl/apps/java-sdk/src/main/java/com/firecrawl/models/SearchData.java`
+- `firecrawl/apps/java-sdk/src/main/java/com/firecrawl/models/Document.java`
+- `firecrawl-docs/api-reference/v2-openapi.json`
