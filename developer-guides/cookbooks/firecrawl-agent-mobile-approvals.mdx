@@ -1,0 +1,77 @@
+---
+title: "Approve paid Agent calls from your phone"
+description: "Connect Firecrawl Agent's paid-call approval protocol to an enrolled customer with Pushary."
+---
+
+Firecrawl Agent can pause before calling a paid Alexandria provider. This recipe delivers that request to a customer's phone using [Pushary](https://pushary.com/docs/agents/embed), then continues the same Firecrawl thread with the recorded decision.
+
+Firecrawl enforces the paid-call gate. Your application stores the proposed calls, receives the human's answer and submits the continuation. Pushary delivers and records the decision; it does not execute the provider call.
+
+## Prerequisites
+
+- Node.js 24 LTS.
+- A Firecrawl API key with Alexandria access and credits.
+- A Pushary Partner workspace, a backend key for enrollment and a runtime key for the customer.
+- A customer who has accepted a Pushary phone enrollment invitation.
+
+This is a community integration example. It does not add Pushary to the Alexandria provider catalog.
+
+## Get the runnable example
+
+The accompanying `examples/pushary-mobile-approvals` directory in this documentation repository contains the complete TypeScript example and tests. From that directory:
+
+```sh
+npm install
+cp .env.example .env
+```
+
+Configure both API keys, the enrolled `PUSHARY_EXTERNAL_ID`, a provider ID returned by [Find Tools](/features/alexandria#find-tools), and `MAX_CREDITS` in `.env`. Never commit the populated file.
+
+Enrollment uses a separate full-access backend credential. Create a link through Pushary's `/api/v1/server/enroll` endpoint with the customer's application-owned identifier, then have the person open and accept that link on their phone. A preexisting Pushary Agent login does not enroll a Partner customer. Use a recipient-bound runtime key for the decision loop.
+
+## Start a gated research turn
+
+The example submits `mode: "chat"` and enables `exchange.requireApproval`, restricts the provider set and sets `maxCalls: 1` and `maxCredits`.
+
+```sh
+node --env-file=.env --import tsx run.ts start /tmp/mobile-approval-demo "Use only Alexandria provider apps-apple-com capability apps/app to inspect app_id 6785677563 in country us. Return the app name and version. Make one paid provider call and do not use web search."
+node --env-file=.env --import tsx run.ts check /tmp/mobile-approval-demo
+```
+
+`check` reads status once. Run it again later if the job is still processing. The completed turn is written to a private `turn.json` file. A paid-call request contains an approval ID and calls with IDs, provider, capability, input and estimated credits.
+
+Recheck the provider's current price before testing. Each Agent turn has its own budget, including the continuation. A terms request is separate from a calls approval: show the actual agreement to an authorized person and obtain explicit consent before accepting it. This example never accepts terms.
+
+## Ask the customer
+
+```sh
+node --env-file=.env --import tsx run.ts request /tmp/mobile-approval-demo
+```
+
+The request shows the exact provider calls, inputs and estimated credits. Its stable idempotency key and saved binding associate it with this recipient, thread and proposal. The example rejects inputs that cannot fit in its review surface instead of silently truncating them.
+
+After the person answers on their phone:
+
+```sh
+node --env-file=.env --import tsx run.ts resume /tmp/mobile-approval-demo
+node --env-file=.env --import tsx run.ts check /tmp/mobile-approval-demo
+```
+
+Only an affirmative answer matching the saved decision, recipient, context and deadline produces `exchange.approve` with the reviewed call IDs. A refusal or expired decision produces `exchange.decline`. Pending decisions stay pending. Every continuation retains `requireApproval: true`; the example does not use `always: true`.
+
+## Handle retries and later approvals
+
+The example persists a claim before submitting a continuation. If the response is lost, it stops for reconciliation instead of automatically replaying a potentially paid action. A repeated successful resume returns the recorded job ID. Inspect Firecrawl history before recovering an uncertain submission. Do not assume the scrape endpoint's request-id replay behavior also applies to Agent submissions.
+
+One directory handles one approval cycle. If the continued Agent asks for another paid call, that call remains gated. Create a new review for the new approval ID. A production worker should store these states in its durable database, schedule polling or verify callbacks, and bind the recipient to the authenticated application user.
+
+## Test the integration
+
+```sh
+npm test
+npm run typecheck
+```
+
+The tests cover malformed responses, mismatched recipients and inputs, refusal, expiry, duplicate/concurrent submissions and uncertain network outcomes. They simulate external services. Before deployment, also verify enrollment, actual phone answers and continuation against your own accounts.
+
+See [paid-call approvals](/features/agent#approve-paid-calls-before-they-run), [provider terms](/features/agent#data-providers-that-need-terms), and [Pushary's integration guide](https://pushary.com/docs/agents/embed).
