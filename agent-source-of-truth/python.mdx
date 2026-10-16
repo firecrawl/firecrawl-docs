@@ -3,7 +3,7 @@ title: "Python Source of Truth"
 description: "Canonical Firecrawl Python source of truth for agents using key endpoints like search, scrape, and interact."
 ---
 
-Canonical Firecrawl Python source of truth for agents. Generated from SDK source (`firecrawl-py` / `firecrawl` **4.22.1**) and the v2 OpenAPI spec. Method names, parameters, and return types match the v2 client in `firecrawl/v2/client.py` unless noted.
+Canonical Firecrawl Python source of truth for agents. Generated from SDK source (`firecrawl-py` **4.50.0**) and the v2 OpenAPI spec. Method names, parameters, and return types match the v2 client in `firecrawl/v2/client.py` unless noted.
 
 ## Install
 
@@ -20,6 +20,17 @@ from firecrawl import Firecrawl
 client = Firecrawl(api_key=os.environ.get("FIRECRAWL_API_KEY"))
 # client = Firecrawl(api_key="fc-...", api_url="https://api.firecrawl.dev")
 ```
+
+Constructor parameters:
+
+- `api_key`: str — falls back to `FIRECRAWL_API_KEY` env var. Omit for keyless free tier (rate-limited per IP).
+- `api_url`: str — defaults to `"https://api.firecrawl.dev"`.
+- `timeout`: float — default request timeout in seconds for all HTTP requests.
+- `max_retries`: int — maximum retries for failed requests (default 3).
+- `backoff_factor`: float — exponential backoff factor (default 0.5).
+- `origin`: str — attribution string stamped into API request payloads (defaults to `python-sdk@<version>`).
+
+Async variant: `from firecrawl import AsyncFirecrawl`.
 
 ## When To Use What
 
@@ -46,6 +57,9 @@ Returns a `SearchData` model with optional lists:
 - `web` — web hits (`SearchResultWeb` or full `Document` when `scrape_options` hydrates content)
 - `news` — news hits (`SearchResultNews` or `Document`)
 - `images` — image hits (`SearchResultImages` or `Document`)
+- `tools` — discovered tools (when `domain_tools` or `sources` includes `"alexandria"`)
+- `warning` — optional warning string
+- `agent_hints` — optional hints list
 
 Omitted buckets are `None` when the API did not return that key.
 
@@ -71,8 +85,11 @@ results = client.search(
     limit=10,
     tbs="qdr:m",
     location="San Francisco,California,United States",
+    country="US",
     ignore_invalid_urls=True,
+    highlights=True,
     timeout=300000,
+    include_domains=["docs.firecrawl.dev"],
     scrape_options=ScrapeOptions(
         formats=[
             "markdown",
@@ -83,11 +100,6 @@ results = client.search(
         include_tags=["main", "article"],
         exclude_tags=["nav", "footer"],
         wait_for=1000,
-        actions=[
-            {"type": "click", "selector": "button#accept"},
-            {"type": "wait", "milliseconds": 750},
-            {"type": "scrape"},
-        ],
     ),
 )
 ```
@@ -106,7 +118,16 @@ results = client.search(
     - `"web"`: web index results
     - `"news"`: news results
     - `"images"`: image results
-    - `Source(type="web" | "news" | "images")`: typed source object form
+    - `"alexandria"`: Alexandria source results
+    - `Source(type="web" | "news" | "images" | "alexandria")`: typed source object form
+
+- `domain_tools`
+  - Type: bool
+  - Use when: you want domain-matched Alexandria tools alongside semantic matches.
+
+- `tool_detail`
+  - Type: `"compact" | "summary" | "full"`
+  - Use when: you want to control tool discovery detail level. Compact by default; summary adds metadata, full includes contracts.
 
 - `categories`
   - Type: list of category names or `Category` objects
@@ -116,7 +137,16 @@ results = client.search(
     - `"gov"`: Firecrawl Government Index results
     - `"research"`: research and academic results
     - `"pdf"`: PDF-focused results
-    - `Category(type="developer" | "gov" | "research" | "pdf")`: typed category object form
+    - `"github"`: site:github.com filter
+    - `Category(type="developer" | "gov" | "research" | "pdf" | "github")`: typed category object form
+
+- `include_domains`
+  - Type: list of str
+  - Use when: you want to restrict results to specific domains. Cannot be combined with `exclude_domains`.
+
+- `exclude_domains`
+  - Type: list of str
+  - Use when: you want to exclude specific domains from results. Cannot be combined with `include_domains`.
 
 - `limit`
   - Type: int
@@ -131,9 +161,18 @@ results = client.search(
   - Type: str
   - Use when: you want localized results.
 
+- `country`
+  - Type: str
+  - Use when: you want ISO 3166-1 alpha-2 geo-targeting for search results.
+
 - `ignore_invalid_urls`
   - Type: bool
   - Use when: you want to drop URLs that cannot be scraped by other endpoints.
+
+- `highlights`
+  - Type: bool
+  - Use when: you want query-relevant highlights for search results.
+  - Notes: defaults to `true`.
 
 - `timeout`
   - Type: int
@@ -143,6 +182,19 @@ results = client.search(
 - `scrape_options`
   - Type: `ScrapeOptions`
   - Use when: you want to scrape each search result (see Scrape parameters for fields).
+
+- `enterprise`
+  - Type: list of str
+  - Use when: you need enterprise search options. `["zdr"]` for zero data retention, `["anon"]` for anonymized search. Must be enabled for your team.
+
+- `threat_protection`
+  - Type: `ThreatProtectionOptions`
+  - Use when: you need enterprise per-request threat protection override.
+  - Fields: `mode` (`"off" | "manual-only" | "normal" | "zscaler"`), `risk_score_threshold` (0-100), `blacklist`, `whitelist`, `blocked_tlds`, `failure_policy` (`"open" | "closed"`).
+
+- `integration`
+  - Type: str
+  - Use when: you need an integration identifier for server-side tracking.
 
 ## Scrape
 
@@ -213,6 +265,8 @@ doc = client.scrape(
     - `"changeTracking"` or `"change_tracking"`: change tracking output
     - `"attributes"`: attribute extraction
     - `"branding"`: branding profile output
+    - `"product"`: product profile output
+    - `"menu"`: menu profile output
     - `"audio"`: audio extraction
     - `"video"`: video extraction
   - Object-only format types:
@@ -263,7 +317,8 @@ doc = client.scrape(
   - Use when: you need file parsing controls (for example PDF parsing).
   - Confirmed values:
     - `"pdf"`: enable PDF parsing
-    - `{ "type": "pdf", "mode": "fast" | "auto" | "ocr", "max_pages": int }`: PDF parser options
+    - `{"type": "pdf", "mode": "fast" | "auto" | "ocr", "max_pages": int, "pages": bool, "blocks": bool, "page_markers": bool}`: PDF parser options. `pages` returns per-page markdown; `blocks` returns per-page typed layout blocks.
+    - `{"type": "image"}`: image parser
 
 - `actions`
   - Type: list of action objects
@@ -306,20 +361,51 @@ doc = client.scrape(
 
 - `max_age`
   - Type: int
-  - Use when: you want cached data up to a maximum age (milliseconds).
-
-- `min_age`
-  - Type: int
-  - Use when: you want cached data only if it is at least this old (milliseconds).
-  - Notes: only on `ScrapeOptions` passed as `scrape_options` to `client.search`. The `client.scrape` method does not accept `min_age`.
+  - Use when: you want cached data up to a maximum age (milliseconds). Set to 0 to bypass index reuse.
 
 - `store_in_cache`
   - Type: bool
   - Use when: you want Firecrawl to cache the result.
 
+- `lockdown`
+  - Type: bool
+  - Use when: you want to serve only previously cached results and never make outbound requests. Returns 404 on cache miss.
+
+- `check_prompt_injection`
+  - Type: bool
+  - Use when: you want to scan page content for prompt injection before LLM-backed formats run. Adds 4 credits.
+
+- `redact_pii`
+  - Type: bool or `RedactPIIOptions`
+  - Use when: you want to redact personally identifiable information from output.
+
+- `threat_protection`
+  - Type: `ThreatProtectionOptions`
+  - Use when: you need enterprise per-request threat protection override.
+
+- `audit_metadata`
+  - Type: `AuditMetadata` with `username: str` (max 1024 chars)
+  - Use when: you need metadata included in SIEM logging events.
+
 - `profile`
   - Type: dict with `name` and optional `save_changes` or `saveChanges`
   - Use when: you want a persistent browser profile shared across scrapes and interactions.
+
+- `domain_tools`
+  - Type: bool
+  - Use when: you want domain-matched Alexandria tools for this URL included in `tools`.
+
+- `tool_detail`
+  - Type: `"compact" | "summary" | "full"`
+  - Use when: you want to control tool discovery detail level.
+
+- `auto_resume`
+  - Type: bool (SDK-only, never sent to API)
+  - Use when: you want to control automatic resumption for large documents.
+
+- `integration`
+  - Type: str
+  - Use when: you need an integration identifier for server-side tracking.
 
 ## Interact
 
@@ -381,11 +467,15 @@ result = client.interact(
 
 - `timeout`
   - Type: int
-  - Use when: you need an execution timeout in seconds.
+  - Use when: you need an execution timeout in seconds (1-300).
+
+- `origin`
+  - Type: str
+  - Use when: you need an origin label for execution telemetry.
 
 ### Return value
 
-Returns `BrowserExecuteResponse`: `success`, optional `live_view_url`, `interactive_live_view_url`, `output`, `stdout`, `result`, `stderr`, `exit_code`, `killed`, `error` (API camelCase is normalized to snake_case on the model).
+Returns `BrowserExecuteResponse`: `success`, optional `cdp_url`, `live_view_url`, `interactive_live_view_url`, `output`, `stdout`, `result`, `stderr`, `exit_code`, `killed`, `truncated`, `error` (API camelCase is normalized to snake_case on the model).
 
 ## Ask (Agentic Debugging)
 
@@ -508,9 +598,10 @@ print(response.json()["answer"])
 
 ## Notes
 
-- Deprecated aliases: `scrape_execute` → `interact`; `stop_interactive_browser` and `delete_scrape_browser` → `stop_interaction`.
+- Deprecated aliases: `scrape_url` → `scrape`; `scrape_execute` → `interact`; `stop_interactive_browser` and `delete_scrape_browser` → `stop_interaction`.
 - The top-level `Firecrawl` client exposes v2 methods directly; v1 remains under `client.v1`.
-- The bundled v2 OpenAPI snippet for `POST /v2/scrape/{jobId}/interact` may only document `code`; the Python SDK and server accept either `code` or `prompt` for this endpoint.
+- Class aliases: `FirecrawlApp = Firecrawl`, `AsyncFirecrawlApp = AsyncFirecrawl` (backward-compatible).
+- No API key is required; scrape, search, and interact fall back to the keyless free tier (rate-limited per IP).
 
 ## Source Of Truth
 
@@ -521,5 +612,4 @@ print(response.json()["answer"])
 - `firecrawl/apps/python-sdk/firecrawl/v2/types.py`
 - `firecrawl/apps/python-sdk/firecrawl/v2/methods/search.py`
 - `firecrawl/apps/python-sdk/firecrawl/v2/methods/scrape.py`
-- `firecrawl/apps/python-sdk/firecrawl/v2/utils/validation.py`
 - `firecrawl-docs/api-reference/v2-openapi.json`

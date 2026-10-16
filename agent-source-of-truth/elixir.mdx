@@ -3,15 +3,17 @@ title: "Elixir Source of Truth"
 description: "Canonical Firecrawl Elixir source of truth for agents using key endpoints like search, scrape, and interact."
 ---
 
-Canonical Firecrawl Elixir source of truth for agents. Generated from SDK source and the v2 OpenAPI spec.
+Canonical Firecrawl Elixir source of truth for agents. Generated from SDK source (`firecrawl` hex package **v1.12.0**) and the v2 OpenAPI spec.
 
 ## Install
 
 Add to `mix.exs`:
 
 ```elixir
-{:firecrawl, "~> 1.0.0"}
+{:firecrawl, "~> 1.12.0"}
 ```
+
+Requires Elixir ~> 1.15.
 
 ## Authenticate
 
@@ -22,6 +24,14 @@ config :firecrawl, api_key: System.get_env("FIRECRAWL_API_KEY")
 # or pass api_key per call
 {:ok, res} = Firecrawl.search_and_scrape([query: "site:docs.firecrawl.dev webhook retries"], api_key: "fc-your-api-key")
 ```
+
+All functions accept an optional keyword list as the last argument (`opts`) with:
+
+- `:api_key` — override the API key for this request. Nil/empty = keyless free tier (rate-limited per IP).
+- `:base_url` — override the default API base URL (default: `"https://api.firecrawl.dev/v2"`; useful for self-hosted instances).
+- Any other options are passed through to `Req`.
+
+The SDK automatically sends an `origin` field with every request body set to `"elixir-sdk@<version>"`.
 
 ## When To Use What
 
@@ -38,6 +48,8 @@ Use search to discover relevant pages from a query, then pick URLs to scrape or 
 ### Preferred SDK method
 
 `Firecrawl.search_and_scrape(params \\ [], opts \\ [])`
+
+Bang variant: `Firecrawl.search_and_scrape!/2` raises on error.
 
 ### Simple Example
 
@@ -57,7 +69,10 @@ Use search to discover relevant pages from a query, then pick URLs to scrape or 
   location: "San Francisco,California,United States",
   country: "US",
   ignore_invalid_urls: true,
+  highlights: true,
   timeout: 60000,
+  include_domains: ["docs.firecrawl.dev"],
+  tool_detail: :summary,
   scrape_options: [
     formats: [
       "markdown",
@@ -75,7 +90,7 @@ Use search to discover relevant pages from a query, then pick URLs to scrape or 
 ### Parameters
 
 - `query`
-  - Type: string
+  - Type: string (required)
   - Use when: you need a search query.
   - Notes: use `site:example.com` to limit results to a domain.
 
@@ -86,7 +101,16 @@ Use search to discover relevant pages from a query, then pick URLs to scrape or 
     - `"web"` or `:web`
     - `"news"` or `:news`
     - `"images"` or `:images`
-    - `%{type: "web" | "news" | "images"}`
+    - `"alexandria"` or `:alexandria`
+    - `%{type: "web" | "news" | "images" | "alexandria"}`
+
+- `domain_tools`
+  - Type: boolean
+  - Use when: you want domain-matched Alexandria tools alongside semantic matches.
+
+- `tool_detail`
+  - Type: atom or string (`:compact`, `:summary`, `:full`)
+  - Use when: you want to control tool discovery detail level.
 
 - `categories`
   - Type: list of atoms, strings, or maps
@@ -96,6 +120,14 @@ Use search to discover relevant pages from a query, then pick URLs to scrape or 
     - `"research"` or `:research`
     - `"pdf"` or `:pdf`
     - `%{type: "developer" | "research" | "pdf"}`
+
+- `include_domains`
+  - Type: list of strings
+  - Use when: you want to restrict results to specific domains.
+
+- `exclude_domains`
+  - Type: list of strings
+  - Use when: you want to exclude specific domains from results.
 
 - `limit`
   - Type: integer
@@ -113,9 +145,17 @@ Use search to discover relevant pages from a query, then pick URLs to scrape or 
   - Type: string
   - Use when: you want ISO 3166-1 alpha-2 targeting (for example `"US"`).
 
+- `safe`
+  - Type: boolean
+  - Use when: you want SafeSearch filtering of explicit content.
+
 - `ignore_invalid_urls`
   - Type: boolean
   - Use when: you want to drop URLs that cannot be scraped by other endpoints.
+
+- `highlights`
+  - Type: boolean
+  - Use when: you want query-relevant highlights for search results. Defaults to true.
 
 - `timeout`
   - Type: integer
@@ -127,6 +167,10 @@ Use search to discover relevant pages from a query, then pick URLs to scrape or 
   - Confirmed values:
     - `"zdr"`: end-to-end zero data retention
     - `"anon"`: anonymized zero data retention
+
+- `threat_protection`
+  - Type: keyword list
+  - Use when: you need enterprise per-request threat protection override.
 
 - `scrape_options`
   - Type: keyword list
@@ -141,6 +185,8 @@ Use scrape when you already have a URL and want structured content in one or mor
 ### Preferred SDK method
 
 `Firecrawl.scrape_and_extract_from_url(params \\ [], opts \\ [])`
+
+Bang variant: `Firecrawl.scrape_and_extract_from_url!/2` raises on error.
 
 ### Simple Example
 
@@ -177,7 +223,6 @@ Use scrape when you already have a URL and want structured content in one or mor
   block_ads: true,
   proxy: :auto,
   max_age: 86400000,
-  min_age: 1,
   store_in_cache: true,
   profile: [name: "docs-session", save_changes: true],
   zero_data_retention: false
@@ -187,7 +232,7 @@ Use scrape when you already have a URL and want structured content in one or mor
 ### Parameters
 
 - `url`
-  - Type: string
+  - Type: string (required)
   - Use when: you want to scrape a specific page.
 
 - `formats`
@@ -204,6 +249,8 @@ Use scrape when you already have a URL and want structured content in one or mor
     - `"changeTracking"`: change tracking output
     - `"json"`: JSON extraction
     - `"branding"`: branding profile output
+    - `"product"`: product profile output
+    - `"menu"`: menu profile output
     - `"audio"`: audio extraction
     - `"video"`: video extraction
   - Format map fields:
@@ -284,7 +331,7 @@ Use scrape when you already have a URL and want structured content in one or mor
 
 - `max_age`
   - Type: integer
-  - Use when: you want cached data up to a maximum age (milliseconds).
+  - Use when: you want cached data up to a maximum age (milliseconds). Set to 0 to bypass index reuse.
 
 - `min_age`
   - Type: integer
@@ -294,9 +341,33 @@ Use scrape when you already have a URL and want structured content in one or mor
   - Type: boolean
   - Use when: you want Firecrawl to cache the result.
 
+- `lockdown`
+  - Type: boolean
+  - Use when: you want to serve only previously cached results and never make outbound requests.
+
+- `check_prompt_injection`
+  - Type: boolean
+  - Use when: you want to scan page content for prompt injection before LLM-backed formats run. Adds 4 credits.
+
+- `redact_pii`
+  - Type: any (boolean or options map)
+  - Use when: you want to redact PII from returned markdown.
+
+- `audit_metadata`
+  - Type: keyword list with `username:` (required, string)
+  - Use when: you need user attribution included with SIEM logging events.
+
 - `profile`
   - Type: keyword list with `name:` and optional `save_changes:` (or `saveChanges:`)
   - Use when: you want a persistent browser profile shared across scrapes and interactions.
+
+- `domain_tools`
+  - Type: boolean
+  - Use when: you want domain-matched Alexandria tools for this URL included in `tools`.
+
+- `threat_protection`
+  - Type: keyword list
+  - Use when: you need enterprise per-request threat protection override.
 
 - `zero_data_retention`
   - Type: boolean
@@ -308,9 +379,13 @@ Use scrape when you already have a URL and want structured content in one or mor
 
 Use interact when a page requires browser actions or code execution after a scrape starts.
 
-### Preferred SDK method
+### Scrape-bound interact
 
-`Firecrawl.interact_with_scrape_browser_session(job_id, params \\ [], opts \\ [])`
+**Preferred SDK method:** `Firecrawl.interact_with_scrape_browser_session(job_id, params \\ [], opts \\ [])`
+
+Bang variant: `Firecrawl.interact_with_scrape_browser_session!/3`
+
+This interacts with the browser session tied to a scrape job via `POST /scrape/{jobId}/interact`.
 
 ### Simple Example
 
@@ -334,14 +409,14 @@ Use interact when a page requires browser actions or code execution after a scra
 )
 ```
 
-### Parameters
+### Parameters (scrape-bound interact)
 
 - `job_id`
   - Type: string
   - Use when: you have a scrape job ID.
 
 - `code`
-  - Type: string
+  - Type: string (required)
   - Use when: you want to run code in the browser session.
 
 - `language`
@@ -357,19 +432,36 @@ Use interact when a page requires browser actions or code execution after a scra
   - Type: string
   - Use when: you want an optional origin label for execution telemetry.
 
-### Stop interactive session
+### Stop scrape-bound session
 
-`Firecrawl.stop_interactive_scrape_browser_session(job_id, opts \\ [])` issues `DELETE /scrape/{jobId}/interact` and tears down the browser session for that scrape job. A bang variant `stop_interactive_scrape_browser_session!/2` is also available.
+`Firecrawl.stop_interactive_scrape_browser_session(job_id, opts \\ [])` issues `DELETE /scrape/{jobId}/interact` and tears down the browser session for that scrape job.
+
+Bang variant: `Firecrawl.stop_interactive_scrape_browser_session!/2`
 
 ```elixir
 {:ok, res} = Firecrawl.stop_interactive_scrape_browser_session("<scrapeJobId>")
 ```
 
+### Standalone interact sessions
+
+The Elixir SDK also exposes standalone interact sessions (not tied to a scrape job):
+
+- `Firecrawl.create_browser_session(params, opts)` — `POST /interact`. Creates a new browser session.
+  - Params: `activity_ttl`, `block_ads`, `location`, `profile`, `stream_web_view`, `ttl`
+- `Firecrawl.execute_browser_code(session_id, params, opts)` — `POST /interact/{sessionId}/execute`. Executes code in a session.
+  - Params: `code` (required), `language`, `timeout`
+- `Firecrawl.list_browser_sessions(params, opts)` — `GET /interact`. Lists sessions.
+  - Params: `status` (`:active` or `:destroyed`)
+- `Firecrawl.delete_browser_session(session_id, opts)` — `DELETE /interact/{sessionId}`. Deletes a session.
+
 ## Notes
 
 - The Elixir client is OpenAPI-shaped; function names and parameter keys are generated from the spec.
 - Each public function has a bang (`!`) variant that raises on error instead of returning `{:error, _}`.
+- Return type for all functions: `{:ok, %Req.Response{}} | {:error, Exception.t() | Firecrawl.Error.t()}`.
 - This SDK exposes code-based interactions only (no `prompt` parameter on `interact_with_scrape_browser_session`).
+- No deprecated aliases — the SDK is auto-generated from the OpenAPI spec.
+- A nil/empty API key is allowed: scrape, search, and interact fall back to the keyless free tier.
 
 ## Source Of Truth
 
