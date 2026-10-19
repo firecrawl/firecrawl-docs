@@ -16,6 +16,9 @@
 # localized snippet guides, and a check that cries wolf gets switched off.
 set -eu
 
+# The workflow scopes the real run; the fixtures choose their own scope.
+unset LOCALE_CHECK_CHANGED_FILES
+
 check="$(pwd)/scripts/check-locale-api-literals.sh"
 specs="$(pwd)/api-reference"
 
