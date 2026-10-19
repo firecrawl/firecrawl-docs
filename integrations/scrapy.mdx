@@ -1,0 +1,164 @@
+---
+title: "Scrapy"
+description: "Fetch pages with Firecrawl from a Scrapy spider through a downloader middleware"
+og:title: "Scrapy | Firecrawl"
+og:description: "Fetch pages with Firecrawl from a Scrapy spider through a downloader middleware"
+---
+
+<Note>
+**Package:** [scrapy-firecrawl on PyPI](https://pypi.org/project/scrapy-firecrawl/) · [Source on GitHub](https://github.com/firecrawl/scrapy-firecrawl)
+
+Fetch pages with Firecrawl from a Scrapy spider through a downloader middleware.
+</Note>
+
+## Overview
+
+`scrapy-firecrawl` is a [Scrapy](https://scrapy.org) downloader middleware that fetches pages with the Firecrawl [scrape endpoint](/api-reference/endpoint/scrape). Your spiders, selectors, and pipelines stay as they are. Only the fetch step changes: pages come back rendered by Firecrawl as an `HtmlResponse` your CSS and XPath selectors already understand, with Markdown and page metadata alongside.
+
+Each `FirecrawlRequest` is one call to `POST /v2/scrape`. Scrapy keeps doing the crawling: your spider decides which links to follow, and Scrapy's scheduler, dupefilter, depth limits, and pipelines work as usual. The middleware does not use Firecrawl's [crawl](/features/crawl) or [map](/features/map) endpoints.
+
+| You get | Detail |
+|---------|--------|
+| **Rendered pages** | Pages that need JavaScript arrive fully rendered, as an `HtmlResponse` for your selectors. |
+| **Markdown and metadata** | `response.meta` carries the page Markdown, metadata, and any other formats you request. |
+| **Scrapy controls** | Calls go through Scrapy's own downloader, so `CONCURRENT_REQUESTS`, `DOWNLOAD_DELAY`, AutoThrottle, and retries apply. |
+| **No extra dependencies** | Calls the REST API directly. The only dependency is Scrapy. |
+
+## Installation
+
+```bash
+pip install scrapy-firecrawl
+```
+
+Requires Python 3.10 or newer and Scrapy 2.11 or newer. Get an API key from the [API Keys page](https://www.firecrawl.dev/app/api-keys) and export it:
+
+```bash
+export FIRECRAWL_API_KEY=fc-YOUR-API-KEY
+```
+
+The middleware reads `FIRECRAWL_API_KEY` from your Scrapy settings or, if it is not set there, from the environment. The crawl stops at startup if the key is missing, so requests are never sent directly by accident.
+
+## Quick start
+
+Enable the middleware in `settings.py`:
+
+```python
+DOWNLOADER_MIDDLEWARES = {
+    "scrapy_firecrawl.FirecrawlMiddleware": 725,
+}
+
+CONCURRENT_REQUESTS = 5  # keep at or below your plan's concurrency
+CONCURRENT_REQUESTS_PER_DOMAIN = 5
+```
+
+Then write a spider. `quotes.toscrape.com/js/` shows its quotes only after JavaScript runs, so a plain Scrapy request sees an empty page:
+
+```python
+from scrapy_firecrawl import FirecrawlRequest, FirecrawlSpider
+
+
+class QuotesSpider(FirecrawlSpider):
+    name = "quotes"
+    start_urls = ["https://quotes.toscrape.com/js/"]
+    firecrawl_params = {"formats": ["markdown"], "waitFor": 1000}
+
+    def parse(self, response):
+        for quote in response.css("div.quote"):
+            yield {
+                "text": quote.css("span.text::text").get(),
+                "author": quote.css("small.author::text").get(),
+            }
+
+        next_page = response.css("li.next a::attr(href)").get()
+        if next_page:
+            yield FirecrawlRequest(response.urljoin(next_page), params=self.firecrawl_params)
+```
+
+```bash
+scrapy crawl quotes -O quotes.json
+```
+
+`FirecrawlSpider` enables the middleware at order 725 if your settings have not, sends `start_urls` as `FirecrawlRequest`s with `firecrawl_params`, and replaces your API key, and any `Bearer` token, with `***` in every log record and traceback. A complete project is in [`examples/quotes_js`](https://github.com/firecrawl/scrapy-firecrawl/tree/main/examples/quotes_js).
+
+## Settings
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `FIRECRAWL_API_KEY` | `$FIRECRAWL_API_KEY` | Your Firecrawl API key. Required. |
+| `FIRECRAWL_API_URL` | `$FIRECRAWL_API_URL`, else `https://api.firecrawl.dev` | Base URL of the API. Point it at a [self-hosted](/contributing/self-host) Firecrawl instance. |
+| `FIRECRAWL_PARAMS` | `{}` | Scrape options applied to every request. Options on a request override them. |
+| `FIRECRAWL_MAX_RETRY_AFTER` | `30` | Longest pause, in seconds, taken for a `Retry-After` header on a 429 or 503 before the retry. |
+
+## Requests
+
+```python
+FirecrawlRequest(url, params=None, response_body="rawHtml", **scrapy_request_kwargs)
+```
+
+`params` are the options of the [scrape endpoint](/api-reference/endpoint/scrape), for example `formats`, `waitFor`, `actions`, `location`, `proxy`, `onlyMainContent`, `headers`, and `timeout`. They must be JSON serializable. `callback`, `errback`, `meta`, `cb_kwargs`, and `priority` work as on any Scrapy request.
+
+`response_body` chooses what the response body is built from:
+
+| Value | Response |
+|-------|----------|
+| `"rawHtml"` (default) | The full page HTML after rendering, as `HtmlResponse`. |
+| `"html"` | The cleaned HTML from Firecrawl, as `HtmlResponse`. |
+| `"markdown"` | The page as Markdown, as `TextResponse`. |
+
+The body format is always added to `formats`. Any other formats you list are returned in `response.meta`.
+
+A plain Scrapy `Request` is sent through Firecrawl when its `meta` has a `firecrawl` key with the same structure:
+
+```python
+yield scrapy.Request(
+    "https://example.com",
+    meta={"firecrawl": {"params": {"onlyMainContent": True}, "response_body": "html"}},
+)
+```
+
+## Responses
+
+`response.url` is the final URL of the page and `response.request.url` is the URL you asked for. `response.status` is the status code of the page itself, so a page that answers 404 arrives as a 404, as it would with a normal Scrapy download. In the callback, `response.meta` holds:
+
+| Key | Value |
+|-----|-------|
+| `firecrawl_markdown` | The Markdown, when `"markdown"` is in `formats`, else `None`. |
+| `firecrawl_metadata` | The `metadata` object: `title`, `statusCode`, `url`, `sourceURL`, `contentType`, and more. |
+| `firecrawl_data` | The whole `data` object, including any other formats you requested (`links`, `screenshot`, `json`, and so on). |
+
+## Errors and retries
+
+The middleware turns the API's answer into a response with a status that Scrapy's own `RetryMiddleware` and `HttpErrorMiddleware` already understand.
+
+| API answer | Response seen by Scrapy | Result |
+|------------|-------------------------|--------|
+| 200 with `success: true` | The page, with the page's status | Callback, or errback for a page 4xx or 5xx |
+| 408, 429, 500, 502, 503, 504 | Same status | Retried up to `RETRY_TIMES`, then the errback |
+| 429 or 503 with `Retry-After` | Same status | Waits up to `FIRECRAWL_MAX_RETRY_AFTER` without blocking the reactor, then retried |
+| 400, 401, 402, 403, other 4xx | Same status | Not retried: the errback gets an `HttpError` |
+| 200 with `success: false` (for example a host that does not resolve) | 400 | Not retried |
+| A reply that is not JSON | 502 | Retried |
+
+For any failure, `response.meta["firecrawl_error"]` and `response.meta["firecrawl_error_code"]` hold the API's message and code, and the response body is the raw API reply. If you customize `RETRY_HTTP_CODES`, keep 408, 429, and the 5xx codes in it. Every retry is another scrape call, so keep `RETRY_TIMES` low.
+
+## Concurrency and throttling
+
+Firecrawl calls go through Scrapy's downloader, so the usual settings control them:
+
+- **`CONCURRENT_REQUESTS`** is the number of scrapes in flight across the whole crawl. Set it to your plan's [concurrency limit](/rate-limits).
+- **`CONCURRENT_REQUESTS_PER_DOMAIN`** applies per target site, not per API host. Scrapy defaults it to 8, so raise it to match `CONCURRENT_REQUESTS` for a single-site crawl.
+- **`DOWNLOAD_DELAY`** spaces out calls to the same target site.
+- **`AUTOTHROTTLE_ENABLED = True`** adapts the delay to how long Firecrawl takes to answer. Scrapes take seconds, so set `AUTOTHROTTLE_TARGET_CONCURRENCY` to the parallelism you want per site (for example `4.0`) and `AUTOTHROTTLE_START_DELAY = 0.5`.
+- **`DOWNLOAD_TIMEOUT`** must exceed the scrape `timeout` you send plus any queue wait. Scrapy's default of 180 seconds is enough for most crawls.
+- **`ROBOTSTXT_OBEY`** is checked by Scrapy for the target URL before the scrape call is made.
+
+## Self-hosting
+
+Set `FIRECRAWL_API_URL` to the base URL of your [self-hosted](/contributing/self-host) instance. `FIRECRAWL_API_KEY` is still read and sent as a bearer token.
+
+## Resources
+
+- [scrapy-firecrawl on GitHub](https://github.com/firecrawl/scrapy-firecrawl)
+- [scrapy-firecrawl on PyPI](https://pypi.org/project/scrapy-firecrawl/)
+- [Firecrawl scrape docs](/features/scrape)
+- [Scrapy downloader middleware docs](https://docs.scrapy.org/en/latest/topics/downloader-middleware.html)
