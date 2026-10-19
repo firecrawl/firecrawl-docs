@@ -92,6 +92,25 @@ elif grep -q 'fragmento.mdx' "$work/out"; then
   status=1
 fi
 
+# Scoped to a change: the same broken page passes when only its English source
+# changed, and fails when the localized page itself changed.
+printf 'features/change-tracking.mdx\n' >"$work/changed"
+rm -rf "$work/repo/.git"
+result="$(LOCALE_CHECK_CHANGED_FILES="$work/changed" run_check)"
+if [ "$result" != pass ]; then
+  echo "selftest: an English-only change was judged on untouched translations:" >&2
+  cat "$work/out" >&2
+  status=1
+fi
+
+printf 'es/features/change-tracking.mdx\n' >"$work/changed"
+rm -rf "$work/repo/.git"
+result="$(LOCALE_CHECK_CHANGED_FILES="$work/changed" run_check)"
+if [ "$result" != fail ]; then
+  echo "selftest: a changed localized page was not checked" >&2
+  status=1
+fi
+
 if [ "$status" -ne 0 ]; then
   exit 1
 fi
