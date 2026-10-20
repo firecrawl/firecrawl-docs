@@ -30,14 +30,14 @@ import { z } from "zod";
 import { Firecrawl } from "firecrawl";
 import { Agent } from "@mastra/core/agent";
 
-const firecrawl = new Firecrawl({
-  apiKey: process.env.FIRECRAWL_API_KEY || "fc-YOUR_API_KEY"
-});
+// 从环境变量中读取 FIRECRAWL_API_KEY
+const firecrawl = new Firecrawl();
 
 const agent = new Agent({
+  id: "summarizer",
   name: "summarizer",
   instructions: "You are a helpful assistant that creates concise summaries of documentation.",
-  model: "openai/gpt-5-nano",
+  model: "openai/gpt-5.6-luna",
 });
 
 // 步骤 1:使用 Firecrawl SDK 搜索
@@ -51,16 +51,16 @@ const searchStep = createStep({
     title: z.string(),
   }),
   execute: async ({ inputData }: { inputData: { query: string } }) => {
-    console.log(`搜索中:${inputData.query}`);
+    console.log(`Searching: ${inputData.query}`);
     const searchResults = await firecrawl.search(inputData.query, { limit: 1 });
     const webResults = (searchResults as any)?.web;
 
     if (!webResults || !Array.isArray(webResults) || webResults.length === 0) {
-      throw new Error("未找到搜索结果");
+      throw new Error("No search results found");
     }
 
     const firstResult = webResults[0];
-    console.log(`找到:${firstResult.title}`);
+    console.log(`Found: ${firstResult.title}`);
     return {
       url: firstResult.url,
       title: firstResult.title,
@@ -80,12 +80,12 @@ const scrapeStep = createStep({
     title: z.string(),
   }),
   execute: async ({ inputData }: { inputData: { url: string; title: string } }) => {
-    console.log(`抓取中:${inputData.url}`);
+    console.log(`Scraping: ${inputData.url}`);
     const scrapeResult = await firecrawl.scrape(inputData.url, {
       formats: ["markdown"],
     });
 
-    console.log(`已抓取:${scrapeResult.markdown?.length || 0} 个字符`);
+    console.log(`Scraped: ${scrapeResult.markdown?.length || 0} characters`);
     return {
       markdown: scrapeResult.markdown || "",
       title: inputData.title,
@@ -93,7 +93,7 @@ const scrapeStep = createStep({
   },
 });
 
-// 步骤 3:使用 Claude 生成摘要
+// 步骤 3:使用 Mastra 智能体生成摘要
 const summarizeStep = createStep({
   id: "summarize",
   inputSchema: z.object({
@@ -104,12 +104,12 @@ const summarizeStep = createStep({
     summary: z.string(),
   }),
   execute: async ({ inputData }: { inputData: { markdown: string; title: string } }) => {
-    console.log(`生成摘要中:${inputData.title}`);
+    console.log(`Summarizing: ${inputData.title}`);
 
-    const prompt = `用 2-3 句话总结以下文档:\n\n标题:${inputData.title}\n\n${inputData.markdown}`;
+    const prompt = `Summarize the following documentation in 2-3 sentences:\n\nTitle: ${inputData.title}\n\n${inputData.markdown}`;
     const result = await agent.generate(prompt);
 
-    console.log(`摘要已生成`);
+    console.log(`Summary generated`);
     return { summary: result.text };
   },
 });
@@ -131,7 +131,7 @@ export const workflow = createWorkflow({
   .commit();
 
 async function testWorkflow() {
-  const run = await workflow.createRunAsync();
+  const run = await workflow.createRun();
   const result = await run.start({
     inputData: { query: "Firecrawl documentation" }
   });
@@ -143,11 +143,40 @@ async function testWorkflow() {
       console.log(`\n${summarize.output.summary}`);
     }
   } else {
-    console.error("工作流失败:", result.status);
+    console.error("Workflow failed:", result.status);
   }
 }
 
 testWorkflow().catch(console.error);
 ```
 
-更多示例请参见 [Mastra 文档](https://mastra.ai/docs)。
+## 浏览器会话 {#browser-sessions}
+
+Mastra 的 `@mastra/browser-firecrawl` 包可为智能体提供托管的 Firecrawl 浏览器。智能体可以使用 Mastra 的浏览器工具，例如 `browser_goto`、`browser_snapshot` 和 `browser_click`，且每个对话会话都有各自独立的浏览器会话。
+
+```bash
+npm install @mastra/browser-firecrawl agent-browser@0.19.0
+```
+
+请同时安装 `agent-browser@0.19.0`。较新的 `agent-browser` 版本不再导出此包所导入的库，搭配使用时会导致导入失败。
+
+```typescript
+import { Agent } from "@mastra/core/agent";
+import { FirecrawlBrowser } from "@mastra/browser-firecrawl";
+
+const browser = new FirecrawlBrowser({
+  apiKey: process.env.FIRECRAWL_API_KEY,
+});
+
+export const browserAgent = new Agent({
+  id: "browser-agent",
+  name: "Browser Agent",
+  instructions: "Use browser_snapshot to read the page, then use the element refs it returns to click and type.",
+  model: "openai/gpt-5.6-luna",
+  browser,
+});
+```
+
+有关会话范围、配置文件和自行托管选项，请参见 [Mastra Firecrawl 浏览器指南](https://mastra.ai/integrations/browsers/firecrawl)。
+
+如需更多示例，请参阅 [Mastra 文档](https://mastra.ai/docs)。

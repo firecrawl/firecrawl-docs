@@ -1,0 +1,294 @@
+---
+title: "借助 Firecrawl 搜索为 Vertex AI 上的 Gemini 提供 Grounding"
+description: "部署一个轻量的 Cloud Run 适配器，让 Vertex AI 上的 Gemini 基于 Firecrawl 搜索结果生成有据可依的答案"
+---
+
+Vertex AI 上的 Gemini 可以调用你提供的搜索 API，并将返回结果作为 grounding 的信息来源。本指南将在 Cloud Run 上部署一个简短的适配器，它会把 Gemini 的请求转换为 [Firecrawl 搜索](/zh/features/search)，并按 Gemini 要求的格式返回结果。
+
+<Note>
+  Google 在文档中将此功能称为 [Grounding with your search API](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/grounding/grounding-with-your-search-api)。本指南中的适配器运行在你自己的 Google Cloud 项目中，其发起的搜索费用将计入你的 Firecrawl 账户。
+</Note>
+
+## 工作原理 {#how-it-works}
+
+1. 你发送给 Gemini 的请求中包含一个类型为 `externalApi` 的检索工具，该工具指向你的适配器。
+2. 当 Gemini 需要信息时，会向适配器发送 `POST {"query": "..."}`，并以 `?key=` 的形式附加你的 API 密钥。
+3. 适配器调用 Firecrawl `/v2/search`，并返回一个由 object 组成的 JSON 数组，每个 object 都包含 `snippet` 和 `uri`。空数组表示没有结果。
+4. Gemini 将这些 snippet 作为 grounding 来源，并在响应的 `groundingMetadata` 中列出。
+
+## 前提条件 {#prerequisites}
+
+* 一个 [Firecrawl API 密钥](https://www.firecrawl.dev/app/api-keys)
+* 一个已启用计费、Vertex AI 和 Cloud Run 的 Google Cloud 项目，并已通过 `gcloud` CLI 登录
+* 一个支持基于你的搜索 API 进行 grounding (接地) 的 Gemini 模型。Google 在上方链接的页面中列出了支持的模型，`gemini-2.5-flash` 就是其中之一。
+
+## 构建适配器 {#build-the-adapter}
+
+创建一个文件夹，并在其中添加以下三个文件。
+
+<CodeGroup>
+  ```python app.py
+  """基于 Firecrawl /v2/search 的 Gemini “Grounding with your search API” 适配器。"""
+  import hmac
+  import os
+  import re
+
+  import httpx
+  from flask import Flask, jsonify, request
+
+  API_URL = os.environ.get("FIRECRAWL_API_URL", "https://api.firecrawl.dev")
+  INTEGRATION_TAG = "_vertex_grounding"
+  LIMIT = int(os.environ.get("RESULT_LIMIT", "10"))
+  SNIPPET_CHARS = int(os.environ.get("SNIPPET_CHARS", "1200"))
+  SNIPPET_MODE = os.environ.get("SNIPPET_MODE", "description")
+  GATEWAY_KEY = os.environ.get("GATEWAY_KEY", "")
+  ENV_FIRECRAWL_KEY = os.environ.get("FIRECRAWL_API_KEY", "")
+  TIMEOUT = float(os.environ.get("FIRECRAWL_TIMEOUT", "20"))
+  MAX_QUERY_CHARS = 500
+
+  app = Flask(__name__)
+  client = httpx.Client(timeout=TIMEOUT)
+
+
+  def resolve_firecrawl_key(supplied):
+      """返回要使用的 Firecrawl API 密钥；若调用方无权访问，则返回 None。"""
+      if not supplied:
+          return None
+      if GATEWAY_KEY:
+          if ENV_FIRECRAWL_KEY and hmac.compare_digest(supplied, GATEWAY_KEY):
+              return ENV_FIRECRAWL_KEY
+          return None
+      return supplied
+
+
+  def excerpt(text, limit):
+      text = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", text or "")
+      text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
+      text = re.sub(r"[#*_>|`]+", " ", text)
+      text = re.sub(r"\s+", " ", text).strip()
+      if len(text) <= limit:
+          return text
+      return text[:limit].rsplit(" ", 1)[0] + "..."
+
+
+  def to_grounding(item):
+      uri = item.get("url")
+      if not uri:
+          return None
+      source = item.get("markdown") if SNIPPET_MODE == "markdown" else None
+      snippet = excerpt(source or item.get("description") or item.get("title"), SNIPPET_CHARS)
+      return {"snippet": snippet, "uri": uri} if snippet else None
+
+
+  @app.get("/healthz")
+  def healthz():
+      return {"ok": True}
+
+
+  @app.post("/")
+  @app.post("/search")
+  @app.post("/v0/search")
+  def search():
+      key = resolve_firecrawl_key(request.args.get("key", ""))
+      if not key:
+          return jsonify({"error": "Missing or invalid key"}), 401
+      body = request.get_json(silent=True)
+      query = body.get("query") if isinstance(body, dict) else None
+      if not isinstance(query, str) or not query.strip():
+          return jsonify({"error": "JSON body with a non-empty 'query' string is required"}), 400
+
+      payload = {"query": query.strip()[:MAX_QUERY_CHARS], "limit": LIMIT, "integration": INTEGRATION_TAG}
+      if SNIPPET_MODE == "markdown":
+          payload["scrapeOptions"] = {"formats": ["markdown"], "onlyMainContent": True}
+      try:
+          resp = client.post(
+              f"{API_URL}/v2/search",
+              json=payload,
+              headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+          )
+      except httpx.HTTPError:
+          return jsonify({"error": "Firecrawl request failed"}), 502
+      if resp.status_code in (401, 403):
+          return jsonify({"error": "Missing or invalid key"}), 401
+      if resp.status_code == 429:
+          return jsonify({"error": "Firecrawl rate limit reached"}), 429
+      if resp.status_code != 200:
+          return jsonify({"error": f"Firecrawl returned {resp.status_code}"}), 502
+
+      web = ((resp.json().get("data") or {}).get("web")) or []
+      results = [r for r in map(to_grounding, web) if r]
+      return jsonify(results)
+  ```
+
+  ```text requirements.txt
+  flask>=3.0,<4
+  gunicorn>=22.0
+  httpx>=0.27,<1
+  ```
+
+  ```dockerfile Dockerfile
+  FROM python:3.12-slim
+  ENV PYTHONUNBUFFERED=1
+  WORKDIR /app
+  COPY requirements.txt .
+  RUN pip install --no-cache-dir -r requirements.txt
+  COPY app.py .
+  RUN useradd --create-home app
+  USER app
+  CMD exec gunicorn --bind 0.0.0.0:${PORT:-8080} --workers 1 --threads 8 --timeout 60 app:app
+  ```
+</CodeGroup>
+
+适配器从 `?key=` 读取密钥，并将其作为 Bearer 令牌发送给 Firecrawl，因此你提供给 Gemini 的 `apiKeyString` 就是你的 Firecrawl API 密钥。密钥缺失或被拒绝时，返回 `401`。Dockerfile 启动 gunicorn 时不启用访问日志，因为访问日志会记录 `?key=` 的值。适配器也从不记录查询内容或密钥。
+
+## 部署到 Cloud Run {#deploy-to-cloud-run}
+
+```bash
+PROJECT_ID=your-project-id
+REGION=us-central1
+
+gcloud run deploy firecrawl-grounding \
+  --project "$PROJECT_ID" \
+  --region "$REGION" \
+  --source . \
+  --allow-unauthenticated
+```
+
+该命令会输出一个服务 URL，在其后加上 `/v0/search` 即为你的端点。由于 Gemini 无法为此调用附加 Google 身份令牌，该服务需允许未经身份验证的请求，并依靠 `?key=` 检查进行访问控制。
+
+### 避免 Firecrawl API 密钥出现在 URL 中 {#keep-the-firecrawl-key-out-of-urls}
+
+Cloud Run 会为每个服务保留请求日志，其中会记录请求 URL。为避免 Firecrawl API 密钥被写入日志，请以 gateway 模式运行适配器：由您选择一个共享密钥供 Gemini 发送，适配器则从 Secret Manager 中读取 Firecrawl API 密钥。
+
+```bash
+PROJECT_ID=your-project-id
+REGION=us-central1
+
+printf %s "$FIRECRAWL_API_KEY" | gcloud secrets create firecrawl-api-key --project "$PROJECT_ID" --data-file=-
+openssl rand -hex 24 | tr -d '\n' | gcloud secrets create grounding-gateway-key --project "$PROJECT_ID" --data-file=-
+
+gcloud run deploy firecrawl-grounding \
+  --project "$PROJECT_ID" \
+  --region "$REGION" \
+  --source . \
+  --allow-unauthenticated \
+  --set-secrets "FIRECRAWL_API_KEY=firecrawl-api-key:latest,GATEWAY_KEY=grounding-gateway-key:latest"
+```
+
+在这两个密钥上，为该服务的运行时服务账户授予 `roles/secretmanager.secretAccessor` 角色。在此模式下，`apiKeyString` 即为网关密钥，可通过 `gcloud secrets versions access latest --secret grounding-gateway-key` 读取。
+
+### 检查端点 {#check-the-endpoint}
+
+```bash
+ENDPOINT=https://YOUR_SERVICE_URL/v0/search
+
+curl -sS -X POST "$ENDPOINT?key=$FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "who won Super Bowl LX"}'
+```
+
+你会获取到一个 object 数组，每个 object 都包含 `snippet` 和 `uri`。如果请求中未带 `?key=`，服务会返回 `401`。
+
+## 为 Gemini 请求接入 grounding {#ground-a-gemini-request}
+
+<CodeGroup>
+  ```python Python (google-genai)
+  from google import genai
+  from google.genai.types import ExternalApi, GenerateContentConfig, Retrieval, Tool
+
+  client = genai.Client(vertexai=True, project="your-project-id", location="global")
+
+  tool = Tool(
+      retrieval=Retrieval(
+          external_api=ExternalApi(
+              api_spec="SIMPLE_SEARCH",
+              endpoint="https://YOUR_SERVICE_URL/v0/search",
+              api_auth={"apiKeyConfig": {"apiKeyString": "YOUR_KEY"}},
+          )
+      )
+  )
+
+  response = client.models.generate_content(
+      model="gemini-2.5-flash",
+      contents="Who won Super Bowl LX?",
+      config=GenerateContentConfig(tools=[tool]),
+  )
+
+  print(response.text)
+  print(response.candidates[0].grounding_metadata.grounding_chunks)
+  ```
+
+  ```bash REST
+  PROJECT_ID=your-project-id
+  LOCATION=global
+  MODEL_ID=gemini-2.5-flash
+
+  cat > request.json <<'EOF'
+  {
+    "contents": [{
+      "role": "user",
+      "parts": [{ "text": "Who won Super Bowl LX?" }]
+    }],
+    "tools": [{
+      "retrieval": {
+        "externalApi": {
+          "api_spec": "SIMPLE_SEARCH",
+          "endpoint": "https://YOUR_SERVICE_URL/v0/search",
+          "apiAuth": {
+            "apiKeyConfig": { "apiKeyString": "YOUR_KEY" }
+          }
+        }
+      }
+    }]
+  }
+  EOF
+
+  curl -X POST \
+    -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+    -H "Content-Type: application/json" \
+    -d `request.json \
+    "https://aiplatform.googleapis.com/v1beta1/projects/$PROJECT_ID/locations/$LOCATION/publishers/google/models/$MODEL_ID:generateContent"
+  ```
+</CodeGroup>
+
+将 `YOUR_SERVICE_URL` 替换为你的服务主机地址，将 `YOUR_KEY` 替换为你的 Firecrawl API 密钥；如果以 gateway 模式部署，则替换为 gateway 密钥。如需使用 `global` 以外的区域位置，请参照 Google 的参考文档，将主机设为 `LOCATION-aiplatform.googleapis.com`。
+
+Gemini 所用的信息来源位于响应的 `candidates[0].groundingMetadata.groundingChunks` 下。在 REST 响应中，每个 chunk 的 `retrievedContext` 都包含你的适配器返回的 `uri` 和 `snippet`。
+
+## 选项 {#options}
+
+请在 Cloud Run 服务上将以下选项设置为环境变量，例如：`gcloud run services update firecrawl-grounding --update-env-vars RESULT_LIMIT=5`。
+
+| 变量                  | 默认值           | 含义                                                          |
+| ------------------- | ------------- | ----------------------------------------------------------- |
+| `RESULT_LIMIT`      | `10`          | 每次查询向 Firecrawl 请求的结果数，取值范围为 1 到 100。                       |
+| `SNIPPET_CHARS`     | `1200`        | snippet 的最大长度，按单词边界截断。                                      |
+| `SNIPPET_MODE`      | `description` | `description` 使用搜索结果的描述。`markdown` 会额外抓取每个结果，并使用其主要内容的开头部分。 |
+| `FIRECRAWL_TIMEOUT` | `20`          | 等待 Firecrawl 响应的超时秒数。                                       |
+| `GATEWAY_KEY`       | 未设置           | 启用 Gateway 模式。                                              |
+
+### 选择 snippet {#choosing-a-snippet}
+
+Gemini 以 snippet 文本作为回答依据，因此 snippet 的内容比链接更重要。默认使用 Firecrawl 搜索返回的描述。搜索默认会在该字段中返回[与 query 相关的重点摘录](/zh/features/search-highlights)，无法生成时则回退为页面的普通描述，因此每个 snippet 都是针对该 query 挑选出的段落。`markdown` 模式会截取每个结果正文的开头部分，而在某些网站上，这部分可能是文章前面的横幅或菜单，因此通常效果较差。此外，它还会让每个 Firecrawl 响应大幅增大。仅当你关注的结果缺少有用的描述时，才建议使用该模式。
+
+## 限制与行为 {#limits-and-behavior}
+
+* Google 允许单次生成请求最多使用 10 个 grounding 信息来源，你也可以将此工具与 Google Search 等其他工具搭配使用。
+* Google 的页面未说明你的端点的最大响应大小或超时时间。请确保适配器响应迅速，并尽量缩短 snippet。在默认设置下，一个响应最多包含 10 个 snippet，每个不超过 1,200 个字符。
+* Firecrawl 搜索支持最长 500 个字符的查询，超出部分会被适配器截断。
+* 每个查询对应一次 Firecrawl 搜索请求，因此 Gemini 发起的每次搜索都会计入你的[限流](/zh/rate-limits)和[计费](/zh/billing)。
+* Gemini 每决定执行一次搜索，就会调用一次适配器；单个请求可能触发多次调用。
+
+| 状态    | 场景                                               |
+| ----- | ------------------------------------------------ |
+| `200` | 由 `snippet` 和 `uri` object 组成的 JSON 数组；无结果时返回空数组 |
+| `400` | 请求体不是包含非空 `query` string 的 JSON                  |
+| `401` | 缺少键、gateway 密钥错误，或 Firecrawl 拒绝了该键               |
+| `429` | 已达到 Firecrawl 限流上限                               |
+| `502` | 无法连接 Firecrawl，或 Firecrawl 返回了其他错误               |
+
+## 相关内容 {#related}
+
+* [搜索](/zh/features/search)
+* [Gemini](/zh/developer-guides/llm-sdks-and-frameworks/gemini)
+* [智能体开发套件 (ADK) ](/zh/developer-guides/llm-sdks-and-frameworks/google-adk)
