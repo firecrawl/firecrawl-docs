@@ -1,0 +1,66 @@
+---
+title: "在 Vercel AI SDK 中通过 MCP 进行网页搜索与抓取"
+description: "将 Vercel AI SDK 的 MCP 客户端连接到 Firecrawl 远程托管的 MCP 服务器，实现网络搜索和抓取"
+sidebarTitle: "AI SDK MCP 客户端"
+---
+
+将 [Vercel AI SDK](https://ai-sdk.dev) 的 MCP 客户端连接到 Firecrawl 远程托管的 MCP 服务器，即可在 `generateText` 和 `streamText` 中使用 Firecrawl 的工具。
+
+<Note>
+  如果希望直接使用封装为 AI SDK 工具的 Firecrawl 工具，而不是通过 MCP 连接，请参见 [Vercel AI SDK 指南](/zh/developer-guides/llm-sdks-and-frameworks/vercel-ai-sdk)。
+</Note>
+
+## 快速配置 {#quick-setup}
+
+[创建 Firecrawl API 密钥](https://www.firecrawl.dev/app/api-keys)，然后安装 AI SDK 及其 MCP 包：
+
+```bash
+npm install ai @ai-sdk/mcp
+export FIRECRAWL_API_KEY="fc-YOUR-API-KEY"
+```
+
+使用 HTTP 传输创建客户端，并在 `Authorization` 标头中填入你的键：
+
+```typescript
+import { createMCPClient } from '@ai-sdk/mcp';
+
+const mcpClient = await createMCPClient({
+  transport: {
+    type: 'http',
+    url: 'https://mcp.firecrawl.dev/v2/mcp',
+    headers: { Authorization: `Bearer ${process.env.FIRECRAWL_API_KEY}` },
+  },
+});
+
+const tools = await mcpClient.tools();
+console.log(Object.keys(tools));
+```
+
+该列表包括 `firecrawl_scrape`、`firecrawl_search`、`firecrawl_map` 和 `firecrawl_crawl`。按照 [AI SDK MCP 指南](https://ai-sdk.dev/docs/ai-sdk-core/mcp-tools) 中的说明，将 `tools` 传给 `generateText` 或 `streamText`，并在响应结束后调用 `await mcpClient.close()` 关闭客户端。
+
+想使用本地进程？可以使用 AI SDK 的 stdio 传输，运行 `npx -y firecrawl-mcp`，并在 `env` 中设置 `FIRECRAWL_API_KEY`。不过，AI SDK 建议在生产环境中使用 HTTP。
+
+## 试一试 {#try-it}
+
+直接调用一个工具，确认连接是否正常：
+
+```typescript
+const result = await tools.firecrawl_scrape.execute(
+  { url: 'https://firecrawl.dev', formats: ['markdown'], onlyMainContent: true },
+  { toolCallId: 'test', messages: [] },
+);
+console.log(result.content[0].text.slice(0, 300));
+await mcpClient.close();
+```
+
+然后将这些工具提供给模型，并使用类似下面的 prompt：
+
+```text
+进行网页搜索，查找最新的 Next.js 版本发布说明，并对各信息来源进行总结。
+```
+
+## 故障排除 {#troubleshooting}
+
+* **身份验证错误：** 确认运行客户端的进程中已设置 `FIRECRAWL_API_KEY`，且标头值为 `Bearer <key>`。
+* **重定向错误：** AI SDK 客户端默认拒绝重定向；请使用完整的 URL `https://mcp.firecrawl.dev/v2/mcp`。
+* **脚本结束后句柄未释放：** 工具使用完毕后，请调用 `mcpClient.close()`。
