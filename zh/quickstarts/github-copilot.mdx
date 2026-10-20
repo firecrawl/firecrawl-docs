@@ -1,0 +1,158 @@
+---
+title: "在 GitHub Copilot 中使用 MCP 网页搜索与抓取"
+description: "为 GitHub Copilot CLI、VS Code 中的 Copilot 以及 Copilot 编程智能体添加 Firecrawl 网页抓取与搜索功能"
+sidebarTitle: "GitHub Copilot"
+---
+
+通过远程托管的 MCP 服务器，将 [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli) 或 [VS Code 中的 Copilot](https://code.visualstudio.com/docs/copilot/overview) 连接到 Firecrawl，然后使用你的 Firecrawl 账户登录。[Copilot 编程智能体](#copilot-coding-agent)则使用 API 密钥进行连接。
+
+下方的服务器 URL 是客户端配置值，不能直接在浏览器中打开。
+
+## Copilot CLI {#copilot-cli}
+
+### 1. 添加 Firecrawl {#1-add-firecrawl}
+
+```bash
+copilot mcp add --transport http firecrawl https://mcp.firecrawl.dev/v2/mcp-oauth
+```
+
+这会将该服务器配置写入 `~/.copilot/mcp-config.json`。你也可以在交互式会话中运行 `/mcp add` 并选择 **HTTP** 类型，或直接编辑该文件：
+
+```json ~/.copilot/mcp-config.json
+{
+  "mcpServers": {
+    "firecrawl": {
+      "type": "http",
+      "url": "https://mcp.firecrawl.dev/v2/mcp-oauth",
+      "tools": ["*"]
+    }
+  }
+}
+```
+
+### 2. 登录并验证 {#2-sign-in-and-verify}
+
+```bash
+copilot
+```
+
+首次连接时，Copilot CLI 会在浏览器中打开 Firecrawl 登录流程，你需要在此选择团队并授权连接。输入 `/mcp`，确认 `firecrawl` 已连接。
+
+### 改用 API 密钥 {#use-an-api-key-instead}
+
+如需无人值守运行，请[创建 Firecrawl API 密钥](https://www.firecrawl.dev/app/api-keys)，将其导出为环境变量 `FIRECRAWL_API_KEY`，然后添加 API 密钥端点，并配置 bearer 标头：
+
+```bash
+copilot mcp add --transport http \
+  --header "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  firecrawl https://mcp.firecrawl.dev/v2/mcp
+```
+
+该键存储在 `~/.copilot/mcp-config.json` 中，请勿将此文件提交到版本控制系统。
+
+## VS Code {#vs-code}
+
+### 1. 添加 Firecrawl {#1-add-firecrawl-2}
+
+在命令面板中运行 **MCP: Add Server** 并选择 **HTTP**，或者在工作区中创建 `.vscode/mcp.json`：
+
+```json .vscode/mcp.json
+{
+  "servers": {
+    "firecrawl": {
+      "type": "http",
+      "url": "https://mcp.firecrawl.dev/v2/mcp-oauth"
+    }
+  }
+}
+```
+
+如需在所有工作区中使用该服务器，请运行 **MCP: Open User Configuration**，并在其中添加相同的条目。
+
+### 2. 登录并验证 {#2-sign-in-and-verify-2}
+
+在 `mcp.json` 编辑器中或通过 **MCP: List Servers** 启动服务器。VS Code 请求身份验证时，选择允许，然后在浏览器中完成 Firecrawl 登录。接着在 **Agent** 模式下打开 Copilot Chat，点击工具图标，确认列表中已包含 Firecrawl 的工具。
+
+### 改用 API 密钥 {#use-an-api-key-instead-2}
+
+使用 API 密钥端点，并让 VS Code 提示你输入密钥。这样密钥会被安全存储，而不会以明文写入文件：
+
+```json .vscode/mcp.json
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "firecrawl-api-key",
+      "description": "Firecrawl API key",
+      "password": true
+    }
+  ],
+  "servers": {
+    "firecrawl": {
+      "type": "http",
+      "url": "https://mcp.firecrawl.dev/v2/mcp",
+      "headers": {
+        "Authorization": "Bearer ${input:firecrawl-api-key}"
+      }
+    }
+  }
+}
+```
+
+## Copilot 编程智能体 {#copilot-coding-agent}
+
+Copilot 编程智能体 (也称为 Copilot 云端智能体) 可在 GitHub 中处理议题和拉取请求。由于其仓库 MCP 设置不支持使用 OAuth 的远程服务器，此配置方式会将 Firecrawl API 密钥存储为 Agents 密钥 (secret) ，并通过标头发送。
+
+### 前提条件 {#requirements}
+
+* 付费的 GitHub Copilot 套餐，且已为该仓库启用编程智能体。
+* 仓库管理员权限，用于编辑 MCP 设置和 Agents 密钥。
+* 一个 [Firecrawl API 密钥](https://www.firecrawl.dev/app/api-keys)。
+
+### 设置步骤 {#set-it-up}
+
+1. 在你的仓库中，依次打开 **Settings** &gt; **Secrets and variables** &gt; **Agents**。
+2. 点击 **New repository secret**，将其命名为 `COPILOT_MCP_FIRECRAWL_API_KEY`，粘贴你的 Firecrawl API 密钥并保存。Copilot 只会将名称以 `COPILOT_MCP_` 开头的 Agents 密钥传递给 MCP 服务器。
+3. 依次打开 **Settings** &gt; **Copilot** &gt; **MCP servers**。
+4. 将以下配置粘贴到 **MCP configuration** 中，然后点击 **Save MCP configuration**：
+
+```json
+{
+  "mcpServers": {
+    "firecrawl": {
+      "type": "http",
+      "url": "https://mcp.firecrawl.dev/v2/mcp",
+      "headers": {
+        "Authorization": "Bearer $COPILOT_MCP_FIRECRAWL_API_KEY"
+      },
+      "tools": ["firecrawl_search", "firecrawl_scrape", "firecrawl_map"]
+    }
+  }
+}
+```
+
+5. 将一个议题分配给 Copilot。待其拉取请求出现后，选择 **View session**，在日志中展开 **Start MCP Servers** 步骤，确认其中列出了 Firecrawl 工具。
+
+<Warning>
+  Copilot 会直接使用 `tools` 列表中的工具，无需请求批准。请只在列表中保留智能体所需的工具。仅当你希望启用所有 Firecrawl 工具时，才使用 `"*"`。
+</Warning>
+
+## 试一试 {#try-it}
+
+```text
+进行网页搜索，查找最新的 Next.js App Router 版本发布说明，并汇总各信息来源的内容。
+```
+
+```text
+抓取 https://docs.firecrawl.dev，并列出其一级章节。
+```
+
+完整的 Firecrawl MCP 工具列表请参见[选择工具](/zh/mcp-server/tools)。
+
+## 故障排除 {#troubleshooting}
+
+* **工具未显示：** 确认只配置了一个 `firecrawl` 服务器，然后重启 Copilot CLI；或者在 VS Code 中运行 **MCP: List Servers** 并重启该服务器。
+* **需要重新登录或返回 `401`：** 重启服务器并完成浏览器登录。在完成身份验证之前，直接向 OAuth 服务器发送请求会返回 `401`，这属于正常现象。
+* **使用 API 密钥的连接返回 `401`：** 确认 URL 为 `https://mcp.firecrawl.dev/v2/mcp` (而非 `/v2/mcp-oauth`) ，且标头为 `Authorization: Bearer <FIRECRAWL_API_KEY>`。
+* **组织策略：** 如果你的 GitHub 组织限制在 Copilot 中使用 MCP 服务器，则需由管理员允许 Firecrawl 后才能连接。
+* **编程智能体：会话日志中缺少 Firecrawl 工具：** 确认 secret 名称与 `COPILOT_MCP_FIRECRAWL_API_KEY` 完全一致，且它是 Agents 密钥，而非 Actions secret。

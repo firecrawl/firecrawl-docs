@@ -1,0 +1,66 @@
+---
+title: "Vercel AI SDK での MCP によるWeb検索とスクレイピング"
+description: "Vercel AI SDK の MCP クライアントを Firecrawl のホスト型MCPサーバーに接続し、Web検索とスクレイピングを行います"
+sidebarTitle: "AI SDK MCP クライアント"
+---
+
+[Vercel AI SDK](https://ai-sdk.dev) の MCP クライアントを Firecrawl のホスト型MCPサーバーに接続し、`generateText` や `streamText` から Firecrawl のツールを使用します。
+
+<Note>
+  MCP 接続ではなく、AI SDK のツールとしてパッケージ化された Firecrawl ツールを使いたい場合は、[Vercel AI SDK ガイド](/ja/developer-guides/llm-sdks-and-frameworks/vercel-ai-sdk)を参照してください。
+</Note>
+
+## クイックセットアップ {#quick-setup}
+
+[Firecrawl APIキーを作成](https://www.firecrawl.dev/app/api-keys)したら、AI SDK とその MCP パッケージをインストールします。
+
+```bash
+npm install ai @ai-sdk/mcp
+export FIRECRAWL_API_KEY="fc-YOUR-API-KEY"
+```
+
+HTTP トランスポートを使用し、`Authorization` ヘッダーに API キーを指定してクライアントを作成します。
+
+```typescript
+import { createMCPClient } from '@ai-sdk/mcp';
+
+const mcpClient = await createMCPClient({
+  transport: {
+    type: 'http',
+    url: 'https://mcp.firecrawl.dev/v2/mcp',
+    headers: { Authorization: `Bearer ${process.env.FIRECRAWL_API_KEY}` },
+  },
+});
+
+const tools = await mcpClient.tools();
+console.log(Object.keys(tools));
+```
+
+このリストには `firecrawl_scrape`、`firecrawl_search`、`firecrawl_map`、`firecrawl_crawl` が含まれます。[AI SDK MCP ガイド](https://ai-sdk.dev/docs/ai-sdk-core/mcp-tools)の説明に従って `tools` を `generateText` または `streamText` に渡し、レスポンスが完了したら `await mcpClient.close()` でクライアントを閉じてください。
+
+ローカルプロセスを使用したい場合は、AI SDK の stdio トランスポートで `npx -y firecrawl-mcp` を実行し、`env` に `FIRECRAWL_API_KEY` を設定してください。なお、AI SDK では本番環境での HTTP の使用を推奨しています。
+
+## 試してみる {#try-it}
+
+ツールを直接呼び出して、接続を確認します。
+
+```typescript
+const result = await tools.firecrawl_scrape.execute(
+  { url: 'https://firecrawl.dev', formats: ['markdown'], onlyMainContent: true },
+  { toolCallId: 'test', messages: [] },
+);
+console.log(result.content[0].text.slice(0, 300));
+await mcpClient.close();
+```
+
+次に、以下のようなプロンプトを添えて、ツールをモデルに渡します。
+
+```text
+ウェブを検索して Next.js の最新リリースノートを探し、各ソースの内容を要約してください。
+```
+
+## トラブルシューティング {#troubleshooting}
+
+* **認証エラー:** クライアントを実行するプロセスで `FIRECRAWL_API_KEY` が設定されていること、およびヘッダーの値が `Bearer <key>` になっていることを確認してください。
+* **リダイレクトエラー:** AI SDK クライアントはデフォルトでリダイレクトを拒否します。URL は `https://mcp.firecrawl.dev/v2/mcp` を正確に指定してください。
+* **スクリプト終了後もハンドルが開いたままになる:** ツールを使い終わったら `mcpClient.close()` を呼び出してください。

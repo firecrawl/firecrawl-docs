@@ -1,0 +1,72 @@
+---
+sidebarTitle: "OpenAI Responses API"
+title: "OpenAIエージェントでMCPによるウェブ検索とスクレイピングを利用する"
+description: "Responses APIのMCPツールを使って、OpenAIモデルでFirecrawlのウェブ検索とスクレイピングを利用できるようにします"
+---
+
+import AgentCapabilityCards from "/snippets/ja/shared/agent-capability-cards.mdx";
+
+Responses API でホスト型MCPサーバーをリモートの `mcp` ツールとして追加すると、OpenAI のモデルを Firecrawl に接続できます。OpenAI が Firecrawl のツール一覧を取得し、モデルはそれらのツールを呼び出してウェブを検索したり、ページの内容を読み取ったりします。
+
+<Note>
+  OpenAI のドキュメントによると、Agent Builder は 2026 年 11 月 30 日に提供終了となる予定です。このページで紹介するリモート MCP ツールは Agent Builder に依存しません。
+</Note>
+
+## 前提条件 {#requirements}
+
+* `OPENAI_API_KEY` に設定した OpenAI APIキーと、`openai` Python パッケージ
+* `FIRECRAWL_API_KEY` に設定した [Firecrawl APIキー](https://www.firecrawl.dev/app/api-keys)
+
+## クイックセットアップ {#quick-setup}
+
+`tools` リストに Firecrawl サーバーを追加します。`authorization` フィールドには Firecrawl APIキーを指定し、`allowed_tools` でモデルが呼び出せるツールを制限します。
+
+```python
+import os
+from openai import OpenAI
+
+client = OpenAI()
+
+response = client.responses.create(
+    model="gpt-6-astra",
+    tools=[
+        {
+            "type": "mcp",
+            "server_label": "firecrawl",
+            "server_description": "Search the web and read pages as Markdown.",
+            "server_url": "https://mcp.firecrawl.dev/v2/mcp",
+            "authorization": os.environ["FIRECRAWL_API_KEY"],
+            "allowed_tools": ["firecrawl_search", "firecrawl_scrape"],
+            "require_approval": "never",
+        }
+    ],
+    input="Search the web for the latest Next.js release notes and summarize the sources.",
+)
+
+print(response.output_text)
+```
+
+OpenAI は `authorization` の値を保存しないため、リクエストのたびに送信してください。データがサーバーに送信される前に各ツール呼び出しを確認したい場合は、`require_approval` を `"always"` に設定します。
+
+キーベースの接続について詳しくは、[APIキーを設定する](/ja/mcp-server/keyless#add-an-api-key)を参照してください。このセットアップでは OpenAI が MCP サーバーへの接続を代行するため、コードから Firecrawl API を直接呼び出すことはありません。
+
+## 試してみる {#try-it}
+
+```text
+ウェブを検索して TypeScript の最新リリースノートを探し、ソースの内容を要約してください。
+```
+
+```text
+https://firecrawl.dev をスクレイピングして、その機能を説明してください。
+```
+
+## できること {#what-you-can-do}
+
+<AgentCapabilityCards />
+
+## トラブルシューティング {#troubleshooting}
+
+* **ツールの一覧取得中にリクエストが失敗する:** `server_url` が `https://mcp.firecrawl.dev/v2/mcp` と完全に一致していること、およびスクリプトを実行する環境に `FIRECRAWL_API_KEY` が設定されていることを確認してください。
+* **サーバーが `401` を返す:** OpenAI はリクエスト間で `authorization` の値を保持しないため、キーを差し替えてからリクエストを再送信してください。
+* **ツールが見つからない:** `allowed_tools` にそのツール名を追加するか、`allowed_tools` を削除してサーバーが公開するすべてのツールをインポートしてください。
+* **モデルが Firecrawl を使用せずに回答する:** プロンプト内でツール名を明示してください(例: 「Use firecrawl&#95;search to find...」)。
