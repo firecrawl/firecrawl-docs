@@ -48,15 +48,19 @@ curl -X POST "https://api.firecrawl.dev/v2/search" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "site:docs.firecrawl.dev crawl webhooks",
-    "sources": [{"type": "web"}, {"type": "news"}],
+    "sources": [{"type": "web"}, {"type": "news"}, {"type": "alexandria"}],
     "categories": [{"type": "research"}],
+    "includeDomains": ["docs.firecrawl.dev"],
     "limit": 10,
     "tbs": "qdr:m",
     "location": "San Francisco,California,United States",
     "country": "US",
     "ignoreInvalidURLs": true,
+    "highlights": true,
     "timeout": 60000,
     "enterprise": ["anon"],
+    "domainTools": true,
+    "toolDetail": "compact",
     "scrapeOptions": {
       "formats": [
         "markdown",
@@ -76,6 +80,7 @@ curl -X POST "https://api.firecrawl.dev/v2/search" \
 Successful responses include `success`, `data`, optional `warning`, `id`, and `creditsUsed`.
 
 - `data.web`, `data.images`, `data.news`: result arrays; which keys appear depends on `sources` (by default only `data.web` is populated).
+- `data.tools`: discovered Alexandria tool contracts when `domainTools` is enabled.
 - Web and news items include fields such as `title`, `url`, and (when `scrapeOptions` / formats request it) `markdown`, `html`, `rawHtml`, `links`, `screenshot`, `audio`, `video`, and `metadata`.
 - Image items include fields such as `imageUrl`, `url`, and dimensions when available.
 - `warning`: optional human-readable notice.
@@ -96,15 +101,27 @@ Successful responses include `success`, `data`, optional `warning`, `id`, and `c
     - `{ "type": "web" }` with optional per-source `tbs` and `location`
     - `{ "type": "news" }`
     - `{ "type": "images" }`
+    - `{ "type": "alexandria" }`: Alexandria domain-tool discovery source
 
 - `categories`
   - Type: array of typed category objects
   - Use when: you want to filter results by category.
   - Confirmed object shapes:
     - `{ "type": "developer" }`
+    - `{ "type": "github" }`
     - `{ "type": "gov" }`
     - `{ "type": "research" }`
     - `{ "type": "pdf" }`
+
+- `includeDomains`
+  - Type: array of strings
+  - Use when: you want to restrict results to specific domains (hostnames only).
+  - Notes: mutually exclusive with `excludeDomains`.
+
+- `excludeDomains`
+  - Type: array of strings
+  - Use when: you want to exclude specific domains from results.
+  - Notes: mutually exclusive with `includeDomains`.
 
 - `limit`
   - Type: integer (minimum 1, maximum 100, default 5)
@@ -126,6 +143,14 @@ Successful responses include `success`, `data`, optional `warning`, `id`, and `c
   - Type: boolean (default false)
   - Use when: you want to drop URLs that cannot be scraped by other endpoints.
 
+- `highlights`
+  - Type: boolean (default true)
+  - Use when: you want query-relevant highlights generated for search results.
+
+- `safe`
+  - Type: boolean
+  - Use when: you want to filter explicit content (SafeSearch).
+
 - `timeout`
   - Type: integer (milliseconds, default 60000)
   - Use when: you need a request timeout in milliseconds.
@@ -136,6 +161,19 @@ Successful responses include `success`, `data`, optional `warning`, `id`, and `c
   - Values:
     - `"zdr"`: end-to-end zero data retention
     - `"anon"`: anonymized zero data retention
+
+- `threatProtection`
+  - Type: object
+  - Use when: you need per-request threat protection overrides (enterprise feature).
+
+- `domainTools`
+  - Type: boolean
+  - Use when: you want Alexandria domain-matched tool contracts included in results.
+
+- `toolDetail`
+  - Type: string (`"compact"`, `"summary"`, or `"full"`)
+  - Use when: you want to control how much tool contract detail is returned.
+  - Notes: `"compact"` returns provider, capability, and description; `"summary"` adds metadata; `"full"` includes contracts.
 
 - `scrapeOptions`
   - Type: object
@@ -181,6 +219,7 @@ curl -X POST "https://api.firecrawl.dev/v2/scrape" \
     "headers": {"User-Agent": "FirecrawlDocsBot/1.0"},
     "onlyMainContent": true,
     "waitFor": 1000,
+    "fastMode": true,
     "parsers": [{"type": "pdf", "mode": "auto", "maxPages": 5}],
     "actions": [
       {"type": "click", "selector": "#accept"},
@@ -194,6 +233,7 @@ curl -X POST "https://api.firecrawl.dev/v2/scrape" \
     "maxAge": 86400000,
     "minAge": 1,
     "storeInCache": true,
+    "checkPromptInjection": true,
     "profile": {"name": "docs-session", "saveChanges": true},
     "zeroDataRetention": false
   }'
@@ -204,6 +244,9 @@ curl -X POST "https://api.firecrawl.dev/v2/scrape" \
 Successful responses include `success` and `data`. Common `data` fields (depending on `formats` and options):
 
 - `markdown`, `summary`, `html`, `rawHtml`, `screenshot`, `audio`, `video`, `links`
+- `product`: product extraction data when the `product` format is requested
+- `menu`: menu extraction data when the `menu` format is requested
+- `pages`, `blocks`: per-page content when PDF parsers produce them
 - `actions`: when the request included scrape-time `actions`, contains ordered results such as `screenshots`, `scrapes`, `javascriptReturns`, and `pdfs`
 - `metadata`: page metadata (`title`, `sourceURL`, `url`, `statusCode`, `error`, and other extracted fields)
 - `warning`: optional extraction or formatting notice
@@ -229,13 +272,18 @@ Successful responses include `success` and `data`. Common `data` fields (dependi
     - `"changeTracking"`: change tracking output
     - `"json"`: JSON extraction
     - `"branding"`: branding profile output
+    - `"product"`: product data extraction
+    - `"menu"`: menu extraction
     - `"audio"`: audio extraction
     - `"video"`: video extraction
   - Format object fields:
     - `type`: one of the format strings above
     - `prompt`, `schema`: JSON extraction options for `type: "json"`
+    - `question`: for `type: "question"` (question-answer extraction)
+    - `query`: for `type: "highlights"` (relevant source-text extraction)
     - `modes`, `schema`, `prompt`, `tag`: change tracking options for `type: "changeTracking"`
     - `fullPage`, `quality`, `viewport`: screenshot options for `type: "screenshot"`
+    - `selectors`: array of `{selector, attribute}` for `type: "attributes"`
 
 - `headers`
   - Type: object
@@ -264,6 +312,10 @@ Successful responses include `success` and `data`. Common `data` fields (dependi
 - `mobile`
   - Type: boolean
   - Use when: you want a mobile viewport.
+
+- `fastMode`
+  - Type: boolean
+  - Use when: you want faster scrapes with reduced fidelity.
 
 - `parsers`
   - Type: array of parser names (`"pdf"`, `"image"`) or parser objects
@@ -305,7 +357,7 @@ Successful responses include `success` and `data`. Common `data` fields (dependi
 - `proxy`
   - Type: string
   - Use when: you need proxy control.
-  - Confirmed values: `"basic"`, `"enhanced"`, `"auto"`
+  - Confirmed values: `"basic"`, `"stealth"`, `"enhanced"`, `"auto"`
 
 - `maxAge`
   - Type: number
@@ -319,9 +371,38 @@ Successful responses include `success` and `data`. Common `data` fields (dependi
   - Type: boolean
   - Use when: you want Firecrawl to cache the result.
 
+- `lockdown`
+  - Type: boolean
+  - Use when: you want to serve only previously cached results, never make outbound requests.
+
 - `profile`
   - Type: object with `name` and optional `saveChanges`
   - Use when: you want a persistent browser profile shared across scrapes and interactions.
+
+- `checkPromptInjection`
+  - Type: boolean
+  - Use when: you want to scan page content for prompt injection before LLM-backed formats run. Adds 4 credits.
+
+- `redactPII`
+  - Type: boolean or object
+  - Use when: you want to redact personally identifiable information from returned content.
+  - Object form: `{ "mode": "accurate" | "aggressive" | "fast", "entities": ["PERSON", "EMAIL", "PHONE", "LOCATION", "FINANCIAL", "SECRET"], "replaceStyle": "tag" | "mask" | "remove" }`
+
+- `auditMetadata`
+  - Type: object with `username`
+  - Use when: you want user attribution included with SIEM logging events.
+
+- `threatProtection`
+  - Type: object
+  - Use when: you need per-request threat protection overrides (enterprise feature).
+
+- `domainTools`
+  - Type: boolean
+  - Use when: you want Alexandria domain-matched tool contracts included in the response.
+
+- `toolDetail`
+  - Type: string (`"compact"`, `"summary"`, or `"full"`)
+  - Use when: you want to control how much tool contract detail is returned.
 
 - `zeroDataRetention`
   - Type: boolean
@@ -371,6 +452,13 @@ curl -X POST "https://api.firecrawl.dev/v2/scrape/<jobId>/interact" \
   - Type: string (required in OpenAPI; min length 1, max length 100000)
   - Use when: you want to run code in the scrape-bound browser sandbox.
 
+- `prompt` (JSON body)
+  - Type: string
+  - Use when: you want the browser agent to follow a natural-language instruction instead of code.
+  - Notes: not in `v2-openapi.json` but accepted by the server and documented in SDK clients.
+
+- At least one of `code` or `prompt` must be provided. Several SDKs enforce this client-side.
+
 - `language` (JSON body)
   - Type: string
   - Use when: you need a specific runtime.
@@ -382,7 +470,7 @@ curl -X POST "https://api.firecrawl.dev/v2/scrape/<jobId>/interact" \
 
 ### Response
 
-Successful responses include `success` plus execution fields such as `stdout`, `result` (alias of stdout), `stderr`, `exitCode`, `killed`, and `error` (nullable).
+Successful responses include `success` plus execution fields such as `stdout`, `result` (alias of stdout), `stderr`, `exitCode`, `killed`, `output` (aggregated output from agent prompt execution), and `error` (nullable).
 
 ### DELETE /scrape/{jobId}/interact
 
@@ -485,11 +573,13 @@ curl -X POST "https://api.firecrawl.dev/v2/support/docs-search" \
 
 - Search result rows are nested under `data.web`, `data.images`, or `data.news`, not as a flat `data` array.
 - Use `POST /scrape/{jobId}/interact` for multi-step browser workflows; scrape `actions` are best for small pre-scrape steps.
-- The published OpenAPI schema requires `code` for interact. Some SDKs and clients also accept a `prompt` field for natural-language instructions; that alias is not in `v2-openapi.json`.
+- The published OpenAPI schema requires `code` for interact. The server and most SDKs also accept a `prompt` field for natural-language instructions; that alias is not yet in `v2-openapi.json`.
+- `includeDomains` and `excludeDomains` are mutually exclusive on search requests.
+- Alexandria source (`"type": "alexandria"`) enables domain-tool discovery; combine with `domainTools` and `toolDetail` to control tool contract output.
 
 ## Source Of Truth
 
 - `firecrawl-docs/api-reference/v2-openapi.json`
 - `firecrawl/apps/js-sdk/firecrawl/src/v2/types.ts`
 - `firecrawl/apps/python-sdk/firecrawl/v2/types.py`
-- `firecrawl/apps/rust-sdk/src/v2/scrape.rs`
+- `firecrawl/apps/rust-sdk/src/scrape.rs`
