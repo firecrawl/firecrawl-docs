@@ -27,7 +27,7 @@ export const OpenAIInstallButtons = ({ includeClaude = false } = {}) => (
     <p className="fc-openai-install-hint">
       {includeClaude
         ? "Install, connect your Firecrawl account, and start a new chat."
-        : "One plugin for both. Install, connect your Firecrawl account, and start a new chat."}
+        : "One plugin for ChatGPT and Codex. Install it, connect your Firecrawl account, and start a new chat to search, scrape, and interact with the web."}
     </p>
   </div>
 );
