@@ -25,6 +25,10 @@
 # one shape that is not an identifier is a localized filename such as
 # `destino.mdx`, so tokens ending in a file extension or a bare TLD are
 # skipped.
+#
+# LOCALE_CHECK_CHANGED_FILES, when set, names a file listing changed paths, and
+# only localized pages in that list are checked. An English-only change always
+# drifts from the translations until the next sync, so it is not judged here.
 set -eu
 
 specs="api-reference/v2-openapi.json api-reference/v1-openapi.json api-reference/webhooks-openapi.json"
@@ -34,11 +38,13 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT INT TERM
 
 # Strings that are genuinely localizable, or English prose that happens to be
-# identifier-shaped. Extend this list rather than loosening the checks.
+# identifier-shaped, including sample-local variable names.
+# Extend this list rather than loosening the checks.
 cat >"$work/allow" <<'ALLOWLIST'
 exemplo.com
 ejemplo.com
 exemple.com
+dadosRaspados
 ALLOWLIST
 
 # API vocabulary: enum values and schema property names, restricted to
@@ -95,7 +101,8 @@ xargs awk '
   }
 ' <"$work/all-mdx" | sort -u >"$work/tokens"
 
-awk -F'\t' -v locales="$locales" '
+awk -F'\t' -v locales="$locales" -v scopefile="${LOCALE_CHECK_CHANGED_FILES:-}" '
+  BEGIN { if (scopefile != "") while ((getline path < scopefile) > 0) scope[path] = 1 }
   FNR == NR { allow[$0] = 1; next }
   FILENAME == vocabfile { vocab[$0] = 1; next }
   FILENAME == englishfile { english[$0] = 1; next }
@@ -114,6 +121,7 @@ awk -F'\t' -v locales="$locales" '
       source = file
       sub(locales, "", source)
       if (!(source in tokens)) continue
+      if (scopefile != "" && !(file in scope)) continue
 
       split(fenced[source], from_english, " ")
       for (k in from_english) {

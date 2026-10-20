@@ -16,6 +16,9 @@
 # localized snippet guides, and a check that cries wolf gets switched off.
 set -eu
 
+# The workflow scopes the real run; the fixtures choose their own scope.
+unset LOCALE_CHECK_CHANGED_FILES
+
 check="$(pwd)/scripts/check-locale-api-literals.sh"
 specs="$(pwd)/api-reference"
 
@@ -36,7 +39,7 @@ via their markdown content, and the snippet lives in snippets/custom.mdx.
 PAGE
 
 # Good: literals kept in English, the feature named as prose, a filename that
-# happens to be identifier-shaped.
+# happens to be identifier-shaped, and a sample-local variable.
 cat >"$work/repo/es/features/change-tracking.mdx" <<'PAGE'
 ---
 title: "Seguimiento de cambios"
@@ -44,6 +47,10 @@ title: "Seguimiento de cambios"
 
 Agrega `changeTracking` a tu array `formats`. El seguimiento de cambios compara
 las páginas por su contenido en markdown, y el fragmento vive en fragmento.mdx.
+
+```js
+const dadosRaspados = await app.scrapeUrl(url);
+```
 PAGE
 
 run_check() (
@@ -85,6 +92,25 @@ elif ! grep -q 'seguimientoDeCambios' "$work/out"; then
 elif grep -q 'fragmento.mdx' "$work/out"; then
   echo "selftest: a localized filename was reported as an API identifier:" >&2
   cat "$work/out" >&2
+  status=1
+fi
+
+# Scoped to a change: the same broken page passes when only its English source
+# changed, and fails when the localized page itself changed.
+printf 'features/change-tracking.mdx\n' >"$work/changed"
+rm -rf "$work/repo/.git"
+result="$(LOCALE_CHECK_CHANGED_FILES="$work/changed" run_check)"
+if [ "$result" != pass ]; then
+  echo "selftest: an English-only change was judged on untouched translations:" >&2
+  cat "$work/out" >&2
+  status=1
+fi
+
+printf 'es/features/change-tracking.mdx\n' >"$work/changed"
+rm -rf "$work/repo/.git"
+result="$(LOCALE_CHECK_CHANGED_FILES="$work/changed" run_check)"
+if [ "$result" != fail ]; then
+  echo "selftest: a changed localized page was not checked" >&2
   status=1
 fi
 
