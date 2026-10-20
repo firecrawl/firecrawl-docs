@@ -143,6 +143,25 @@ export const McpClientSelector = ({ variant = "agent", showSeeAll = true } = {})
         </>
       ),
     },
+    {
+      id: "droid",
+      name: "Droid",
+      detail: "Run in terminal",
+      icon: "/images/agent-clients/droid.svg",
+      iconClassName: "",
+      command: `droid mcp add firecrawl ${mcpUrl} --type http`,
+      description: "Run this in your terminal to add Firecrawl as a remote MCP server in Factory Droid.",
+      hint: isHuman ? (
+        <>
+          Then enter <code>/mcp</code> in Droid and complete the Firecrawl sign-in.
+        </>
+      ) : (
+        <>
+          Then run <code>droid mcp list</code> and confirm <strong>firecrawl</strong> is
+          connected.
+        </>
+      ),
+    },
   ];
   const [activeId, setActiveId] = useState(clients[0].id);
   const [copiedId, setCopiedId] = useState(null);
