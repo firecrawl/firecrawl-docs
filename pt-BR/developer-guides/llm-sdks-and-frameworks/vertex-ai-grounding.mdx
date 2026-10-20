@@ -1,0 +1,294 @@
+---
+title: "Fundamente o Gemini no Vertex AI com a busca do Firecrawl"
+description: "Implante um pequeno adaptador no Cloud Run para que o Gemini no Vertex AI possa fundamentar suas respostas em resultados de busca do Firecrawl"
+---
+
+O Gemini no Vertex AI pode chamar uma API de busca fornecida por você e usar os resultados como fontes de grounding. Neste guia, você vai implantar um adaptador simples no Cloud Run que converte a request do Gemini em uma [busca do Firecrawl](/pt-BR/features/search) e retorna os resultados no formato esperado pelo Gemini.
+
+<Note>
+  Na documentação do Google, esse recurso aparece como [Grounding with your search API](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/grounding/grounding-with-your-search-api). O adaptador deste guia é executado no seu próprio projeto do Google Cloud, e as buscas que ele faz são cobradas na sua conta do Firecrawl.
+</Note>
+
+## Como funciona {#how-it-works}
+
+1. Seu request ao Gemini inclui uma ferramenta de recuperação do tipo `externalApi` que aponta para o seu adaptador.
+2. Quando precisa de informações, o Gemini envia `POST {"query": "..."}` ao adaptador, com a sua chave anexada como `?key=`.
+3. O adaptador chama o endpoint `/v2/search` do Firecrawl e responde com um array JSON de objects, cada um com um `snippet` e um `uri`. Um array vazio indica que não há resultados.
+4. O Gemini usa os trechos como fontes de grounding e os lista em `groundingMetadata` na resposta.
+
+## Pré-requisitos {#prerequisites}
+
+* Uma [chave de API do Firecrawl](https://www.firecrawl.dev/app/api-keys)
+* Um projeto do Google Cloud com faturamento, Vertex AI e Cloud Run ativados, e a CLI `gcloud` autenticada
+* Um modelo Gemini compatível com grounding usando sua API de busca. O Google lista esses modelos na página indicada acima, e o `gemini-2.5-flash` é um deles.
+
+## Construa o adaptador {#build-the-adapter}
+
+Crie uma pasta com estes três arquivos.
+
+<CodeGroup>
+  ```python app.py
+  """Adaptador do Gemini "Grounding with your search API" baseado no Firecrawl /v2/search."""
+  import hmac
+  import os
+  import re
+
+  import httpx
+  from flask import Flask, jsonify, request
+
+  API_URL = os.environ.get("FIRECRAWL_API_URL", "https://api.firecrawl.dev")
+  INTEGRATION_TAG = "_vertex_grounding"
+  LIMIT = int(os.environ.get("RESULT_LIMIT", "10"))
+  SNIPPET_CHARS = int(os.environ.get("SNIPPET_CHARS", "1200"))
+  SNIPPET_MODE = os.environ.get("SNIPPET_MODE", "description")
+  GATEWAY_KEY = os.environ.get("GATEWAY_KEY", "")
+  ENV_FIRECRAWL_KEY = os.environ.get("FIRECRAWL_API_KEY", "")
+  TIMEOUT = float(os.environ.get("FIRECRAWL_TIMEOUT", "20"))
+  MAX_QUERY_CHARS = 500
+
+  app = Flask(__name__)
+  client = httpx.Client(timeout=TIMEOUT)
+
+
+  def resolve_firecrawl_key(supplied):
+      """Retorna a chave do Firecrawl a ser usada ou None quando o chamador não tem permissão."""
+      if not supplied:
+          return None
+      if GATEWAY_KEY:
+          if ENV_FIRECRAWL_KEY and hmac.compare_digest(supplied, GATEWAY_KEY):
+              return ENV_FIRECRAWL_KEY
+          return None
+      return supplied
+
+
+  def excerpt(text, limit):
+      text = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", text or "")
+      text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
+      text = re.sub(r"[#*_>|`]+", " ", text)
+      text = re.sub(r"\s+", " ", text).strip()
+      if len(text) <= limit:
+          return text
+      return text[:limit].rsplit(" ", 1)[0] + "..."
+
+
+  def to_grounding(item):
+      uri = item.get("url")
+      if not uri:
+          return None
+      source = item.get("markdown") if SNIPPET_MODE == "markdown" else None
+      snippet = excerpt(source or item.get("description") or item.get("title"), SNIPPET_CHARS)
+      return {"snippet": snippet, "uri": uri} if snippet else None
+
+
+  @app.get("/healthz")
+  def healthz():
+      return {"ok": True}
+
+
+  @app.post("/")
+  @app.post("/search")
+  @app.post("/v0/search")
+  def search():
+      key = resolve_firecrawl_key(request.args.get("key", ""))
+      if not key:
+          return jsonify({"error": "Missing or invalid key"}), 401
+      body = request.get_json(silent=True)
+      query = body.get("query") if isinstance(body, dict) else None
+      if not isinstance(query, str) or not query.strip():
+          return jsonify({"error": "JSON body with a non-empty 'query' string is required"}), 400
+
+      payload = {"query": query.strip()[:MAX_QUERY_CHARS], "limit": LIMIT, "integration": INTEGRATION_TAG}
+      if SNIPPET_MODE == "markdown":
+          payload["scrapeOptions"] = {"formats": ["markdown"], "onlyMainContent": True}
+      try:
+          resp = client.post(
+              f"{API_URL}/v2/search",
+              json=payload,
+              headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+          )
+      except httpx.HTTPError:
+          return jsonify({"error": "Firecrawl request failed"}), 502
+      if resp.status_code in (401, 403):
+          return jsonify({"error": "Missing or invalid key"}), 401
+      if resp.status_code == 429:
+          return jsonify({"error": "Firecrawl rate limit reached"}), 429
+      if resp.status_code != 200:
+          return jsonify({"error": f"Firecrawl returned {resp.status_code}"}), 502
+
+      web = ((resp.json().get("data") or {}).get("web")) or []
+      results = [r for r in map(to_grounding, web) if r]
+      return jsonify(results)
+  ```
+
+  ```text requirements.txt
+  flask>=3.0,<4
+  gunicorn>=22.0
+  httpx>=0.27,<1
+  ```
+
+  ```dockerfile Dockerfile
+  FROM python:3.12-slim
+  ENV PYTHONUNBUFFERED=1
+  WORKDIR /app
+  COPY requirements.txt .
+  RUN pip install --no-cache-dir -r requirements.txt
+  COPY app.py .
+  RUN useradd --create-home app
+  USER app
+  CMD exec gunicorn --bind 0.0.0.0:${PORT:-8080} --workers 1 --threads 8 --timeout 60 app:app
+  ```
+</CodeGroup>
+
+O adaptador lê a chave de `?key=` e a envia ao Firecrawl como token bearer; portanto, o `apiKeyString` que você fornece ao Gemini é a sua chave de API do Firecrawl. Se a chave estiver ausente ou for rejeitada, a resposta será `401`. O Dockerfile inicia o gunicorn sem log de acesso, já que esse log registraria o valor de `?key=`. O adaptador nunca registra a consulta nem a chave.
+
+## Implantar no Cloud Run {#deploy-to-cloud-run}
+
+```bash
+PROJECT_ID=your-project-id
+REGION=us-central1
+
+gcloud run deploy firecrawl-grounding \
+  --project "$PROJECT_ID" \
+  --region "$REGION" \
+  --source . \
+  --allow-unauthenticated
+```
+
+O comando exibe a URL do serviço. Seu endpoint é essa URL seguida de `/v0/search`. Como o Gemini não consegue anexar um token de identidade do Google a essa chamada, o serviço permite requisições não autenticadas, e a verificação de `?key=` funciona como controle de acesso.
+
+### Mantenha a chave do Firecrawl fora das URLs {#keep-the-firecrawl-key-out-of-urls}
+
+O Cloud Run mantém um log de requests para cada serviço, no qual as URLs dos requests ficam registradas. Para que sua chave do Firecrawl não apareça nesse log, execute o adaptador no modo gateway. Você escolhe um segredo compartilhado que o Gemini vai enviar, e o adaptador usa a chave do Firecrawl armazenada no Secret Manager.
+
+```bash
+PROJECT_ID=your-project-id
+REGION=us-central1
+
+printf %s "$FIRECRAWL_API_KEY" | gcloud secrets create firecrawl-api-key --project "$PROJECT_ID" --data-file=-
+openssl rand -hex 24 | tr -d '\n' | gcloud secrets create grounding-gateway-key --project "$PROJECT_ID" --data-file=-
+
+gcloud run deploy firecrawl-grounding \
+  --project "$PROJECT_ID" \
+  --region "$REGION" \
+  --source . \
+  --allow-unauthenticated \
+  --set-secrets "FIRECRAWL_API_KEY=firecrawl-api-key:latest,GATEWAY_KEY=grounding-gateway-key:latest"
+```
+
+Conceda à conta de serviço de runtime do serviço a função `roles/secretmanager.secretAccessor` em ambos os segredos. Nesse modo, `apiKeyString` é o segredo do gateway, que você pode ler com `gcloud secrets versions access latest --secret grounding-gateway-key`.
+
+### Verifique o endpoint {#check-the-endpoint}
+
+```bash
+ENDPOINT=https://YOUR_SERVICE_URL/v0/search
+
+curl -sS -X POST "$ENDPOINT?key=$FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "who won Super Bowl LX"}'
+```
+
+O retorno é um array de objects com `snippet` e `uri`. Sem `?key=`, o serviço responde com `401`.
+
+## Fundamentar uma request do Gemini {#ground-a-gemini-request}
+
+<CodeGroup>
+  ```python Python (google-genai)
+  from google import genai
+  from google.genai.types import ExternalApi, GenerateContentConfig, Retrieval, Tool
+
+  client = genai.Client(vertexai=True, project="your-project-id", location="global")
+
+  tool = Tool(
+      retrieval=Retrieval(
+          external_api=ExternalApi(
+              api_spec="SIMPLE_SEARCH",
+              endpoint="https://YOUR_SERVICE_URL/v0/search",
+              api_auth={"apiKeyConfig": {"apiKeyString": "YOUR_KEY"}},
+          )
+      )
+  )
+
+  response = client.models.generate_content(
+      model="gemini-2.5-flash",
+      contents="Who won Super Bowl LX?",
+      config=GenerateContentConfig(tools=[tool]),
+  )
+
+  print(response.text)
+  print(response.candidates[0].grounding_metadata.grounding_chunks)
+  ```
+
+  ```bash REST
+  PROJECT_ID=your-project-id
+  LOCATION=global
+  MODEL_ID=gemini-2.5-flash
+
+  cat > request.json <<'EOF'
+  {
+    "contents": [{
+      "role": "user",
+      "parts": [{ "text": "Who won Super Bowl LX?" }]
+    }],
+    "tools": [{
+      "retrieval": {
+        "externalApi": {
+          "api_spec": "SIMPLE_SEARCH",
+          "endpoint": "https://YOUR_SERVICE_URL/v0/search",
+          "apiAuth": {
+            "apiKeyConfig": { "apiKeyString": "YOUR_KEY" }
+          }
+        }
+      }
+    }]
+  }
+  EOF
+
+  curl -X POST \
+    -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+    -H "Content-Type: application/json" \
+    -d `request.json \
+    "https://aiplatform.googleapis.com/v1beta1/projects/$PROJECT_ID/locations/$LOCATION/publishers/google/models/$MODEL_ID:generateContent"
+  ```
+</CodeGroup>
+
+Substitua `YOUR_SERVICE_URL` pelo host do seu serviço e `YOUR_KEY` pela sua Chave de API do Firecrawl ou, se você implantou no modo gateway, pelo segredo do gateway. Para uma localização regional diferente de `global`, use `LOCATION-aiplatform.googleapis.com` como host, conforme a referência do Google.
+
+Na resposta, as fontes usadas pelo Gemini aparecem em `candidates[0].groundingMetadata.groundingChunks`. Na resposta REST, o `retrievedContext` de cada chunk traz o `uri` e o `snippet` retornados pelo seu adaptador.
+
+## Opções {#options}
+
+Defina estas opções como variáveis de ambiente no serviço do Cloud Run, por exemplo, com `gcloud run services update firecrawl-grounding --update-env-vars RESULT_LIMIT=5`.
+
+| Variável            | Padrão        | Significado                                                                                                                                       |
+| ------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RESULT_LIMIT`      | `10`          | Número de resultados solicitados ao Firecrawl por query, de 1 a 100.                                                                              |
+| `SNIPPET_CHARS`     | `1200`        | Tamanho máximo do trecho, cortado sem dividir palavras.                                                                                           |
+| `SNIPPET_MODE`      | `description` | `description` usa a descrição do resultado de busca. `markdown` também faz o scraping de cada resultado e usa o início do seu conteúdo principal. |
+| `FIRECRAWL_TIMEOUT` | `20`          | Tempo de espera pelo Firecrawl, em segundos.                                                                                                      |
+| `GATEWAY_KEY`       | não definida  | Ativa o modo gateway.                                                                                                                             |
+
+### Escolhendo um trecho {#choosing-a-snippet}
+
+O Gemini se baseia no texto do trecho, então o conteúdo dele importa mais do que o link. O padrão usa a descrição retornada pela busca do Firecrawl. Por padrão, a busca retorna [destaques relevantes para a query](/pt-BR/features/search-highlights) nesse campo e, quando não consegue gerá-los, recorre à descrição simples da página. Assim, cada trecho é selecionado em função da query. O modo `markdown` usa os primeiros caracteres do conteúdo principal de cada resultado, que em alguns sites é um banner ou menu antes do artigo, por isso costuma ser a opção menos eficaz. Ele também deixa cada resposta do Firecrawl muito maior. Use-o quando os resultados que importam para você não tiverem uma descrição útil.
+
+## Limites e comportamento {#limits-and-behavior}
+
+* O Google permite que uma request de geração use até 10 fontes de grounding, e você pode combinar esta ferramenta com outras, como o Google Search.
+* A página do Google não informa um tamanho máximo de resposta nem um tempo limite para o seu endpoint. Mantenha o adaptador rápido e os trechos curtos. Com os valores padrão, uma resposta contém no máximo 10 trechos de 1.200 caracteres.
+* A busca do Firecrawl aceita queries de até 500 caracteres. O adaptador trunca queries mais longas nesse limite.
+* Cada query corresponde a uma request de busca do Firecrawl, portanto seus [limites de taxa](/pt-BR/rate-limits) e sua [cobrança](/pt-BR/billing) se aplicam a cada busca feita pelo Gemini.
+* O Gemini chama o adaptador uma vez para cada busca que decide executar, e uma única request pode disparar várias buscas.
+
+| Status | Quando                                                                              |
+| ------ | ----------------------------------------------------------------------------------- |
+| `200`  | Array JSON de objects `snippet` e `uri`, ou um array vazio quando não há resultados |
+| `400`  | O corpo não é um JSON com uma string `query` não vazia                              |
+| `401`  | Chave ausente, segredo do gateway incorreto ou chave rejeitada pelo Firecrawl       |
+| `429`  | Limite de requisições do Firecrawl atingido                                         |
+| `502`  | Não foi possível acessar o Firecrawl ou ele retornou outro erro                     |
+
+## Relacionados {#related}
+
+* [Pesquisar](/pt-BR/features/search)
+* [Gemini](/pt-BR/developer-guides/llm-sdks-and-frameworks/gemini)
+* [Agent Development Kit (ADK)](/pt-BR/developer-guides/llm-sdks-and-frameworks/google-adk)
