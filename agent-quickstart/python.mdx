@@ -1,0 +1,282 @@
+---
+title: "Python Agent Quickstart"
+description: "Canonical Firecrawl Python quickstart for external agents using search, scrape, and interact."
+---
+
+Canonical Firecrawl Python quickstart for agents. Generated from SDK source (`firecrawl-py` **v4.50.0**) and the v2 OpenAPI spec. Method names, parameters, and return types match the v2 client.
+
+## Install
+
+```bash
+pip install firecrawl-py
+```
+
+## Authenticate
+
+```python
+import os
+from firecrawl import Firecrawl
+
+client = Firecrawl(api_key=os.environ.get("FIRECRAWL_API_KEY"))
+# client = Firecrawl(api_key="fc-...", api_url="https://api.firecrawl.dev")
+```
+
+Async client: `from firecrawl import AsyncFirecrawl`.
+
+## When To Use What
+
+- **`search`**: use when you start with a query and need discovery.
+- **`scrape`**: use when you already have a URL and want page content.
+- **`interact`**: use when the page needs clicks, forms, or post-scrape browser actions.
+
+## Search
+
+### Why use it
+
+Use search to discover relevant pages from a query, then pick URLs to scrape or interact with. Constrain results to a site with `site:`, for example `site:docs.firecrawl.dev crawl webhooks`.
+
+### Preferred SDK method
+
+`client.search(query, **options)` → `SearchData`
+
+### Example
+
+```python
+results = client.search("site:docs.firecrawl.dev webhook retries")
+for item in results.web or []:
+    print(getattr(item, "url", None), getattr(item, "title", None))
+```
+
+```python
+from firecrawl.v2.types import ScrapeOptions
+
+results = client.search(
+    "site:docs.firecrawl.dev crawl webhooks",
+    sources=["web", "news"],
+    categories=["research"],
+    limit=10,
+    tbs="qdr:m",
+    location="San Francisco,California,United States",
+    ignore_invalid_urls=True,
+    timeout=300000,
+    scrape_options=ScrapeOptions(
+        formats=[
+            "markdown",
+            "links",
+            {"type": "json", "prompt": "Extract title and key endpoints."},
+        ],
+        only_main_content=True,
+        include_tags=["main", "article"],
+        exclude_tags=["nav", "footer"],
+        wait_for=1000,
+    ),
+)
+```
+
+### Return value
+
+`SearchData` has optional lists:
+
+- `web` — web hits (`SearchResultWeb` or full `Document` when `scrape_options` hydrates content)
+- `news` — news hits
+- `images` — image hits
+- `tools` — discovered Alexandria tools
+
+Accessing `.data` raises an `AttributeError` — use `.web`, `.news`, `.images`, or `.tools`.
+
+### Parameters
+
+| Parameter | Type | Description |
+|---|---|---|
+| `query` | `str` | Search query. Use `site:example.com` to limit results to a domain. |
+| `sources` | `list[str \| Source]` | Which sources to search: `"web"`, `"news"`, `"images"`, `"alexandria"`. |
+| `categories` | `list[str \| Category]` | Filter by category: `"github"`, `"research"`, `"pdf"`, `"developer"`, `"gov"`. |
+| `include_domains` | `list[str]` | Restrict results to these domains. Cannot combine with `exclude_domains`. |
+| `exclude_domains` | `list[str]` | Exclude results from these domains. Cannot combine with `include_domains`. |
+| `limit` | `int` | Cap results. Default: `5`. |
+| `tbs` | `str` | Time-based filter (e.g. `qdr:d`, `qdr:w`, `sbd:1,qdr:m`). |
+| `location` | `str` | Localized results. |
+| `country` | `str` | ISO 3166-1 alpha-2 country code. |
+| `ignore_invalid_urls` | `bool` | Drop URLs that cannot be scraped. |
+| `timeout` | `int` | Request timeout in milliseconds. Default: `300000`. |
+| `highlights` | `bool` | Generate query-relevant highlights. |
+| `scrape_options` | `ScrapeOptions` | Scrape each search result (see Scrape parameters). |
+| `enterprise` | `list[str]` | Enterprise ZDR options: `"zdr"`, `"anon"`. |
+| `threat_protection` | `ThreatProtectionOptions` | Per-request threat protection override. |
+| `domain_tools` | `bool` | Include domain-matched Alexandria tool contracts. |
+| `tool_detail` | `"compact" \| "summary" \| "full"` | How much of each tool contract to return. |
+
+## Scrape
+
+### Why use it
+
+Use scrape when you already have a URL and want structured content in one or more formats.
+
+### Preferred SDK method
+
+`client.scrape(url, **options)` → `Document`
+
+### Example
+
+```python
+doc = client.scrape("https://docs.firecrawl.dev", formats=["markdown"])
+```
+
+```python
+doc = client.scrape(
+    "https://example.com/pricing",
+    formats=[
+        "markdown",
+        "links",
+        {"type": "json", "prompt": "Extract plan names and prices."},
+        {"type": "screenshot", "full_page": True, "quality": 80},
+        {"type": "changeTracking", "modes": ["git-diff"], "tag": "pricing"},
+        {"type": "attributes", "selectors": [{"selector": "a", "attribute": "href"}]},
+    ],
+    headers={"User-Agent": "MyAgent/1.0"},
+    only_main_content=True,
+    wait_for=1000,
+    parsers=[{"type": "pdf", "mode": "auto", "max_pages": 5}],
+    actions=[
+        {"type": "click", "selector": "#accept"},
+        {"type": "wait", "milliseconds": 750},
+        {"type": "scrape"},
+    ],
+    location={"country": "US", "languages": ["en-US"]},
+    remove_base64_images=True,
+    fast_mode=True,
+    block_ads=True,
+    proxy="auto",
+    max_age=86400000,
+    store_in_cache=True,
+    profile={"name": "my-session", "save_changes": True},
+)
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|---|---|---|
+| `url` | `str` | URL to scrape. |
+| `formats` | `list[FormatOption]` | Output formats. See format options below. |
+| `headers` | `dict[str, str]` | Custom request headers. |
+| `include_tags` | `list[str]` | Include only specific HTML tags. |
+| `exclude_tags` | `list[str]` | Exclude specific HTML tags. |
+| `only_main_content` | `bool` | Strip nav, footer, and other boilerplate. |
+| `timeout` | `int` | Timeout in milliseconds. |
+| `wait_for` | `int` | Wait for page to render (milliseconds). |
+| `mobile` | `bool` | Use a mobile viewport. |
+| `parsers` | `list[str \| PDFParser \| ImageParser]` | File parsing controls (e.g. `"pdf"` or `{"type": "pdf", "mode": "auto", "max_pages": 5}`). |
+| `actions` | `list[ActionOption]` | Pre-scrape browser actions. |
+| `location` | `Location` | Geo or language-aware scraping (`{"country": "US", "languages": ["en-US"]}`). |
+| `skip_tls_verification` | `bool` | Skip TLS verification. |
+| `remove_base64_images` | `bool` | Drop base64 images from markdown output. |
+| `fast_mode` | `bool` | Faster scrapes with reduced fidelity. |
+| `block_ads` | `bool` | Ad and cookie popup blocking. |
+| `proxy` | `str` | Proxy control: `"basic"`, `"stealth"`, `"enhanced"`, `"auto"`. |
+| `max_age` | `int` | Max age for cached data (milliseconds). |
+| `store_in_cache` | `bool` | Cache the result. |
+| `lockdown` | `bool` | Serve from cache only, never make outbound request. |
+| `check_prompt_injection` | `bool` | Scan for prompt injection attempts. Adds 4 credits. |
+| `redact_pii` | `bool \| RedactPIIOptions` | Redact PII from output. |
+| `threat_protection` | `ThreatProtectionOptions` | Per-request threat protection override. |
+| `profile` | `dict` | Persistent browser profile (`{"name": "...", "save_changes": True}`). |
+| `audit_metadata` | `AuditMetadata` | User attribution for SIEM logging (`{"username": "..."}` or `AuditMetadata(username="...")`). |
+| `domain_tools` | `bool` | Include domain-matched Alexandria tool contracts. |
+| `tool_detail` | `"compact" \| "summary" \| "full"` | How much of each tool contract to return. |
+
+#### Format options
+
+Plain string formats:
+`"markdown"`, `"html"`, `"rawHtml"` (or `"raw_html"`), `"links"`, `"images"`, `"screenshot"`, `"summary"`, `"changeTracking"` (or `"change_tracking"`), `"attributes"`, `"branding"`, `"audio"`, `"video"`
+
+Object-only formats (at minimum `type`):
+
+| Format | Required fields | Optional fields |
+|---|---|---|
+| `{"type": "json"}` | at least one of `prompt` or `schema` | `schema` (JSON Schema dict) |
+| `{"type": "question"}` | `question` | — |
+| `{"type": "highlights"}` | `query` | — |
+| `{"type": "screenshot"}` | — | `full_page`, `quality`, `viewport` |
+| `{"type": "changeTracking"}` | `modes` (`"git-diff"` and/or `"json"`) | `schema`, `prompt`, `tag` |
+| `{"type": "attributes"}` | `selectors` (list of `{selector, attribute}`) | — |
+
+#### Action types
+
+| Action | Required | Optional |
+|---|---|---|
+| `wait` | `milliseconds` or `selector` | — |
+| `click` | `selector` | — |
+| `write` | `text` | — |
+| `press` | `key` | — |
+| `scroll` | `direction` (`"up"` or `"down"`) | `selector` |
+| `screenshot` | — | `full_page`, `quality`, `viewport` |
+| `scrape` | — | — |
+| `executeJavascript` | `script` | — |
+| `pdf` | — | `format`, `landscape`, `scale` |
+
+## Interact
+
+### Why use it
+
+Use interact when a page requires browser actions or code execution after a scrape starts.
+
+### Preferred SDK method
+
+`client.interact(job_id, code=None, *, prompt=None, language="node", timeout=None)`
+
+`prompt` is keyword-only. At least one of `code` or `prompt` must be non-empty.
+
+### Example
+
+```python
+doc = client.scrape("https://example.com", formats=["markdown"])
+job_id = doc.metadata.scrape_id if doc.metadata else None
+if not job_id:
+    raise RuntimeError("Missing scrape_id from scrape response")
+
+result = client.interact(job_id, prompt="Click the pricing tab and summarize the plans.")
+```
+
+```python
+result = client.interact(
+    "<scrapeJobId>",
+    code="print(await page.title())",
+    language="python",
+    timeout=60,
+)
+```
+
+### Stop session
+
+`client.stop_interaction(job_id)` ends the scrape-bound browser session.
+
+### Parameters
+
+| Parameter | Type | Description |
+|---|---|---|
+| `job_id` | `str` | Scrape job ID from `document.metadata.scrape_id`. |
+| `code` | `str` | Code to run in the browser session (optional if `prompt` is set). |
+| `prompt` | `str` | Natural-language instruction for the browser agent (optional if `code` is set). |
+| `language` | `"python" \| "node" \| "bash"` | Runtime for code execution. Default: `"node"`. |
+| `timeout` | `int` | Execution timeout in seconds. |
+
+### Return value
+
+`BrowserExecuteResponse` fields: `success`, `live_view_url`, `interactive_live_view_url`, `output`, `stdout`, `result`, `stderr`, `exit_code`, `killed`, `error`.
+
+## Notes
+
+- Deprecated aliases: `scrape_execute` → `interact`; `stop_interactive_browser` and `delete_scrape_browser` → `stop_interaction`; `scrape_url` → `scrape`.
+- The top-level `Firecrawl` client exposes v2 methods directly; v1 remains under `client.v1`.
+- Class aliases: `FirecrawlApp = Firecrawl`, `AsyncFirecrawlApp = AsyncFirecrawl`.
+- `ScrapeOptions` has `min_age` for use as `scrape_options` in `search`, but `client.scrape` does not accept `min_age`.
+
+## Source Of Truth
+
+- `firecrawl/apps/python-sdk/pyproject.toml`
+- `firecrawl/apps/python-sdk/firecrawl/__init__.py`
+- `firecrawl/apps/python-sdk/firecrawl/client.py`
+- `firecrawl/apps/python-sdk/firecrawl/v2/client.py`
+- `firecrawl/apps/python-sdk/firecrawl/v2/types.py`
+- `firecrawl-docs/api-reference/v2-openapi.json`
