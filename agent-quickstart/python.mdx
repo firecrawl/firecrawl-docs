@@ -1,0 +1,270 @@
+---
+title: "Python Agent Quickstart"
+description: "Canonical Firecrawl Python quickstart for external agents using search, scrape, and interact."
+og:title: "Python Agent Quickstart | Firecrawl"
+og:description: "Canonical Firecrawl Python quickstart for external agents using search, scrape, and interact."
+---
+
+# Firecrawl Python Agent Quickstart
+
+Canonical quickstart for external agents integrating with Firecrawl using the Python SDK. Generated from SDK source and OpenAPI spec.
+
+## Install
+
+```bash
+pip install firecrawl-py
+```
+
+## Authenticate
+
+```python
+from firecrawl import Firecrawl
+
+firecrawl = Firecrawl(api_key="fc-YOUR_API_KEY")
+```
+
+The API key resolves in this order:
+
+1. Value passed as `api_key`
+2. `FIRECRAWL_API_KEY` environment variable
+3. Keyless free tier (rate-limited per IP; only scrape, search, and interact available)
+
+Constructor parameters:
+
+```python
+firecrawl = Firecrawl(
+    api_key="fc-YOUR_API_KEY",
+    api_url="https://api.firecrawl.dev",
+    timeout=60.0,
+    max_retries=3,
+    backoff_factor=0.5,
+)
+```
+
+An async client is also available:
+
+```python
+from firecrawl import AsyncFirecrawl
+
+firecrawl = AsyncFirecrawl(api_key="fc-YOUR_API_KEY")
+```
+
+## When To Use What
+
+- **`search`**: You start with a query and need to discover relevant URLs and their content. Use when you don't have a specific URL yet.
+- **`scrape`**: You already have a URL and want its page content as markdown, HTML, or structured JSON. Use for targeted extraction.
+- **`interact`**: The page needs clicks, form fills, or other browser actions after an initial scrape. Use for multi-step browser automation.
+
+## Search
+
+### Why use it
+
+Search the web for a query and optionally scrape the results. Returns structured results grouped by source type (web, news, images). Use this when you need to discover relevant pages before extracting content.
+
+### Preferred SDK method
+
+```python
+firecrawl.search(query, **options)
+```
+
+### Example
+
+```python
+results = firecrawl.search(
+    "firecrawl web scraping API",
+    limit=5,
+    scrape_options={"formats": ["markdown"]},
+)
+
+for result in results.web or []:
+    print(result.title, result.url)
+    print(result.markdown)  # available when scrape_options is set
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|---|---|---|
+| `query` | `str` | **Required.** The search query string. |
+| `sources` | `list[str]` | Which result sets to return: `"web"`, `"news"`, `"images"`. Default: `["web"]`. |
+| `categories` | `list[str]` | Narrow results by category: `"github"`, `"research"`, `"pdf"`, `"developer"`. |
+| `include_domains` | `list[str]` | Restrict results to these domains. Cannot combine with `exclude_domains`. |
+| `exclude_domains` | `list[str]` | Exclude results from these domains. Cannot combine with `include_domains`. |
+| `limit` | `int` | Max results per source type. Default: `5`. |
+| `tbs` | `str` | Time-based filter. `"qdr:h"` (hour), `"qdr:d"` (day), `"qdr:w"` (week), `"qdr:m"` (month), `"qdr:y"` (year), or custom range `"cdr:1,cd_min:MM/DD/YYYY,cd_max:MM/DD/YYYY"`. |
+| `location` | `str` | Geographic location for results. |
+| `ignore_invalid_urls` | `bool` | Exclude URLs invalid for other Firecrawl endpoints. Default: `false`. |
+| `timeout` | `int` | Timeout in milliseconds. Default: `300000`. |
+| `highlights` | `bool` | Generate query-relevant highlights. Default: `true`. |
+| `scrape_options` | `ScrapeOptions` | Options applied to each result's scrape. Pass this to get full page content in results. |
+| `enterprise` | `list[str]` | Enterprise options: `"zdr"` (zero data retention), `"anon"` (anonymized). |
+| `threat_protection` | `ThreatProtectionOptions` | Per-request threat protection override (enterprise). |
+
+**Return type:** `SearchData` with `.web`, `.news`, `.images` properties. Accessing `.data` raises `AttributeError` with a migration message.
+
+## Scrape
+
+### Why use it
+
+Scrape a single URL and get its content as markdown, HTML, screenshots, structured JSON, or other formats. The primary tool for extracting page content when you already know the URL.
+
+### Preferred SDK method
+
+```python
+firecrawl.scrape(url, **options)
+```
+
+### Example
+
+```python
+doc = firecrawl.scrape(
+    "https://example.com",
+    formats=["markdown", "links"],
+    only_main_content=True,
+)
+
+print(doc.markdown)
+print(doc.links)
+```
+
+Extract structured data:
+
+```python
+doc = firecrawl.scrape(
+    "https://example.com/pricing",
+    formats=[{
+        "type": "json",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "plans": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "price": {"type": "number"},
+                        },
+                    },
+                },
+            },
+        },
+    }],
+)
+
+print(doc.json)
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|---|---|---|
+| `url` | `str` | **Required.** The URL to scrape. |
+| `formats` | `list` | Output formats. String values: `"markdown"`, `"html"`, `"rawHtml"`, `"links"`, `"images"`, `"screenshot"`, `"summary"`, `"changeTracking"`, `"json"`, `"attributes"`, `"branding"`, `"product"`, `"menu"`, `"audio"`, `"video"`. Objects: `{"type": "json", "schema": ..., "prompt": ...}`, `{"type": "screenshot", "fullPage": ..., "quality": ..., "viewport": ...}`, `{"type": "question", "question": ...}`, `{"type": "highlights", "query": ...}`. Default: `["markdown"]`. |
+| `only_main_content` | `bool` | Only return main content, excluding headers/navs/footers. Default: `true`. |
+| `include_tags` | `list[str]` | HTML tags to include in output. |
+| `exclude_tags` | `list[str]` | HTML tags to exclude from output. |
+| `headers` | `dict[str, str]` | Custom HTTP headers to send with the request. |
+| `timeout` | `int` | Timeout in milliseconds. Default: `60000`. Range: 1000-300000. |
+| `wait_for` | `int` | Delay in ms before fetching content. Default: `0`. |
+| `mobile` | `bool` | Emulate a mobile device. Default: `false`. |
+| `parsers` | `list` | Parser config. PDF: `{"type": "pdf", "mode": "fast"\|"auto"\|"ocr", "maxPages": ..., "pages": ..., "blocks": ..., "pageMarkers": ...}`. |
+| `actions` | `list` | Browser actions before grabbing content: `WaitAction`, `ClickAction`, `WriteAction`, `PressAction`, `ScrollAction`, `ScrapeAction`, `ExecuteJavascriptAction`, `ScreenshotAction`, `PDFAction`. |
+| `location` | `Location` | Location settings. `Location(country="US", languages=["en"])`. |
+| `skip_tls_verification` | `bool` | Skip TLS certificate verification. Default: `true`. |
+| `remove_base64_images` | `bool` | Remove base64-encoded images from markdown. Default: `true`. |
+| `fast_mode` | `bool` | Use fast mode (less accurate). |
+| `block_ads` | `bool` | Block ads and cookie popups. Default: `true`. |
+| `proxy` | `str` | Proxy type: `"basic"`, `"stealth"`, `"enhanced"`, `"auto"`. Default: `"auto"`. |
+| `max_age` | `int` | Use cached result if younger than this value (ms). Default: `172800000` (2 days). |
+| `store_in_cache` | `bool` | Store result in Firecrawl cache. Default: `true`. |
+| `lockdown` | `bool` | Serve only cached results. Default: `false`. |
+| `redact_pii` | `bool \| RedactPIIOptions` | Redact PII. Pass `True` for defaults or an options object with `mode`, `entities`, `replace_style`. |
+| `profile` | `dict` | Persistent browser storage profile. `{"name": "my-profile", "saveChanges": True}`. |
+| `audit_metadata` | `AuditMetadata` | User attribution for SIEM logging. `AuditMetadata(username="user@example.com")`. |
+| `threat_protection` | `ThreatProtectionOptions` | Per-request threat protection override (enterprise). |
+
+## Interact
+
+### Why use it
+
+Execute code or natural-language prompts in the browser session created by a prior scrape. Use this for multi-step workflows: scrape a page first to get a `job_id`, then interact with the live browser to click buttons, fill forms, or run JavaScript.
+
+### Preferred SDK method
+
+```python
+firecrawl.interact(job_id, code=None, *, prompt=None, language="node", timeout=None)
+```
+
+### Example
+
+```python
+# First scrape to get a session
+doc = firecrawl.scrape("https://example.com", formats=["markdown"])
+job_id = doc.metadata.get("jobId")
+
+# Execute code in the browser
+result = firecrawl.interact(
+    job_id,
+    code="document.querySelector('button.load-more').click();",
+    language="node",
+    timeout=30,
+)
+
+print(result.stdout)
+
+# Or use a natural-language prompt
+agent_result = firecrawl.interact(
+    job_id,
+    prompt="Click the 'Load More' button and wait for new content",
+)
+
+print(agent_result.output)
+
+# Stop the session when done
+firecrawl.stop_interaction(job_id)
+```
+
+### Parameters
+
+| Parameter | Type | Description |
+|---|---|---|
+| `job_id` | `str` | **Required.** The scrape job ID from a prior scrape. |
+| `code` | `str` | Code to execute in the browser sandbox. Provide either `code` or `prompt`. |
+| `prompt` | `str` | Natural-language instruction for the browser agent. Provide either `code` or `prompt`. |
+| `language` | `"python" \| "node" \| "bash"` | Language for code execution. Default: `"node"`. |
+| `timeout` | `int` | Execution timeout in seconds (1-300). |
+
+The response includes:
+
+| Field | Type | Description |
+|---|---|---|
+| `success` | `bool` | Whether execution succeeded. |
+| `output` | `str \| None` | Agent's response (only when using `prompt`). |
+| `stdout` | `str \| None` | Standard output from code execution. |
+| `stderr` | `str \| None` | Standard error output. |
+| `exit_code` | `int \| None` | Exit code of executed process. |
+| `killed` | `bool` | Whether process was killed due to timeout. |
+| `live_view_url` | `str \| None` | Read-only live view of the browser. |
+| `interactive_live_view_url` | `str \| None` | Interactive live view. |
+
+Call `firecrawl.stop_interaction(job_id)` to end the session when done.
+
+## Notes
+
+- All parameter names use **snake_case** (e.g. `only_main_content`, `scrape_options`). The SDK converts these to camelCase for the API.
+- `SearchData` returns results via `.web`, `.news`, `.images` properties. The old `.data` accessor is removed and raises a helpful error.
+- **Deprecated aliases for interact:**
+  - `scrape_execute(job_id, ...)` → use `interact(job_id, ...)`
+  - `stop_interactive_browser(job_id)` → use `stop_interaction(job_id)`
+  - `delete_scrape_browser(job_id)` → use `stop_interaction(job_id)`
+- **Deprecated aliases for other methods:**
+  - `scrape_url()` → `scrape()`
+  - `crawl_url()` → `crawl()`
+  - `map_url()` → `map()`
+- The class `FirecrawlApp` is an alias for `Firecrawl`. Use `Firecrawl` for new code.
+
+## Source Of Truth
+
+- SDK: `firecrawl/apps/python-sdk/firecrawl/client.py`, `firecrawl/apps/python-sdk/firecrawl/v2/client.py`, `firecrawl/apps/python-sdk/firecrawl/v2/types.py`
+- OpenAPI: `firecrawl-docs/api-reference/v2-openapi.json`
