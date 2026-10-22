@@ -1,0 +1,281 @@
+---
+title: "Node.js Agent Quickstart"
+description: "Canonical Firecrawl Node.js quickstart for external agents using search, scrape, and interact."
+---
+
+# Firecrawl Node.js Agent Quickstart
+
+Canonical quickstart for external agents. Generated from SDK source (`firecrawl` **v4.50.0**) and the v2 OpenAPI spec. Method names and parameters match the SDK public API.
+
+## Install
+
+```bash
+npm install firecrawl
+```
+
+## Authenticate
+
+```ts
+import { Firecrawl } from "firecrawl";
+
+const client = new Firecrawl({
+  apiKey: process.env.FIRECRAWL_API_KEY,
+  // apiUrl: "https://api.firecrawl.dev" // optional; falls back to FIRECRAWL_API_URL env or cloud default
+});
+```
+
+## When To Use What
+
+- `search`: use when you start with a query and need discovery.
+- `scrape`: use when you already have a URL and want page content.
+- `interact`: use when the page needs clicks, forms, or post-scrape browser actions. For multi-step interactive flows, prefer `interact` over scrape-time `actions`.
+
+## Search
+
+### Why use it
+
+Discover relevant pages from a query, then pick URLs to scrape or interact with. Constrain results to a site with `site:` in the query, e.g. `site:docs.firecrawl.dev crawl webhooks`.
+
+### Preferred SDK method
+
+`client.search(query, options?)` → `Promise<SearchData>`
+
+### Example
+
+```ts
+const results = await client.search("site:docs.firecrawl.dev webhook retries", {
+  limit: 5,
+  scrapeOptions: { formats: ["markdown"], onlyMainContent: true }
+});
+
+for (const hit of results.web ?? []) {
+  console.log(hit.url, hit.title);
+}
+```
+
+### Parameters
+
+- `query` (string, required) — The search query. Use `site:example.com` to limit results to a domain.
+
+- `sources` (array) — Which result sources to include. Values: `"web"`, `"news"`, `"images"`, `"alexandria"`, or typed objects like `{ type: "web" }`. Default: `[{type: "web"}]`.
+
+- `categories` (array) — Narrow results by category. Values: `"developer"`, `"gov"`, `"research"`, `"pdf"`, `"github"`, or typed objects. Use when you want domain-specific results.
+
+- `includeDomains` (string[]) — Restrict results to these domains. Cannot be combined with `excludeDomains`.
+
+- `excludeDomains` (string[]) — Exclude results from these domains. Cannot be combined with `includeDomains`.
+
+- `limit` (number) — Max number of results. Default per OpenAPI: 10. Min: 1, Max: 100.
+
+- `tbs` (string) — Time-based search filter. Examples: `"qdr:d"` (past day), `"qdr:w"` (past week), `"qdr:m"` (past month), `"sbd:1,qdr:m"` (sort by date, past month).
+
+- `location` (string) — Geo-target location string, e.g. `"San Francisco,California,United States"`.
+
+- `country` (string) — ISO 3166-1 alpha-2 country code for geo-targeting. Default per OpenAPI: `"US"`.
+
+- `ignoreInvalidURLs` (boolean) — Drop URLs that cannot be scraped by other endpoints. Default: false.
+
+- `timeout` (number) — Request timeout in milliseconds. Default per OpenAPI: 60000.
+
+- `highlights` (boolean) — Generate query-relevant highlights. Default: true.
+
+- `scrapeOptions` (ScrapeOptions) — Options for scraping each search result. Same fields as the Scrape parameters section (minus `toolDetail`).
+
+- `enterprise` (string[]) — Enterprise options. Values: `"default"`, `"anon"`, `"zdr"`.
+
+- `threatProtection` (object) — Per-request threat protection override (enterprise).
+
+- `domainTools` (boolean) — Include domain-matched tool contracts alongside semantic matches.
+
+- `toolDetail` (`"compact"` | `"summary"` | `"full"`) — Tool contract detail level. Default: `"compact"`.
+
+- `integration` (string) — Integration identifier for tracking.
+
+- `origin` (string) — Origin identifier for tracking.
+
+### Return value
+
+`SearchData` has optional arrays. Each entry is a lightweight result or a full `Document` when `scrapeOptions` hydrated the hit:
+
+- `web` — web index hits
+- `news` — news hits
+- `images` — image hits
+- `tools` — discovered tool contracts
+
+Access results via `result.web`, `result.news`, `result.images`. There is no `result.data`.
+
+## Scrape
+
+### Why use it
+
+Fetch structured content from a URL in one or more formats (markdown, HTML, JSON extraction, screenshots, and more).
+
+### Preferred SDK method
+
+`client.scrape(url, options?)` → `Promise<Document>`
+
+### Example
+
+```ts
+const doc = await client.scrape("https://example.com/pricing", {
+  formats: [
+    "markdown",
+    { type: "json", prompt: "Extract plan names and prices." }
+  ],
+  onlyMainContent: true
+});
+
+console.log(doc.markdown);
+console.log(doc.json);
+```
+
+### Parameters
+
+- `url` (string, required) — The URL to scrape.
+
+- `formats` (array) — Output formats. Plain strings: `"markdown"`, `"html"`, `"rawHtml"`, `"links"`, `"images"`, `"screenshot"`, `"summary"`, `"changeTracking"`, `"attributes"`, `"branding"`, `"product"`, `"menu"`, `"audio"`, `"video"`. Object forms for richer config:
+  - `{ type: "json", prompt?, schema? }` — LLM-based JSON extraction. At least one of `prompt` or `schema` required.
+  - `{ type: "question", question }` — Question-answer extraction.
+  - `{ type: "highlights", query }` — Source-text extraction relevant to a query.
+  - `{ type: "screenshot", fullPage?, quality?, viewport? }` — Screenshot with options.
+  - `{ type: "changeTracking", modes, schema?, prompt?, tag? }` — `modes` is required (`"git-diff"` and/or `"json"`).
+  - `{ type: "attributes", selectors: [{ selector, attribute }] }` — Attribute extraction.
+  Default per OpenAPI: `["markdown"]`.
+
+- `headers` (Record<string, string>) — Custom HTTP request headers.
+
+- `includeTags` (string[]) — Only include content from these HTML tags.
+
+- `excludeTags` (string[]) — Exclude content from these HTML tags.
+
+- `onlyMainContent` (boolean) — Strip headers, navs, footers. Default per OpenAPI: true.
+
+- `timeout` (number) — Timeout in milliseconds. Default per OpenAPI: 60000. Min: 1000, Max: 300000.
+
+- `waitFor` (number) — Wait time in ms before scraping, for JS-rendered content. Default per OpenAPI: 0. Max: 60000.
+
+- `mobile` (boolean) — Emulate a mobile device. Default: false.
+
+- `parsers` (array) — Parser configuration. Values: `"pdf"`, `"image"`, or objects like `{ type: "pdf", mode?: "fast" | "auto" | "ocr", maxPages? }`. Default per OpenAPI: `["pdf", "image"]`.
+
+- `actions` (array) — Browser actions to execute before scraping. Types:
+  - `{ type: "wait", milliseconds }` or `{ type: "wait", selector }`
+  - `{ type: "click", selector }`
+  - `{ type: "write", text }` (click to focus the input first)
+  - `{ type: "press", key }`
+  - `{ type: "scroll", direction: "up" | "down", selector? }`
+  - `{ type: "screenshot", fullPage?, quality?, viewport? }`
+  - `{ type: "scrape" }`
+  - `{ type: "executeJavascript", script }`
+  - `{ type: "pdf", format?, landscape?, scale? }`
+
+- `location` (object) — Geo/language config: `{ country?: string, languages?: string[] }`. Default country: `"US"`.
+
+- `skipTlsVerification` (boolean) — Skip TLS certificate verification.
+
+- `removeBase64Images` (boolean) — Drop base64 images from markdown output. Default per OpenAPI: true.
+
+- `fastMode` (boolean) — Faster scrapes with reduced fidelity.
+
+- `blockAds` (boolean) — Block ads and cookie popups. Default per OpenAPI: true.
+
+- `proxy` (string) — Proxy mode. Values: `"basic"`, `"stealth"`, `"enhanced"`, `"auto"`, or a custom proxy URL. Default per OpenAPI: `"auto"`.
+
+- `maxAge` (number) — Use cached content up to this age in milliseconds. Default per OpenAPI: 172800000 (2 days). Set to 0 to bypass cache.
+
+- `minAge` (number) — Cache-only mode; minimum age of cached data in ms. Set to 1 to accept any cached data.
+
+- `storeInCache` (boolean) — Store result in Firecrawl cache. Default per OpenAPI: true.
+
+- `lockdown` (boolean) — Serve only cached results, never make outbound requests. Default: false.
+
+- `checkPromptInjection` (boolean) — Scan content for prompt injection before LLM formats run. Adds 4 credits. Default: false.
+
+- `redactPII` (boolean | object) — Redact personally identifiable information from output. Default: false.
+
+- `threatProtection` (object) — Per-request threat protection override (enterprise).
+
+- `auditMetadata` (object) — SIEM logging attribution: `{ username: string }`.
+
+- `profile` (object) — Persistent browser profile: `{ name: string, saveChanges?: boolean }`. Use when you need session state across scrapes and interactions.
+
+- `integration` (string) — Integration identifier for tracking.
+
+- `origin` (string) — Origin identifier for tracking.
+
+- `domainTools` (boolean) — Include domain-matched tool contracts for this URL.
+
+- `toolDetail` (`"compact"` | `"summary"` | `"full"`) — Tool contract detail level.
+
+- `autoResume` (boolean) — SDK-only. Auto-resume on `processing_continues` timeout. Default: true. Set to false to surface the timeout immediately.
+
+## Interact
+
+### Why use it
+
+Control the browser session tied to a prior scrape job. Use for clicks, form fills, navigation, or natural-language instructions. The session is identified by `metadata.scrapeId` from a scrape response. For multi-step flows, prefer `interact` over scrape-time `actions`.
+
+### Preferred SDK method
+
+`client.interact(jobId, args)` → `Promise<ScrapeExecuteResponse>`
+
+### Example
+
+```ts
+const doc = await client.scrape("https://example.com", { formats: ["markdown"] });
+const jobId = doc.metadata?.scrapeId;
+if (!jobId) throw new Error("Missing scrapeId from scrape response");
+
+// Natural-language interaction
+const result = await client.interact(jobId, {
+  prompt: "Click the pricing tab and summarize the plans."
+});
+
+// Or code-based interaction
+const codeResult = await client.interact(jobId, {
+  code: "console.log(await page.title());",
+  language: "node"
+});
+
+// Clean up when done
+await client.stopInteraction(jobId);
+```
+
+### Parameters
+
+- `jobId` (string, required) — The scrape job ID from `document.metadata.scrapeId`.
+
+- `code` (string) — Code to execute in the browser session. Use with `language` to specify the runtime.
+
+- `prompt` (string) — Natural-language instruction for the browser agent.
+
+- At least one of `code` or `prompt` must be provided (SDK validates this).
+
+- `language` (`"python"` | `"node"` | `"bash"`) — Runtime language for code execution. Default: `"node"`.
+
+- `timeout` (number) — Execution timeout in seconds. Default per OpenAPI: 30. Min: 1, Max: 300.
+
+- `origin` (string) — Origin identifier for tracking.
+
+### Stop session
+
+`client.stopInteraction(jobId)` — Terminates the browser session associated with the scrape job.
+
+## Notes
+
+- The default `Firecrawl` export is the v2 client. The v1 client remains accessible under `client.v1`.
+- The package declares **Node.js >= 22** in `engines`.
+- Zod schemas passed to `formats` (for `json` or `changeTracking`) are automatically converted to JSON Schema by the SDK.
+- Deprecated aliases (migration only, do not use in new code):
+  - `scrapeUrl(url, options)` → use `scrape(url, options)`
+  - `scrapeExecute(jobId, args)` → use `interact(jobId, args)`
+  - `stopInteractiveBrowser(jobId)` → use `stopInteraction(jobId)`
+  - `deleteScrapeBrowser(jobId)` → use `stopInteraction(jobId)`
+
+## Source Of Truth
+
+- `firecrawl/apps/js-sdk/firecrawl/package.json`
+- `firecrawl/apps/js-sdk/firecrawl/src/index.ts`
+- `firecrawl/apps/js-sdk/firecrawl/src/v2/client.ts`
+- `firecrawl/apps/js-sdk/firecrawl/src/v2/types.ts`
+- `firecrawl-docs/api-reference/v2-openapi.json`
