@@ -11,7 +11,7 @@ Canonical Firecrawl Rust source of truth for agents. Generated from SDK source a
 cargo add firecrawl
 ```
 
-Crate: **`firecrawl`** on crates.io. The current SDK version is **2.0.0** (verify the latest release on crates.io before pinning).
+Crate: **`firecrawl`** on crates.io. The current SDK version is **2.21.7** (verify the latest release on crates.io before pinning).
 
 ## Authenticate
 
@@ -21,6 +21,8 @@ use firecrawl::Client;
 let client = Client::new("fc-your-api-key")?;
 // Self-hosted example:
 // let client = Client::new_selfhosted("http://localhost:3002", Some("fc-your-api-key"))?;
+// Keyless free tier (rate-limited per IP):
+// let client = Client::new_selfhosted("https://api.firecrawl.dev", None::<&str>)?;
 ```
 
 ## When To Use What
@@ -59,13 +61,18 @@ use firecrawl::{
 };
 
 let options = SearchOptions {
-    sources: Some(vec![SearchSource::Web, SearchSource::News]),
+    sources: Some(vec![SearchSource::Web, SearchSource::News, SearchSource::Alexandria]),
     categories: Some(vec![SearchCategory::Research]),
+    include_domains: Some(vec!["docs.firecrawl.dev".to_string()]),
     limit: Some(10),
     tbs: Some("qdr:m".to_string()),
     location: Some("San Francisco,California,United States".to_string()),
+    country: Some("US".to_string()),
     ignore_invalid_urls: Some(true),
+    highlights: Some(true),
     timeout: Some(60000),
+    domain_tools: Some(true),
+    tool_detail: Some(ToolDetail::Compact),
     scrape_options: Some(ScrapeOptions {
         formats: Some(vec![Format::Markdown, Format::Links, Format::Json]),
         json_options: Some(JsonOptions {
@@ -95,6 +102,7 @@ let results = client
   - `web: Option<Vec<SearchResultOrDocument>>` — each item is either `SearchResultOrDocument::WebResult(SearchResultWeb)` (url, title, description, …) or `SearchResultOrDocument::Document(Document)` when the API returned scraped content for that row (detected when markdown, html, rawHtml, or metadata is present).
   - `news: Option<Vec<SearchResultNews>>`
   - `images: Option<Vec<SearchResultImage>>`
+  - `tools: Option<Vec<DiscoveredTool>>` — present when `domain_tools` is enabled
 
 ### Parameters
 
@@ -106,12 +114,20 @@ let results = client
 - `options.sources`
   - Type: `Vec<SearchSource>`
   - Use when: you want to control which sources are searched.
-  - Confirmed values: `Web`, `News`, `Images`
+  - Confirmed values: `Web`, `News`, `Images`, `Alexandria`
 
 - `options.categories`
   - Type: `Vec<SearchCategory>`
   - Use when: you want to filter results by category.
-  - Confirmed values: `Research`, `Pdf`
+  - Confirmed values: `Github`, `Research`, `Pdf`
+
+- `options.include_domains`
+  - Type: `Vec<String>`
+  - Use when: you want to restrict results to specific domains. Mutually exclusive with `exclude_domains`.
+
+- `options.exclude_domains`
+  - Type: `Vec<String>`
+  - Use when: you want to exclude specific domains from results. Mutually exclusive with `include_domains`.
 
 - `options.limit`
   - Type: u32
@@ -125,6 +141,10 @@ let results = client
   - Type: String
   - Use when: you want localized results.
 
+- `options.country`
+  - Type: String
+  - Use when: you want ISO 3166-1 alpha-2 targeting (for example `"US"`).
+
 - `options.ignore_invalid_urls`
   - Type: bool
   - Use when: you want to drop URLs that cannot be scraped by other endpoints.
@@ -132,6 +152,20 @@ let results = client
 - `options.timeout`
   - Type: u32
   - Use when: you need a request timeout in milliseconds.
+
+- `options.highlights`
+  - Type: bool
+  - Use when: you want query-relevant highlights in search results.
+  - Notes: defaults to `true`.
+
+- `options.domain_tools`
+  - Type: bool
+  - Use when: you want to include Alexandria domain-matched tool contracts in results.
+
+- `options.tool_detail`
+  - Type: `ToolDetail`
+  - Use when: you want to control how much tool contract detail is returned.
+  - Confirmed values: `Compact`, `Summary`, `Full`
 
 - `options.scrape_options`
   - Type: `ScrapeOptions`
@@ -170,7 +204,7 @@ let doc = client
 ```rust
 use firecrawl::{
     Client, ScrapeOptions, Format, JsonOptions, ScreenshotOptions, ChangeTrackingOptions,
-    ChangeTrackingMode, AttributeSelector, Action, ParserConfig, ProxyType,
+    ChangeTrackingMode, AttributeSelector, Action, ParserConfig, ProxyType, ProfileConfig,
 };
 
 let doc = client
@@ -211,6 +245,10 @@ let doc = client
             Action::Scrape,
         ]),
         proxy: Some(ProxyType::Auto),
+        profile: Some(ProfileConfig {
+            name: "docs-session".to_string(),
+            save_changes: Some(true),
+        }),
         ..Default::default()
     })
     .await?;
@@ -225,7 +263,7 @@ let doc = client
 - `options.formats`
   - Type: `Vec<Format>`
   - Use when: you want multiple output formats.
-  - Confirmed values: `Markdown`, `Html`, `RawHtml`, `Links`, `Images`, `Screenshot`, `Summary`, `ChangeTracking`, `Json`, `Attributes`, `Branding`, `Audio`, `Video`
+  - Confirmed values: `Markdown`, `Html`, `RawHtml`, `Links`, `Images`, `Screenshot`, `Summary`, `ChangeTracking`, `Json`, `Attributes`, `Branding`, `Product`, `Menu`, `Audio`, `Video`, `Question(QuestionFormat)`, `Highlights(HighlightsFormat)`
 
 - `options.headers`
   - Type: `HashMap<String, String>`
@@ -314,10 +352,36 @@ let doc = client
   - Type: bool
   - Use when: you want Firecrawl to cache the result.
 
+- `options.lockdown`
+  - Type: bool
+  - Use when: you want to serve only previously cached results, never making outbound requests.
+
+- `options.check_prompt_injection`
+  - Type: bool
+  - Use when: you want to scan page content for prompt injection before LLM-backed formats run. Adds 4 credits.
+
+- `options.redact_pii`
+  - Type: bool
+  - Use when: you want to redact personally identifiable information from returned content.
+
+- `options.audit_metadata`
+  - Type: `AuditMetadata`
+  - Use when: you need user attribution for SIEM logging events.
+  - Confirmed fields: `username`
+
 - `options.profile`
   - Type: `ProfileConfig`
   - Use when: you want a persistent browser profile shared across scrapes and interactions.
   - Confirmed fields: `name`, `save_changes`
+
+- `options.domain_tools`
+  - Type: bool
+  - Use when: you want to include Alexandria domain-matched tool contracts in results.
+
+- `options.tool_detail`
+  - Type: `ToolDetail`
+  - Use when: you want to control how much tool contract detail is returned.
+  - Confirmed values: `Compact`, `Summary`, `Full`
 
 - `options.integration`
   - Type: `Option<String>`
@@ -424,7 +488,7 @@ let stopped = client.stop_interaction("<scrapeJobId>").await?;
 - `options.origin`
   - Type: `Option<String>`
   - Use when: you need an optional origin label for execution telemetry.
-  - Notes: omit in agent-oriented examples unless your product intentionally sets it.
+  - Notes: auto-set to `"rust-sdk@{version}"` if omitted. Omit in agent-oriented examples unless your product intentionally sets it.
 
 At least one of `options.code` or `options.prompt` must be non-empty; otherwise the SDK returns `FirecrawlError::Misuse` before calling the API.
 
@@ -442,8 +506,10 @@ The v2 OpenAPI spec currently models the interact request body with `code` as re
 - Deprecated aliases: `scrape_execute`, `stop_interactive_browser`, and `delete_scrape_browser` map to `interact` and `stop_interaction`.
 - `ScrapeOptions` includes dedicated `json_options`, `screenshot_options`, and `change_tracking_options` for advanced formats.
 - `search_and_scrape(query, limit)` is a convenience helper: it calls `search` with default `ScrapeOptions` and returns `Vec<Document>` built from `SearchResultOrDocument::Document` entries in `data.web` (see `search.rs`).
+- `scrape_with_schema(url, schema, prompt)` is a convenience helper for JSON extraction: it wraps `scrape` with `Format::Json` and `JsonOptions` and returns the extracted `Value`.
 - v2 SDK exports all types at the crate root: `use firecrawl::Client` (not `use firecrawl::v2::Client`).
 - Error types simplified in v2: `CrawlJobFailed(String, CrawlStatus)` → `JobFailed(String)`, `Missuse` → `Misuse`.
+- The `origin` field on `SearchOptions`, `ScrapeOptions`, and `ScrapeExecuteOptions` is auto-set to `"rust-sdk@{version}"` if not explicitly provided.
 
 ## Source Of Truth
 
