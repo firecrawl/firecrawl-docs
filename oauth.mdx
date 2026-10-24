@@ -1,0 +1,192 @@
+---
+title: "OAuth for apps"
+description: "Let users connect their own Firecrawl account to your app with OAuth instead of pasting an API key"
+og:title: "OAuth for apps | Firecrawl"
+og:description: "Let users connect their own Firecrawl account to your app with OAuth instead of pasting an API key"
+---
+
+Firecrawl runs an OAuth 2.1 authorization server. Your app sends the user to Firecrawl, the user signs in and picks a team, and your app gets an access token it can use on the Firecrawl REST API in place of an API key. Usage is billed to the team the user picked.
+
+<Note>
+If your platform creates Firecrawl accounts for its users and pays for their usage, use [Firecrawl for Platforms](/firecrawl-for-platforms) instead. OAuth is for users who bring their own Firecrawl account.
+</Note>
+
+## Overview
+
+| | |
+| --- | --- |
+| Discovery | `https://www.firecrawl.dev/.well-known/oauth-authorization-server` |
+| Authorization endpoint | `https://www.firecrawl.dev/api/oauth/authorize` |
+| Token endpoint | `https://www.firecrawl.dev/api/oauth/token` |
+| Revocation endpoint | `https://www.firecrawl.dev/api/oauth/revoke` |
+| Registration endpoint | `https://www.firecrawl.dev/api/oauth/register` |
+| Resource (audience) | `https://api.firecrawl.dev/` |
+| Grant types | `authorization_code`, `refresh_token` |
+| PKCE | Required, `S256` only |
+| Client authentication | `none` (public clients, no client secret) |
+| Access token lifetime | 1 hour, prefix `fco_` |
+| Refresh token lifetime | 90 days, prefix `fcr_`, single use |
+
+## Scopes
+
+| Scope | Grants |
+| --- | --- |
+| `firecrawl:global` | Full access to the Firecrawl REST API on the chosen team, using that team's credits. This is the default when `scope` is omitted. |
+| `offline_access` | Tells the user on the consent screen that your app stays connected until they revoke it. Requires `firecrawl:global`. |
+
+A token can do anything an API key on that team can do. Request only what you need and keep tokens on your server.
+
+## Register your app
+
+Your app needs a `client_id`. There are two ways to get one, and neither needs approval from Firecrawl.
+
+<Tabs>
+  <Tab title="Dynamic Client Registration">
+    Register once with [RFC 7591](https://www.rfc-editor.org/rfc/rfc7591) and store the `client_id` it returns.
+
+    ```bash
+    curl -X POST https://www.firecrawl.dev/api/oauth/register \
+      -H "Content-Type: application/json" \
+      -d '{
+        "client_name": "Acme Builder",
+        "redirect_uris": ["https://acme.example/oauth/firecrawl/callback"],
+        "grant_types": ["authorization_code", "refresh_token"],
+        "token_endpoint_auth_method": "none"
+      }'
+    ```
+
+    The `client_name` is what users see on the consent screen.
+  </Tab>
+  <Tab title="Client ID Metadata Document">
+    Host a JSON metadata document at an HTTPS URL you control and use that URL as your `client_id`. Firecrawl fetches it during authorization, so you can update your name and redirect URIs without registering again. The consent screen shows the document's host to the user.
+
+    ```json
+    {
+      "client_id": "https://acme.example/oauth/firecrawl-client.json",
+      "client_name": "Acme Builder",
+      "redirect_uris": ["https://acme.example/oauth/firecrawl/callback"],
+      "grant_types": ["authorization_code", "refresh_token"],
+      "response_types": ["code"],
+      "token_endpoint_auth_method": "none"
+    }
+    ```
+  </Tab>
+</Tabs>
+
+Redirect URIs must use HTTPS. `http://localhost` and other loopback addresses are allowed for local development. A redirect URI may not contain a fragment or user info, and the URI you send at authorization must match a registered one exactly.
+
+## Authorize
+
+Generate a PKCE `code_verifier` and its S256 `code_challenge`, then send the user's browser to the authorization endpoint.
+
+```text
+https://www.firecrawl.dev/api/oauth/authorize
+  ?response_type=code
+  &client_id=YOUR_CLIENT_ID
+  &redirect_uri=https%3A%2F%2Facme.example%2Foauth%2Ffirecrawl%2Fcallback
+  &code_challenge=CODE_CHALLENGE
+  &code_challenge_method=S256
+  &scope=firecrawl%3Aglobal%20offline_access
+  &resource=https%3A%2F%2Fapi.firecrawl.dev%2F
+  &state=RANDOM_STATE
+```
+
+| Parameter | Required | Notes |
+| --- | --- | --- |
+| `response_type` | Yes | Must be `code`. |
+| `client_id` | Yes | From registration, or your metadata document URL. |
+| `redirect_uri` | Yes | Must match a registered redirect URI. |
+| `code_challenge` | Yes | Base64url SHA-256 of the `code_verifier`. |
+| `code_challenge_method` | Yes | Must be `S256`. |
+| `scope` | No | Space-separated. Defaults to `firecrawl:global`. |
+| `resource` | No | `https://api.firecrawl.dev/` for the REST API. This is the default. |
+| `state` | Recommended | Returned unchanged. Check it on the callback. |
+
+The user signs in if needed, chooses a team, and approves. Firecrawl then redirects to your `redirect_uri` with `code` and `state`. The code is valid for a short time and only once.
+
+If the user cancels, Firecrawl redirects with `error=access_denied`.
+
+## Exchange the code
+
+```bash
+curl -X POST https://www.firecrawl.dev/api/oauth/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d grant_type=authorization_code \
+  -d code=AUTHORIZATION_CODE \
+  -d code_verifier=CODE_VERIFIER \
+  -d client_id=YOUR_CLIENT_ID \
+  -d redirect_uri=https://acme.example/oauth/firecrawl/callback \
+  -d resource=https://api.firecrawl.dev/
+```
+
+The token endpoint accepts `application/x-www-form-urlencoded` or JSON.
+
+```json
+{
+  "access_token": "fco_...",
+  "token_type": "bearer",
+  "expires_in": 3600,
+  "refresh_token": "fcr_...",
+  "scope": "firecrawl:global offline_access",
+  "user_id": "...",
+  "team_id": "..."
+}
+```
+
+`user_id` and `team_id` identify who authorized and which team is billed. Store both tokens server-side.
+
+## Call the API
+
+Send the access token as a bearer token, exactly like an API key.
+
+```bash
+curl -X POST https://api.firecrawl.dev/v2/scrape \
+  -H "Authorization: Bearer fco_..." \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}'
+```
+
+The SDKs accept the token wherever they take an API key, for example `new Firecrawl({ apiKey: "fco_..." })`.
+
+## Refresh
+
+Access tokens expire after one hour. Exchange the refresh token for a new pair before or after expiry.
+
+```bash
+curl -X POST https://www.firecrawl.dev/api/oauth/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d grant_type=refresh_token \
+  -d refresh_token=fcr_... \
+  -d client_id=YOUR_CLIENT_ID
+```
+
+The response has the same shape as the code exchange. Refresh tokens rotate: each one works once, so always store the new `refresh_token` from the response. Using a refresh token a second time is treated as a stolen token: Firecrawl revokes the whole connection, including the tokens the first refresh just returned, and the user has to connect your app again. Serialize refreshes per connection and never retry a refresh that returned `invalid_grant`.
+
+## Revoke
+
+Call the revocation endpoint ([RFC 7009](https://www.rfc-editor.org/rfc/rfc7009)) when the user disconnects Firecrawl in your app. Send the refresh token: that revokes the whole connection, including its access token and the key behind it. Sending an access token only invalidates that access token; the refresh token keeps working and the connection stays listed in the user's Settings.
+
+```bash
+curl -X POST https://www.firecrawl.dev/api/oauth/revoke \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d token=fcr_...
+```
+
+The endpoint returns `200` even when the token is unknown or already revoked. Users can also revoke your app from [Settings](https://www.firecrawl.dev/app/settings?tab=mcp). A connection also ends when the authorizing user leaves the team.
+
+## Errors
+
+The authorization and token endpoints return standard OAuth errors as JSON: `{"error": "...", "error_description": "..."}`.
+
+| Error | Endpoint | Meaning | What to do |
+| --- | --- | --- | --- |
+| `invalid_request` | authorize, token | A required parameter is missing or malformed, for example no `code_challenge` or an unregistered `redirect_uri`. | Fix the request. |
+| `invalid_client` | authorize | The `client_id` is unknown or its metadata document can't be used. | Check registration. |
+| `unsupported_response_type` | authorize | `response_type` isn't `code`. | Use `code`. |
+| `invalid_scope` | authorize, token | A scope isn't supported, or `offline_access` was sent without `firecrawl:global`. | Request supported scopes. |
+| `access_denied` | redirect | The user cancelled on the consent screen. | Let the user try again. |
+| `invalid_grant` | token | The code or refresh token is invalid, expired, already used, or revoked; the PKCE verifier, `client_id`, `redirect_uri` or `resource` doesn't match; or the user left the team. | Send the user through authorization again. |
+| `unsupported_grant_type` | token | `grant_type` isn't `authorization_code` or `refresh_token`. | Fix the request. |
+| `server_error` | any | Temporary failure. | Retry with backoff. |
+
+On the REST API, an OAuth token that is expired, revoked, or unknown gets `401` with `Unauthorized: Invalid or expired OAuth token`. Refresh once, and if that fails with `invalid_grant`, ask the user to reconnect. A `503` with `OAuth authentication is temporarily unavailable` is temporary; retry with backoff. Other errors, such as `402` for insufficient credits, are the same as with an API key.
