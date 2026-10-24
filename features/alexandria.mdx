@@ -177,10 +177,55 @@ if catalogue.items and catalogue.items[0].get("next"):
 
 [Agent](/features/agent) runs can call your team's providers on their own while they research. Send `exchange: { "enabled": true }` with the request, and pin up to five providers with `toolkits` if you want. Without `exchange`, an API or SDK run uses the web only. See [Use your connected Alexandria tools](/features/agent#use-your-connected-alexandria-tools).
 
+## Zero Data Retention (ZDR)
+
+[Zero Data Retention](/security#data-handling-and-zero-data-retention) on an Alexandria call means Firecrawl returns the provider response to you on that request and does not keep it afterward. The activity log keeps billing metadata — whether the call succeeded, how long it took, and the credit cost — and drops the target, the call options, and any error text. This is the same `zeroDataRetention` field as [Scrape ZDR](/features/scrape#zero-data-retention-zdr). The cost and the providers that accept it are different.
+
+A provider supports ZDR when its page in the [Alexandria app](https://www.firecrawl.dev/app/alexandria) shows a **ZDR supported** pill. Hovering the pill says ZDR costs +1 credit per request when enabled. That credit is on top of the tool's listed price. The response field `data.creditsCost` is the total for the request.
+
+To enable ZDR, set `zeroDataRetention: true` on the scrape body, as a sibling of `alexandria`. The sample below uses this page's example tool so you can see where the field goes. Send it for a provider whose page shows the pill:
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/scrape \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY" \
+  -d '{
+    "alexandria": {
+      "provider": "particle",
+      "capability": "podcasts/episodes/search",
+      "options": { "semantic_search": "AI agents", "limit": 2 }
+    },
+    "zeroDataRetention": true
+  }'
+```
+
+`timeout`, `origin`, and `integration` may sit beside `alexandria` as well. `url`, `formats`, and other scrape options may not.
+
+If your team has zero data retention forced on, every Alexandria call runs with ZDR, including a request that leaves `zeroDataRetention` out.
+
+A capability that cannot honor ZDR fails the request with [`zero_data_retention_unsupported`](/api-reference/errors) (400). Check the provider page for the pill before you send the flag.
+
+<Note>
+The current JavaScript and Python SDKs do not send `zeroDataRetention` on an Alexandria scrape. JavaScript rejects any field other than `alexandria`, `requestId`, `timeout`, `integration`, and `origin`. Python forwards `timeout`, `integration`, and `request_id` only. Send the HTTP request above.
+</Note>
+
+### Retrying a ZDR call
+
+Send an `x-request-id` header when you may retry. It is 1 to 128 characters of letters, digits, `.`, `_`, `:`, and `-`, and the response echoes it back. For a call that ran without ZDR, the same id and the same body replay the stored response and do not run the provider again.
+
+Under ZDR the response is not stored. After the call completes, the same `x-request-id` returns [`response_not_retained`](/api-reference/errors) (409). Send a new `x-request-id` to run the call again. That is a new charge.
+
+Reusing an `x-request-id` with a different body, including a different `zeroDataRetention` value, returns [`duplicate_request`](/api-reference/errors) (409).
+
+Domain matching on a URL scrape (`domainTools: true`) stays unavailable with zero data retention and returns 403. See [Alexandria data tools](/features/scrape#alexandria-data-tools).
+
+An [Agent](/features/agent#zero-data-retention-zdr) run with `zeroDataRetention` only calls Alexandria capabilities that support ZDR.
+
 ## Pricing and access
 
 - **Tool discovery:** free. Use `sources: ["alexandria"]` for tools only, or `["web", "alexandria"]` to include paid web results.
 - **Execution:** charged at the tool's listed price.
+- **Zero data retention:** +1 credit per request, on top of the tool price, for providers that show **ZDR supported**. See [Zero Data Retention](#zero-data-retention-zdr).
 - **Provider terms:** a `THIRD_PARTY_DATA_TERMS_REQUIRED` error includes `requiresAction.url`. An org admin must review and accept the terms there. Agents need explicit user authorization before accepting terms. [Agent](/features/agent#data-providers-that-need-terms) runs skip providers whose terms your team hasn't accepted and report them in `exchange.skippedProviders`.
 
 <AccordionGroup>
