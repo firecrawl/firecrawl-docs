@@ -5,7 +5,9 @@ description: 'Give AI agents live scores, NFL injury reports, fantasy projection
 icon: 'football'
 ---
 
-Firecrawl Alexandria gives AI agents structured sports data through the same Firecrawl API key they use for search and scrape. Your agent finds a sports tool with a free search, then calls it with `/scrape` and gets JSON back: scores and schedules, official NFL injury reports, weekly fantasy projections and rankings, and public league data from Sleeper and Yahoo.
+Firecrawl Alexandria is a catalogue of data tools from providers like ESPN, NFL.com, and Sleeper that your AI agent calls through Firecrawl, with the same API key it uses for search and scrape. Your agent finds a sports tool with a free search, then runs it with Firecrawl `/scrape` and gets JSON back.
+
+The sports tools cover scores and schedules, official NFL injury reports, weekly fantasy projections and rankings, and public league data from Sleeper and Yahoo.
 
 Use it to build fantasy apps, sports chatbots, and research agents that answer "who should I start this week?" from this week's projections and injury reports.
 
@@ -27,7 +29,11 @@ ESPN covers the NFL, NBA, WNBA, MLB, NHL, college sports, and soccer competition
 
 ## How does Firecrawl Alexandria return sports data?
 
-Firecrawl Alexandria runs in three calls. A `/search` with `sources: ["alexandria"]` returns matching tools for free, Find Tools returns a tool's inputs and price for free, and `/scrape` with an `alexandria` body runs the tool and bills its listed credits.
+Each provider offers capabilities, which are the individual tools your agent calls by name, such as `sleeper-com` with `fantasy-football-leagues/trending_players`. Getting data takes three calls:
+
+- A Firecrawl `/search` with `sources: ["alexandria"]` returns matching tools for free.
+- Find Tools (`find_tools` in Python, `findTools` in Node) returns a tool's inputs and price for free.
+- A Firecrawl `/scrape` with an `alexandria` body runs the tool and bills its listed credits.
 
 <Steps>
   <Step title="Find a tool">
@@ -41,7 +47,7 @@ Firecrawl Alexandria runs in three calls. A `/search` with `sources: ["alexandri
   </Step>
 </Steps>
 
-`find_tools` and `scrape(alexandria=...)` need the Python or Node SDK at version 4.48.0 or later. Firecrawl Alexandria needs an [API key](https://www.firecrawl.dev/app/api-keys); it doesn't run keyless.
+The examples need the Python SDK 4.44.0 or later, or the Node SDK 4.41.0 or later. Firecrawl Alexandria needs an [API key](https://www.firecrawl.dev/app/api-keys); it doesn't run keyless.
 
 ### Find sports tools with a free search
 
@@ -89,7 +95,7 @@ curl -s https://api.firecrawl.dev/v2/search \
 ```
 </CodeGroup>
 
-The search returned these tools on October 26, 2026 (cURL response, first three of five):
+The search returned these tools on October 26, 2026 (cURL response, first three results):
 
 ```json
 {
@@ -117,7 +123,7 @@ The search returned these tools on October 26, 2026 (cURL response, first three 
 }
 ```
 
-The ranking can change between identical calls, so pick a tool by its provider and capability rather than by its position in the list.
+Pick a tool by its provider and capability, since the order of results can vary. If discovery returns `TOOL_DISCOVERY_UNAVAILABLE`, retry the request.
 
 ### Get this week's fantasy projections
 
@@ -288,7 +294,7 @@ Pass a capability from that list plus `expand: ["options", "response"]` to read 
 
 ## How do you combine sports providers in one agent?
 
-A waiver-wire assistant takes the players most added across Sleeper leagues and attaches this week's StartWho projection to each one, using two providers on one API key.
+A waiver-wire assistant takes the players most added across Sleeper leagues and ranks them by their CBS Sports rest-of-season projection, using two providers on one API key.
 
 <CodeGroup>
 ```python Python
@@ -312,18 +318,22 @@ trending = run(
     "fantasy-football-leagues/trending_players",
     {"type": "add", "limit": 10},
 )
-projections = run(
-    "startwho-com",
-    "fantasy-sports-rankings/projections",
-    {"position": "FLX", "scoring": "PPR"},
-)
 
-points = {p["name"]: p["projected_points"] for p in projections["players"]}
+projected = {}
+for position in sorted({p["position"] for p in trending["players"]}):
+    cbs = run(
+        "cbssports-com",
+        "fantasy-sports-rankings/projections",
+        {"position": position, "type": "ros", "scoring": "PPR"},
+    )
+    for row in cbs["players"]:
+        projected[row["name"]] = row["fantasy_points"]
 
-for player in trending["players"]:
-    projected = points.get(player["name"], "-")
-    flags = ",".join(player["flags"]) or "-"
-    print(f'{player["name"]:<20} {player["position"]:<3} {player["count"]:>7} adds  proj {projected:<5} flags {flags}')
+ranked = sorted(trending["players"], key=lambda p: projected.get(p["name"], 0), reverse=True)
+
+for player in ranked:
+    points = projected.get(player["name"], "-")
+    print(f'{player["name"]:<20} {player["position"]:<3} {player["count"]:>7} adds  ROS pts {points}')
 ```
 
 ```javascript JavaScript
@@ -338,36 +348,47 @@ async function run(provider, capability, options) {
   return result.data;
 }
 
-const [trending, projections] = await Promise.all([
-  run("sleeper-com", "fantasy-football-leagues/trending_players", { type: "add", limit: 10 }),
-  run("startwho-com", "fantasy-sports-rankings/projections", { position: "FLX", scoring: "PPR" }),
-]);
+const trending = await run("sleeper-com", "fantasy-football-leagues/trending_players", {
+  type: "add",
+  limit: 10,
+});
 
-const points = new Map(projections.players.map((p) => [p.name, p.projected_points]));
+const projected = new Map();
+for (const position of new Set(trending.players.map((p) => p.position))) {
+  const cbs = await run("cbssports-com", "fantasy-sports-rankings/projections", {
+    position,
+    type: "ros",
+    scoring: "PPR",
+  });
+  for (const row of cbs.players) projected.set(row.name, row.fantasy_points);
+}
 
-for (const p of trending.players) {
-  const flags = p.flags.join(",") || "-";
-  console.log(p.name, p.position, `${p.count} adds`, `proj ${points.get(p.name) ?? "-"}`, `flags ${flags}`);
+const ranked = [...trending.players].sort(
+  (a, b) => (projected.get(b.name) ?? 0) - (projected.get(a.name) ?? 0),
+);
+
+for (const p of ranked) {
+  console.log(p.name, p.position, `${p.count} adds`, `ROS pts ${projected.get(p.name) ?? "-"}`);
 }
 ```
 </CodeGroup>
 
-The Python version printed this on Monday, October 26, 2026, after the Sunday games:
+The Python version printed this on October 26, 2026:
 
 ```text
-Darius Cooper        WR   773521 adds  proj 9.6   flags -
-Seth McGowan         RB   466504 adds  proj -     flags locked
-Caleb Douglas        WR   273088 adds  proj -     flags locked
-Kaelon Black         RB   256354 adds  proj -     flags locked
-KC Concepcion Jr.    WR   233577 adds  proj -     flags locked
-Emanuel Wilson       RB   188829 adds  proj 11    flags locked
-Tyler Higbee         TE   184284 adds  proj 10    flags locked
-Omar Cooper Jr.      WR   133432 adds  proj -     flags locked
-Justice Hill         RB   133155 adds  proj -     flags locked
-Konata Mumpfield     WR   131130 adds  proj 5.7   flags locked
+Caleb Douglas        WR   286544 adds  ROS pts 111.9
+Omar Cooper Jr.      WR   138072 adds  ROS pts 103.9
+Tyler Higbee         TE   140067 adds  ROS pts 76.8
+Emanuel Wilson       RB   160731 adds  ROS pts 73.8
+Makai Lemon          WR   108340 adds  ROS pts 68.8
+Justice Hill         RB   117468 adds  ROS pts 60.6
+Darius Cooper        WR   644343 adds  ROS pts 50.3
+Kaelon Black         RB   261842 adds  ROS pts 41.1
+Seth McGowan         RB   371792 adds  ROS pts 6.9
+KC Concepcion Jr.    WR   237150 adds  ROS pts -
 ```
 
-Sleeper marks a player `locked` once his game has kicked off, and its flags also mark players who are out, on bye, or injured. Have your agent read the flags before it suggests a start, sit, add, or drop. A dash under `proj` means StartWho had no prop-based projection for that player that week.
+The most-added player that day ranked seventh by rest-of-season projection, so the ranking changes which pickup to make. CBS Sports projects the top 100 players per position, and a dash means the player wasn't in that list. To check a pickup before a start, read the Sleeper player's `flags`, which mark players who are locked, out, on bye, or injured.
 
 ## How do you use sports data from the CLI or an MCP client?
 
@@ -380,7 +401,7 @@ The [Firecrawl CLI](/sdks/cli) and the [MCP server](/mcp-server) expose the same
 firecrawl search "weekly fantasy football projections in PPR" --sources alexandria --limit 5
 
 # List a provider's tools and prices.
-firecrawl find-tools --options '{"providers":["sleeper-com"],"level":"tools"}'
+firecrawl find-tools --options '{"providers":["sleeper-com"],"level":"tools"}' --include-costs
 
 # Run a tool.
 firecrawl scrape --alexandria startwho-com/fantasy-sports-rankings/projections --options '{"position":"QB","scoring":"PPR","limit":3}'
@@ -400,7 +421,7 @@ Discovery and Find Tools are free. Running a tool bills the credits listed in it
 
 ## How accurate is Firecrawl Alexandria on fantasy questions?
 
-[Firecrawl's fantasy data benchmark](https://www.firecrawl.dev/benchmarks/fantasy) tests agents on 272 real fantasy football questions from the 2026 NFL season, graded by code. Agents using Firecrawl Alexandria answered 80.5% of them correctly. The [FantasyBench write-up](https://www.firecrawl.dev/blog/best-fantasy-data-tools-ai-agents) breaks the results down by question type.
+Firecrawl Alexandria was the most accurate of three setups on [Firecrawl's fantasy data benchmark](https://www.firecrawl.dev/benchmarks/fantasy), 8.8 points ahead of native web search. The benchmark asks 272 real fantasy questions from the 2026 NFL season and grades answers against nflverse stats and saved projections from 7 sites. Firecrawl Alexandria answered above 80% of them fully right, and the gap was widest on weekly projections. The [FantasyBench write-up](https://www.firecrawl.dev/blog/best-fantasy-data-tools-ai-agents) breaks the results down by question type.
 
 ## FAQs
 
@@ -418,11 +439,11 @@ Discovery and Find Tools are free. Running a tool bills the credits listed in it
   </Accordion>
 
   <Accordion title="Which sports does Firecrawl Alexandria cover?">
-    Fantasy tools focus on the NFL, with Yahoo and CBS Sports adding fantasy basketball. ESPN adds scores, rosters, standings, and injuries for the NBA, WNBA, MLB, NHL, college sports, and soccer. Baseball Savant adds MLB Statcast data, and World Table Tennis adds table tennis results and rankings.
+    Fantasy tools focus on the NFL, with Yahoo and CBS Sports adding fantasy basketball. ESPN adds scores, rosters, and standings for the NBA, WNBA, MLB, NHL, college sports, and soccer, plus injury reports for the NFL, NBA, WNBA, MLB, NHL, and college football. Baseball Savant adds MLB Statcast data, and World Table Tennis adds table tennis results and rankings.
   </Accordion>
 
   <Accordion title="Do I need an account with each sports provider?">
-    No. Every call runs on your Firecrawl API key and credits. If a provider requires its data terms to be accepted, the response says so and includes a link for an org admin.
+    You don't need separate provider accounts or API keys. Every call runs on your Firecrawl API key and credits. Some providers require an org admin to accept their data terms first, and the response includes a link to do that.
   </Accordion>
 
   <Accordion title="Can I use sports data in ChatGPT or Claude?">
