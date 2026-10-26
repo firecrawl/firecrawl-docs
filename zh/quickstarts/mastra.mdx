@@ -1,8 +1,8 @@
 ---
 title: "Mastra"
-description: "将 Firecrawl 集成到 Mastra 工具中，让你的代理和工作流能够搜索并抓取实时网页数据。"
-og:title: "Mastra 入门指南 | Firecrawl"
-og:description: "将 Firecrawl 集成到 Mastra 工具中，让你的代理和工作流能够搜索并抓取实时网页数据。"
+description: "将 Firecrawl 集成到 Mastra 工具和智能体中，让它们能够搜索、抓取实时网页并与之交互。"
+og:title: "Mastra 快速入门 | Firecrawl"
+og:description: "将 Firecrawl 集成到 Mastra 工具和智能体中，让它们能够搜索、抓取实时网页并与之交互。"
 ---
 
 ## 前提条件 {#prerequisites}
@@ -35,7 +35,7 @@ import { Firecrawl } from "firecrawl";
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 
-const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY! });
+const firecrawl = new Firecrawl();
 
 export const firecrawlSearch = createTool({
   id: "firecrawl-search",
@@ -52,10 +52,9 @@ export const firecrawlSearch = createTool({
   execute: async ({ query }) => {
     const results = await firecrawl.search(query, { limit: 3 });
     return {
-      results: (results.web ?? []).map((item) => ({
-        title: item.title ?? null,
-        url: item.url,
-      })),
+      results: (results.web ?? []).flatMap((item) =>
+        "url" in item ? [{ title: item.title ?? null, url: item.url }] : [],
+      ),
     };
   },
 });
@@ -108,10 +107,10 @@ export const mastra = new Mastra({
 
 ## 在 Studio 中测试 {#test-in-studio}
 
-运行开发服务器，并打开 [Mastra Studio](https://mastra.ai/docs/studio/overview)：
+运行开发服务器，并在 `http://localhost:4111` 打开 [Mastra Studio](https://mastra.ai/docs/studio/overview)：
 
 ```bash
-mastra dev
+npm run dev
 ```
 
 打开 **网页代理**，尝试以下 prompt：
@@ -119,15 +118,42 @@ mastra dev
 * &quot;查找最新的 Firecrawl 更新日志，并总结最近一次发布的内容。&quot;
 * &quot;搜索 Firecrawl 的定价，并提取各套餐档位。&quot;
 
-## 自托管 Firecrawl {#self-hosted-firecrawl}
+## 为智能体提供托管浏览器 {#give-the-agent-a-hosted-browser}
 
-如果你在本地运行 Firecrawl，请设置 `FIRECRAWL_API_URL`，并向客户端传入 `apiUrl`：
+对于需要点击、输入或滚动的页面，Mastra 的 [`@mastra/browser-firecrawl`](https://mastra.ai/integrations/browsers/firecrawl) 包会在 Firecrawl 浏览器会话中运行智能体的浏览器工具，无需在本地安装 Chromium。
+
+```bash
+npm install @mastra/browser-firecrawl agent-browser@0.19.0
+```
+
+<Note>
+  请将 `agent-browser` 的版本锁定为 0.19.0。之后的版本仅提供 CLI，会导致 `@mastra/browser-firecrawl` 导入失败，并报错 `Cannot find package .../agent-browser/index.js`。
+</Note>
+
+创建 `src/mastra/agents/browser-agent.ts`，然后参照 `webAgent` 的方式，在 Mastra 实例上注册 `browserAgent`：
 
 ```typescript
-const firecrawl = new Firecrawl({
-  apiKey: process.env.FIRECRAWL_API_KEY!,
-  apiUrl: process.env.FIRECRAWL_API_URL,
+import { Agent } from "@mastra/core/agent";
+import { FirecrawlBrowser } from "@mastra/browser-firecrawl";
+
+export const browserAgent = new Agent({
+  id: "browser-agent",
+  name: "Browser Agent",
+  instructions:
+    "Use the browser tools to open pages, click, and type. Take a snapshot after each action to check the result.",
+  model: "openai/gpt-5.4",
+  browser: new FirecrawlBrowser({ apiKey: process.env.FIRECRAWL_API_KEY }),
 });
+```
+
+默认情况下，每个对话会话都有各自独立的浏览器会话。如需了解共享会话、会话超时以及已保存的配置文件，请参见 [Mastra Firecrawl 浏览器文档](https://mastra.ai/integrations/browsers/firecrawl)。
+
+## 自托管 Firecrawl {#self-hosted-firecrawl}
+
+如果你自行部署运行 Firecrawl，请将 `FIRECRAWL_API_URL` 添加到 `.env` 中。SDK 会从环境变量中读取该值，因此上述工具无需任何变更：
+
+```bash
+FIRECRAWL_API_URL=http://localhost:3002
 ```
 
 ## 后续步骤 {#next-steps}

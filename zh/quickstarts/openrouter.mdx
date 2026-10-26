@@ -4,7 +4,7 @@ description: "将 Firecrawl 作为工具与 OpenRouter 提供的任意模型配�
 sidebarTitle: "OpenRouter"
 ---
 
-将 [OpenRouter](https://openrouter.ai) (一个面向数百个 LLM 的统一 API) 与 Firecrawl 搭配使用，即可为任意模型提供实时网页搜索、抓取和爬取能力。
+将 [OpenRouter](https://openrouter.ai) (一个面向数百个 LLM 的统一 API) 与面向 AI 智能体的上下文 API Firecrawl 搭配使用，即可为任意模型提供实时网络搜索和抓取能力。
 
 OpenRouter 的 API 与 OpenAI 兼容，因此你可以将 OpenAI SDK 指向 OpenRouter 的 base URL，再将 Firecrawl 的 Python 或 JavaScript SDK 作为工具使用。
 
@@ -23,13 +23,13 @@ export OPENROUTER_API_KEY=sk-or-YOUR-OPENROUTER-KEY
 
 ## 使用任意 OpenRouter 模型进行抓取 + 总结 {#scrape-summarize-with-any-openrouter-model}
 
-这会使用 Firecrawl 抓取页面，并用你在 OpenRouter 中选择的任意模型进行总结——这里以 Claude Haiku 4.5 为例。
+这会使用 Firecrawl 抓取页面，并用你在 OpenRouter 中选择的任意模型进行总结，这里以 Claude Haiku 4.5 为例。
 
 ```typescript
 import { Firecrawl } from 'firecrawl';
 import OpenAI from 'openai';
 
-const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+const firecrawl = new Firecrawl();
 
 const openrouter = new OpenAI({
   apiKey: process.env.OPENROUTER_API_KEY,
@@ -50,7 +50,7 @@ const completion = await openrouter.chat.completions.create({
 console.log(completion.choices[0]?.message.content);
 ```
 
-将 `model` 的值改为任意 [OpenRouter 支持的模型](https://openrouter.ai/models)——`openai/gpt-5`、`google/gemini-2.5-pro`、`meta-llama/llama-4-maverick` 等。
+将 `model` 的值改为任意 [OpenRouter 支持的模型](https://openrouter.ai/models)，例如 `openai/gpt-5`、`google/gemini-2.5-pro`、`meta-llama/llama-4-maverick` 等。
 
 ## 工具调用：由模型决定何时抓取 {#tool-calling-model-decides-when-to-scrape}
 
@@ -61,7 +61,7 @@ import { Firecrawl } from 'firecrawl';
 import OpenAI from 'openai';
 import { z } from 'zod';
 
-const firecrawl = new Firecrawl({ apiKey: process.env.FIRECRAWL_API_KEY });
+const firecrawl = new Firecrawl();
 const openrouter = new OpenAI({
   apiKey: process.env.OPENROUTER_API_KEY,
   baseURL: 'https://openrouter.ai/api/v1',
@@ -94,7 +94,7 @@ const response = await openrouter.chat.completions.create({
 });
 
 const call = response.choices[0]?.message.tool_calls?.[0];
-if (call?.function.name === 'scrape_website') {
+if (call?.type === 'function' && call?.function.name === 'scrape_website') {
   const { url } = ScrapeArgs.parse(JSON.parse(call.function.arguments));
   const page = await firecrawl.scrape(url, { formats: ['markdown'] });
   console.log(page.markdown);
@@ -103,12 +103,16 @@ if (call?.function.name === 'scrape_website') {
 
 ## Python {#python}
 
+```bash
+pip install firecrawl-py openai
+```
+
 ```python
 import os
 from firecrawl import Firecrawl
 from openai import OpenAI
 
-firecrawl = Firecrawl(api_key=os.environ["FIRECRAWL_API_KEY"])
+firecrawl = Firecrawl()
 
 openrouter = OpenAI(
     api_key=os.environ["OPENROUTER_API_KEY"],
@@ -125,8 +129,29 @@ completion = openrouter.chat.completions.create(
 print(completion.choices[0].message.content)
 ```
 
+## 将 Firecrawl 用作 OpenRouter 的网页搜索引擎 {#firecrawl-as-openrouters-web-search-engine}
+
+OpenRouter 也可以在其服务端通过 Firecrawl 执行网络搜索。只需添加 `openrouter:web_search` 服务器工具，并将 `engine` 设为 `firecrawl`；模型会自行决定何时搜索，OpenRouter 再将搜索结果返回给模型。
+
+```bash
+curl https://openrouter.ai/api/v1/chat/completions \
+  -H "Authorization: Bearer sk-or-YOUR-OPENROUTER-KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "anthropic/claude-haiku-4.5",
+    "messages": [
+      { "role": "user", "content": "What changed in the latest Next.js release?" }
+    ],
+    "tools": [
+      { "type": "openrouter:web_search", "parameters": { "engine": "firecrawl", "max_results": 5 } }
+    ]
+  }'
+```
+
+OpenRouter 会将这些搜索的费用计入你的 OpenRouter 账户。有关其他参数及定价，请参见 OpenRouter 的[网络搜索文档](https://openrouter.ai/docs/guides/features/server-tools/web-search)。
+
 ## 说明 {#notes}
 
-* Firecrawl 完全不依赖特定模型——无需修改抓取代码，即可选择任意 OpenRouter 模型。
+* Firecrawl 完全不依赖特定模型，因此无需修改抓取代码，即可选择任意 OpenRouter 模型。
 * 许多热门的 OpenRouter 应用 (Cline、Roo Code、Kilo、Cursor、Continue) 都是可使用 Firecrawl MCP 的代理运行环境。请通过 [MCP 设置选择器](/zh/mcp-server) 连接其中一个。
 * 对于大型任务，请使用 [批量抓取](/zh/features/batch-scrape)，以避免超出 LLM 的上下文预算。

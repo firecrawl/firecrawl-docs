@@ -1,0 +1,148 @@
+---
+title: "Tines"
+description: "在 Tines stories 中通过 HTTP Request actions 调用 Firecrawl 的搜索、抓取、提取、映射和爬取功能"
+---
+
+<Note>
+  **Tines 文档：** [HTTP Request action](https://www.tines.com/docs/actions/types/http-request/) 和 [凭据](https://www.tines.com/docs/credentials/)
+
+  为 Tines stories 接入来自 Firecrawl 的实时网页数据
+</Note>
+
+## 概览 {#overview}
+
+Tines stories 可以通过 HTTP Request action 调用任意 REST API。将该 action 指向 Firecrawl API 后，story 即可进行网页搜索、将网页抓取为 markdown、提取结构化数据、映射站点或爬取整个站点，并将结果传递给 story 中的下一个 action。
+
+## 快速开始 {#quick-start}
+
+1. [创建 Firecrawl API 密钥](https://www.firecrawl.dev/app/api-keys)
+2. 在 Tines 中打开 **凭据**，创建一个名为 `firecrawl` 的 **Text** 凭据，并将密钥粘贴为凭据值
+3. 在 story 中添加一个 **HTTP Request** action，并按下方所示进行配置
+
+通过 `<<CREDENTIAL.firecrawl>>` 引用密钥，可避免密钥直接出现在 action 配置中。
+
+## 抓取网页 {#scrape-a-page}
+
+此操作会发送抓取请求，并以 markdown 格式输出网页内容：
+
+```json
+{
+  "url": "https://api.firecrawl.dev/v2/scrape",
+  "method": "post",
+  "content_type": "json",
+  "headers": {
+    "Authorization": "Bearer <<CREDENTIAL.firecrawl>>"
+  },
+  "payload": {
+    "url": "https://example.com",
+    "formats": ["markdown"],
+    "integration": "_tines"
+  }
+}
+```
+
+将 `https://example.com` 替换为上游事件中的 URL，例如 `<<receive_event.body.url>>`。可选的 `integration` 字段用于标记来自 Tines 的请求。
+
+## 功能概览 {#what-you-can-do}
+
+| 功能     | 端点                             | 使用场景                         |
+| ------ | ------------------------------ | ---------------------------- |
+| **搜索** | `POST /v2/search`              | 针对某个问题或告警查找信息来源，供后续操作使用      |
+| **抓取** | `POST /v2/scrape`              | 将 URL 转换为 markdown 或结构化 JSON |
+| **提取** | `POST /v2/scrape`，使用 `json` 格式 | 结合 prompt 和模式提取标题、产品详情等字段    |
+| **映射** | `POST /v2/map`                 | 列出站点上的所有 URL                 |
+| **爬取** | `POST /v2/crawl`               | 采集整个站点的页面，然后轮询获取结果           |
+
+所有端点均使用基础 URL `https://api.firecrawl.dev`、相同的 `Authorization` 标头以及 JSON 请求体。
+
+## 进行网页搜索 {#search-the-web}
+
+```json
+{
+  "url": "https://api.firecrawl.dev/v2/search",
+  "method": "post",
+  "content_type": "json",
+  "headers": {
+    "Authorization": "Bearer <<CREDENTIAL.firecrawl>>"
+  },
+  "payload": {
+    "query": "firecrawl web scraping",
+    "limit": 5,
+    "sources": ["web"],
+    "integration": "_tines"
+  }
+}
+```
+
+## 提取结构化数据 {#extract-structured-data}
+
+将 `formats` 条目设为 `json` 类型，并提供 prompt 和 JSON 模式：
+
+```json
+{
+  "url": "https://api.firecrawl.dev/v2/scrape",
+  "method": "post",
+  "content_type": "json",
+  "headers": {
+    "Authorization": "Bearer <<CREDENTIAL.firecrawl>>"
+  },
+  "payload": {
+    "url": "https://example.com",
+    "formats": [
+      {
+        "type": "json",
+        "prompt": "Extract the page title",
+        "schema": {
+          "type": "object",
+          "properties": { "title": { "type": "string" } }
+        }
+      }
+    ],
+    "integration": "_tines"
+  }
+}
+```
+
+## 爬取网站 {#crawl-a-site}
+
+爬取任务以异步方式运行：先用一个操作开始爬取，再用另一个操作读取结果。
+
+使用 `POST /v2/crawl` **开始爬取**：
+
+```json
+{
+  "url": "https://api.firecrawl.dev/v2/crawl",
+  "method": "post",
+  "content_type": "json",
+  "headers": {
+    "Authorization": "Bearer <<CREDENTIAL.firecrawl>>"
+  },
+  "payload": {
+    "url": "https://example.com",
+    "limit": 10,
+    "integration": "_tines"
+  }
+}
+```
+
+响应中会包含一个 `id`。使用第二个 HTTP Request 操作，根据该 `id` 读取爬取任务来**检查状态**，并重复执行，直到 `status` 变为 `completed`：
+
+```json
+{
+  "url": "https://api.firecrawl.dev/v2/crawl/<<start_crawl.body.id>>",
+  "method": "get",
+  "headers": {
+    "Authorization": "Bearer <<CREDENTIAL.firecrawl>>"
+  }
+}
+```
+
+此处的 `start_crawl` 是发起该爬取任务的 action 名称。
+
+## 资源 {#resources}
+
+* [Tines HTTP Request action](https://www.tines.com/docs/actions/types/http-request/)
+* [Tines 凭据](https://www.tines.com/docs/credentials/)
+* [Firecrawl API 简介](/zh/api-reference/v2-introduction)
+* [Firecrawl 抓取文档](/zh/features/scrape)
+* [Firecrawl 爬取文档](/zh/features/crawl)

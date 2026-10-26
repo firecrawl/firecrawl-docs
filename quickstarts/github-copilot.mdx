@@ -1,0 +1,168 @@
+---
+title: "MCP Web Search & Scrape in GitHub Copilot"
+description: "Add Firecrawl web scraping and search to GitHub Copilot CLI, Copilot in VS Code and the Copilot coding agent"
+sidebarTitle: "GitHub Copilot"
+---
+
+Connect [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli) or [Copilot in VS Code](https://code.visualstudio.com/docs/copilot/overview) to Firecrawl through the hosted MCP server, then sign in with your Firecrawl account. The [Copilot coding agent](#copilot-coding-agent) connects with an API key.
+
+The server URLs below are client configuration values, not pages to open directly in a browser.
+
+## Copilot CLI
+
+### 1. Add Firecrawl
+
+```bash
+copilot mcp add --transport http firecrawl https://mcp.firecrawl.dev/v2/mcp-oauth
+```
+
+This writes the server to `~/.copilot/mcp-config.json`. You can also run `/mcp add` inside an interactive session and choose the **HTTP** type, or edit the file directly:
+
+```json ~/.copilot/mcp-config.json
+{
+  "mcpServers": {
+    "firecrawl": {
+      "type": "http",
+      "url": "https://mcp.firecrawl.dev/v2/mcp-oauth",
+      "tools": ["*"]
+    }
+  }
+}
+```
+
+### 2. Sign in and verify
+
+```bash
+copilot
+```
+
+On the first connection, Copilot CLI opens the Firecrawl sign-in flow in your browser, where you choose a team and approve the connection. Enter `/mcp` to confirm that `firecrawl` is connected.
+
+### Use an API key instead
+
+For unattended use, [create a Firecrawl API key](https://www.firecrawl.dev/app/api-keys), export it as `FIRECRAWL_API_KEY`, and add the API-key endpoint with a bearer header:
+
+```bash
+copilot mcp add --transport http \
+  --header "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  firecrawl https://mcp.firecrawl.dev/v2/mcp
+```
+
+The key is stored in `~/.copilot/mcp-config.json`, so keep that file out of source control.
+
+## VS Code
+
+### 1. Add Firecrawl
+
+Run **MCP: Add Server** from the Command Palette, choose **HTTP**, and pick **Copilot Global** as the destination. Or add the server yourself to `~/.copilot/mcp-config.json` (every workspace) or to `.mcp.json` at your workspace root (shared with your team):
+
+```json ~/.copilot/mcp-config.json
+{
+  "mcpServers": {
+    "firecrawl": {
+      "type": "http",
+      "url": "https://mcp.firecrawl.dev/v2/mcp-oauth"
+    }
+  }
+}
+```
+
+These portable files use a top-level `mcpServers` object. VS Code still reads the older `.vscode/mcp.json` and user-profile `mcp.json` (a top-level `servers` object) for compatibility, but labels them deprecated.
+
+### 2. Sign in and verify
+
+Start the server from **MCP: List Servers**. When VS Code asks to authenticate, allow it and complete the Firecrawl sign-in in your browser. Then open Copilot Chat in **Agent** mode and select the tools icon to confirm that Firecrawl's tools are listed.
+
+### Use an API key instead
+
+Portable configuration files don't support VS Code input variables, so add the API-key endpoint with the Copilot CLI and keep the key in your environment:
+
+```bash
+copilot mcp add --transport http \
+  --header "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  firecrawl https://mcp.firecrawl.dev/v2/mcp
+```
+
+The key is stored in `~/.copilot/mcp-config.json`, so keep that file out of source control.
+
+If you use VS Code's Local harness and want VS Code to prompt for the key instead, put the server in `.vscode/mcp.json` with an input variable. Servers that need interactive input are not forwarded to Copilot harness sessions.
+
+```json .vscode/mcp.json
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "firecrawl-api-key",
+      "description": "Firecrawl API key",
+      "password": true
+    }
+  ],
+  "servers": {
+    "firecrawl": {
+      "type": "http",
+      "url": "https://mcp.firecrawl.dev/v2/mcp",
+      "headers": {
+        "Authorization": "Bearer ${input:firecrawl-api-key}"
+      }
+    }
+  }
+}
+```
+
+## Copilot coding agent
+
+The Copilot coding agent (also called Copilot cloud agent) works on issues and pull requests in GitHub. Its repository MCP settings do not support remote servers that use OAuth, so this setup stores a Firecrawl API key as an Agents secret and sends it as a header.
+
+### Requirements
+
+- A paid GitHub Copilot plan with the coding agent enabled for the repository.
+- Repository administrator access, which is needed to edit MCP settings and Agents secrets.
+- A [Firecrawl API key](https://www.firecrawl.dev/app/api-keys).
+
+### Set it up
+
+1. In your repository, open **Settings**, then **Secrets and variables**, then **Agents**.
+2. Select **New repository secret**, name it `COPILOT_MCP_FIRECRAWL_API_KEY`, paste your Firecrawl API key, and save. Copilot only passes Agents secrets whose names start with `COPILOT_MCP_` to MCP servers.
+3. Open **Settings**, then **Copilot**, then **MCP servers**.
+4. Paste this configuration into **MCP configuration** and select **Save MCP configuration**:
+
+```json
+{
+  "mcpServers": {
+    "firecrawl": {
+      "type": "http",
+      "url": "https://mcp.firecrawl.dev/v2/mcp",
+      "headers": {
+        "Authorization": "Bearer $COPILOT_MCP_FIRECRAWL_API_KEY"
+      },
+      "tools": ["firecrawl_search", "firecrawl_scrape", "firecrawl_map"]
+    }
+  }
+}
+```
+
+5. Assign an issue to Copilot. When its pull request appears, choose **View session**, open the **Start MCP Servers** step in the logs, and confirm that the Firecrawl tools are listed.
+
+<Warning>
+Copilot uses the tools in the `tools` list without asking for approval. Keep the list to the tools the agent needs. Use `"*"` only if you want every Firecrawl tool available.
+</Warning>
+
+## Try it
+
+```text
+Search the web for the latest Next.js App Router release notes and summarize the sources.
+```
+
+```text
+Scrape https://docs.firecrawl.dev and list the top-level sections.
+```
+
+See [choose a tool](/mcp-server/tools) for the full Firecrawl MCP tool list.
+
+## Troubleshooting
+
+- **Tools do not appear:** confirm that only one `firecrawl` server is configured, then restart Copilot CLI, or run **MCP: List Servers** in VS Code and restart the server.
+- **Sign-in is required again or returns `401`:** restart the server and complete the browser sign-in. A bare request to the OAuth server is expected to return `401` before authentication.
+- **An API-key connection returns `401`:** confirm that the URL is `https://mcp.firecrawl.dev/v2/mcp` (not `/v2/mcp-oauth`) and that the header is `Authorization: Bearer <FIRECRAWL_API_KEY>`.
+- **Organization policy:** if your GitHub organization restricts MCP servers in Copilot, an administrator must allow Firecrawl before it can connect.
+- **Coding agent: the Firecrawl tools are missing from the session log:** confirm the secret name is exactly `COPILOT_MCP_FIRECRAWL_API_KEY` and that it is an Agents secret, not an Actions secret.

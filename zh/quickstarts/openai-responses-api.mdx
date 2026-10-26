@@ -1,0 +1,72 @@
+---
+sidebarTitle: "OpenAI Responses API"
+title: "在 OpenAI 智能体中通过 MCP 实现网页搜索与抓取"
+description: "通过 Responses API 的 MCP 工具，为 OpenAI 模型提供 Firecrawl 网页搜索与抓取能力"
+---
+
+import AgentCapabilityCards from "/snippets/zh/shared/agent-capability-cards.mdx";
+
+在 Responses API 中将远程托管的 MCP 服务器添加为远程 `mcp` 工具，即可将 OpenAI 模型连接到 Firecrawl。OpenAI 会列出各项 Firecrawl 工具，模型则调用这些工具进行网页搜索并读取页面内容。
+
+<Note>
+  根据 OpenAI 的文档，Agent Builder 计划于 2026 年 11 月 30 日停止服务。本页介绍的远程 MCP 工具不依赖 Agent Builder。
+</Note>
+
+## 前置要求 {#requirements}
+
+* 将 OpenAI API 密钥配置到 `OPENAI_API_KEY` 中，并安装 `openai` Python 包。
+* 将 [Firecrawl API 密钥](https://www.firecrawl.dev/app/api-keys)配置到 `FIRECRAWL_API_KEY` 中。
+
+## 快速配置 {#quick-setup}
+
+将 Firecrawl 服务器添加到 `tools` 列表中。`authorization` 字段用于传入你的 Firecrawl API 密钥，`allowed_tools` 则用于限制模型可调用的工具：
+
+```python
+import os
+from openai import OpenAI
+
+client = OpenAI()
+
+response = client.responses.create(
+    model="gpt-6-astra",
+    tools=[
+        {
+            "type": "mcp",
+            "server_label": "firecrawl",
+            "server_description": "Search the web and read pages as Markdown.",
+            "server_url": "https://mcp.firecrawl.dev/v2/mcp",
+            "authorization": os.environ["FIRECRAWL_API_KEY"],
+            "allowed_tools": ["firecrawl_search", "firecrawl_scrape"],
+            "require_approval": "never",
+        }
+    ],
+    input="Search the web for the latest Next.js release notes and summarize the sources.",
+)
+
+print(response.output_text)
+```
+
+OpenAI 不会存储 `authorization` 值，因此每次请求都需要携带该值。如果希望在数据发送到服务器之前逐一审核每次工具调用，请将 `require_approval` 设置为 `"always"`。
+
+有关基于密钥的连接的更多信息，请参见[配置 API 密钥](/zh/mcp-server/keyless#add-an-api-key)。在此配置方式下，你的代码不会直接调用 Firecrawl API，而是由 OpenAI 代你连接 MCP 服务器。
+
+## 试一试 {#try-it}
+
+```text
+进行网页搜索，查找最新的 TypeScript 版本发布说明，并对各信息来源进行总结。
+```
+
+```text
+抓取 https://firecrawl.dev 并说明它的功能。
+```
+
+## 你可以用它做什么 {#what-you-can-do}
+
+<AgentCapabilityCards />
+
+## 故障排除 {#troubleshooting}
+
+* **列出工具时请求失败：** 确认 `server_url` 与 `https://mcp.firecrawl.dev/v2/mcp` 完全一致，并确认运行脚本的环境中已设置 `FIRECRAWL_API_KEY`。
+* **服务器返回 `401`：** 更换 API 密钥后重新发送请求。OpenAI 不会在请求之间保留 `authorization` 值。
+* **缺少某个工具：** 将其名称添加到 `allowed_tools`，或移除 `allowed_tools`，以导入服务器公开的全部工具。
+* **模型未调用 Firecrawl 就直接给出答案：** 在 prompt 中明确指定工具名称，例如“Use firecrawl&#95;search to find...”。

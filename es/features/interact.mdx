@@ -290,11 +290,11 @@ Las sesiones también expiran automáticamente según el TTL (predeterminado: 10
   Detén siempre las sesiones al terminar para evitar Billing innecesario. Los credits se prorratean por segundo, con un cargo mínimo de un minuto de browser. Las sesiones que usan un `prompt` facturan 7 credits por minuto de browser; las sesiones sin prompt facturan 2. Consulta [Billing](/es/billing#credit-costs-per-endpoint) para más detalles.
 </Warning>
 
-## Perfiles persistentes con Scraping + Interact {#persistent-profiles-with-scrape-interact}
+## Perfiles persistentes con Extracción de datos web + Interact {#persistent-profiles-with-scrape-interact}
 
-De forma predeterminada, cada sesión de scraping + interact se inicia con un navegador limpio. Con `profile`, puedes guardar y reutilizar el estado del navegador (cookies, localStorage, sesiones) entre scrapings. Esto resulta útil para mantener la sesión iniciada y conservar las preferencias.
+De forma predeterminada, cada sesión de extracción de datos web + interact se inicia con un navegador limpio. Con `profile`, puedes guardar y reutilizar el estado del navegador (cookies, localStorage, sesiones) entre extracciones de datos web. Esto resulta útil para mantener la sesión iniciada y conservar las preferencias.
 
-Pasa el objeto `profile` en la solicitud inicial `POST /v2/scrape`. No pases `profile` a `POST /v2/scrape/{scrapeId}/interact`; la sesión de interact reutiliza la sesión del navegador y la configuración del perfil del trabajo de scraping. Detén la sesión de interact con `DELETE /v2/scrape/{scrapeId}/interact` para que puedan guardarse los cambios del perfil.
+Pasa el objeto `profile` en la solicitud inicial `POST /v2/scrape`. No pases `profile` a `POST /v2/scrape/{scrapeId}/interact`; la sesión de interact reutiliza la sesión del navegador y la configuración del perfil del trabajo de extracción de datos web. Detén la sesión de interact con `DELETE /v2/scrape/{scrapeId}/interact` para que puedan guardarse los cambios del perfil con permisos de escritura.
 
 ```bash cURL
 curl -X POST "https://api.firecrawl.dev/v2/scrape" \
@@ -322,10 +322,10 @@ curl -X DELETE "https://api.firecrawl.dev/v2/scrape/SCRAPE_ID/interact" \
 
 El ciclo de vida del perfil es:
 
-1. Crea el scraping con `profile.name` y `saveChanges: true`.
+1. Crea la extracción de datos web con `profile.name` y `saveChanges: true`.
 2. Ejecuta interacciones con prompt o código usando el `scrapeId` devuelto.
 3. Detén la sesión para guardar cookies, localStorage y otro estado del navegador.
-4. Inicia un scraping posterior con el mismo `profile.name`. Usa `saveChanges: false` cuando solo quieras leer el estado existente sin volver a escribir cambios.
+4. Inicia una extracción de datos web posterior con el mismo `profile.name`. Usa `saveChanges: false` cuando solo quieras leer el estado existente sin volver a escribir cambios.
 
 <CodeGroup>
   <ProfilePython />
@@ -339,7 +339,7 @@ El ciclo de vida del perfil es:
 
 | Parámetro     | Predeterminado | Descripción                                                                                                                                                                                                                                                      |
 | ------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`        | None           | Nombre del perfil persistente. Los scrapings con el mismo nombre comparten el estado del navegador.                                                                                                                                                              |
+| `name`        | None           | Nombre del perfil persistente. Las extracciones de datos web con el mismo nombre comparten el estado del navegador.                                                                                                                                                              |
 | `saveChanges` | `true`         | Cuando es `true`, el estado del navegador se vuelve a guardar en el perfil cuando se detiene la sesión de interact. Establécelo en `false` para cargar datos existentes sin escribir cambios, lo que resulta útil cuando necesitas varios lectores concurrentes. |
 
 <Note>
@@ -350,7 +350,7 @@ El estado del navegador se guarda cuando se detiene la sesión de interact. Det�
 
 ### Validar la persistencia {#validate-persistence}
 
-Puedes probar la persistencia sin depender de un flujo de inicio de sesión real: escribe un valor en `localStorage` en una sesión, detenla y luego lee ese valor en una segunda sesión con el mismo perfil.
+Puedes probar la persistencia sin depender de un flujo de inicio de sesión real: escribe un valor en localStorage en una sesión, detenla y luego lee ese valor en una segunda sesión con el mismo perfil.
 
 ```bash cURL
 # Sesión 1: escribir el estado del navegador y guardarlo
@@ -404,6 +404,34 @@ La segunda respuesta de Interact debería mostrar `localStorage` como `"saved"` 
   Puede que los perfiles creados a través de la API todavía no aparezcan en Dashboard &gt; Interact &gt; Profiles. Actualmente, el dashboard no ofrece un inventario completo de los perfiles persistentes creados mediante la API.
 </Info>
 
+## Retención cero de datos (ZDR) {#zero-data-retention-zdr}
+
+Interact admite la Retención cero de datos (ZDR) para equipos con requisitos estrictos de tratamiento de datos. Cuando está habilitada, Firecrawl no conservará ningún contenido de página ni salida de ejecución una vez finalizada la sesión.
+
+Para habilitar ZDR, establece `zeroDataRetention: true` en tu primera llamada a interact:
+
+```bash cURL
+curl -X POST https://api.firecrawl.dev/v2/scrape/YOUR_SCRAPE_ID/interact \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer fc-YOUR_API_KEY" \
+  -d '{
+    "prompt": "Click the pricing tab and summarize the plans",
+    "zeroDataRetention": true
+  }'
+```
+
+También puedes pasar `zeroDataRetention: true` al crear una sesión independiente con [`POST /v2/interact`](/es/api-reference/endpoint/browser-create). Al interactuar con una extracción de datos web que ya se realizó con `zeroDataRetention: true`, se inicia automáticamente una sesión ZDR. La política de retención se guarda en la sesión, por lo que las llamadas posteriores a esa misma sesión se mantienen en modo ZDR aunque omitan la opción.
+
+ZDR está disponible en los planes Enterprise y debe estar habilitado para tu equipo. Las solicitudes que establecen `zeroDataRetention: true` desde un equipo que no tiene ZDR habilitado devuelven un `403`. Visita [firecrawl.dev/enterprise](https://www.firecrawl.dev/enterprise) para empezar.
+
+<Note>
+  * Las grabaciones de sesión y los perfiles persistentes no están disponibles en modo ZDR. Las solicitudes que combinan `zeroDataRetention: true` con `recordSession` o `profile` devuelven un `400`.
+  * Una sesión existente que se inició sin ZDR no se puede cambiar a ZDR. Si solicitas ZDR en ella, se devuelve un `409`: detén la sesión e inicia una nueva con `zeroDataRetention: true`.
+  * Las extracciones de datos web con ZDR no conservan la URL extraída, por lo que es posible que Firecrawl no pueda reconstruir el navegador a partir de la extracción de datos web original. Si interact devuelve un `409` indicando que el contexto de reproducción no está disponible, pasa `url` en la solicitud para abrir esa página en una nueva sesión ZDR. Las acciones de la extracción de datos web original no se vuelven a ejecutar.
+</Note>
+
+Consulta [Precios](#pricing) para conocer los costos de las sesiones ZDR.
+
 ## Cuándo usar cada opción {#when-to-use-what}
 
 | Caso de uso                                  | Recomendado                  | Por qué                                       |
@@ -420,9 +448,10 @@ La segunda respuesta de Interact debería mostrar `localStorage` como `"saved"` 
 
 ## Precios {#pricing}
 
-* **Solo código** (sin `prompt`): 2 credits por minuto de sesión
-* **Con prompts de IA**: 7 credits por minuto de sesión
-* **scraping**: se factura por separado (1 credit por scraping, más cualquier costo específico del formato)
+* **Solo código** (sin `prompt`): 2 créditos por minuto de sesión
+* **Con prompts de IA**: 7 créditos por minuto de sesión
+* **extracción de datos web**: se factura por separado (1 crédito por extracción de datos web, más cualquier costo específico del formato)
+* **Retención cero de datos**: las sesiones con ZDR suman 2 créditos por minuto de sesión, por lo que las sesiones de solo código se facturan a 4 créditos por minuto y las sesiones con prompts de IA, a 9, con el mismo mínimo de un minuto. Una extracción de datos web con ZDR mantiene además su propio [costo de ZDR](/es/features/scrape#zero-data-retention-zdr) de 1 crédito adicional por página.
 
 ## Referencia de la API {#api-reference}
 
@@ -431,13 +460,15 @@ La segunda respuesta de Interact debería mostrar `localStorage` como `"saved"` 
 
 ### Cuerpo de la solicitud (POST) {#request-body-post}
 
-| Campo      | Tipo     | Predeterminado | Descripción                                                                                                               |
-| ---------- | -------- | -------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `prompt`   | `string` | Ninguno        | Tarea en lenguaje natural para el agente de IA. Obligatorio si no se establece `code`. Máximo 10.000 caracteres.          |
-| `code`     | `string` | Ninguno        | Código que se va a ejecutar (Node.js, Python o Bash). Obligatorio si no se establece `prompt`. Máximo 100.000 caracteres. |
-| `language` | `string` | `"node"`       | `"node"`, `"python"` o `"bash"`. Solo se usa con `code`.                                                                  |
-| `timeout`  | `number` | `30`           | Timeout en segundos (1–300).                                                                                              |
-| `origin`   | `string` | Ninguno        | Identificador del llamante para el seguimiento de la actividad.                                                           |
+| Campo               | Tipo      | Predeterminado | Descripción                                                                                                                                  |
+| ------------------- | --------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prompt`            | `string`  | Ninguno        | Tarea en lenguaje natural para el agente de IA. Obligatorio si no se establece `code`. Máximo 10.000 caracteres.                             |
+| `code`              | `string`  | Ninguno        | Código que se va a ejecutar (Node.js, Python o Bash). Obligatorio si no se establece `prompt`. Máximo 100.000 caracteres.                    |
+| `language`          | `string`  | `"node"`       | `"node"`, `"python"` o `"bash"`. Solo se usa con `code`.                                                                                     |
+| `timeout`           | `number`  | `30`           | Timeout en segundos (1–300).                                                                                                                 |
+| `origin`            | `string`  | Ninguno        | Identificador del llamante para el seguimiento de la actividad.                                                                              |
+| `zeroDataRetention` | `boolean` | `false`        | Ejecuta la sesión con [retención cero de datos](#zero-data-retention-zdr). Requiere que ZDR esté habilitado para tu equipo.                  |
+| `url`               | `string`  | Ninguno        | Página que se abrirá en una nueva sesión cuando el contexto de la extracción de datos web original no esté disponible; por ejemplo, tras una extracción de datos web con ZDR. |
 
 ### Respuesta {#response}
 
