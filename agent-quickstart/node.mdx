@@ -16,9 +16,12 @@ npm install @mendable/firecrawl-js
 ## Authenticate
 
 ```typescript
-import FirecrawlApp from "@mendable/firecrawl-js";
+import { Firecrawl } from "@mendable/firecrawl-js";
 
-const firecrawl = new FirecrawlApp({ apiKey: "fc-YOUR_API_KEY" });
+const client = new Firecrawl({
+  apiKey: process.env.FIRECRAWL_API_KEY,
+  // apiUrl: "https://api.firecrawl.dev" // optional; falls back to FIRECRAWL_API_URL or cloud default
+});
 ```
 
 ## When To Use What
@@ -36,18 +39,22 @@ Search combines web search with optional scraping of each result. It returns str
 ### Preferred SDK method
 
 ```typescript
-firecrawl.search(query, options?)
+client.search(query, options?)
 ```
+
+Returns `SearchData` with `.web`, `.news`, `.images`, `.tools` arrays.
+
+**Wrong turn to avoid:** `search()` does not return `{ data: [...] }`. Web results are in `result.web`, news in `result.news`, images in `result.images`.
 
 ### Example
 
 ```typescript
-const results = await firecrawl.search("firecrawl web scraping", {
+const results = await client.search("site:docs.firecrawl.dev webhook retries", {
   limit: 5,
   scrapeOptions: { formats: ["markdown"] },
 });
 
-for (const item of results.data?.web ?? []) {
+for (const item of results.web ?? []) {
   console.log(item.url, item.title);
 }
 ```
@@ -72,6 +79,8 @@ for (const item of results.data?.web ?? []) {
 | `domainTools` | `boolean` | Include domain-matched tool contracts alongside results. |
 | `toolDetail` | `"compact" \| "summary" \| "full"` | Detail level for tool contracts. Default: `"compact"`. |
 | `enterprise` | `Array<"anon" \| "zdr">` | Enterprise ZDR options. Must be enabled for your team. |
+| `integration` | `string` | Integration identifier for server-side tracking. |
+| `threatProtection` | `ThreatProtectionOptions` | Per-request threat protection override. |
 
 ## Scrape
 
@@ -82,13 +91,15 @@ Scrape fetches a single URL and returns page content in one or more formats (mar
 ### Preferred SDK method
 
 ```typescript
-firecrawl.scrape(url, options?)
+client.scrape(url, options?)
 ```
+
+Returns `Document` with `.markdown`, `.html`, `.json`, `.screenshot`, `.metadata`, etc.
 
 ### Example
 
 ```typescript
-const doc = await firecrawl.scrape("https://example.com", {
+const doc = await client.scrape("https://example.com", {
   formats: ["markdown", "links"],
   onlyMainContent: true,
 });
@@ -102,7 +113,7 @@ console.log(doc.links);
 | Parameter | Type | Description |
 |---|---|---|
 | `url` | `string` | **Required.** The URL to scrape. |
-| `formats` | `FormatOption[]` | Output formats: `"markdown"`, `"html"`, `"rawHtml"`, `"links"`, `"screenshot"`, `"json"`, `"images"`, `"audio"`, `"video"`, `"summary"`, `"changeTracking"`, `"attributes"`, etc. |
+| `formats` | `FormatOption[]` | Output formats: `"markdown"`, `"html"`, `"rawHtml"`, `"links"`, `"screenshot"`, `"json"` (object only), `"images"`, `"audio"`, `"video"`, `"summary"`, `"changeTracking"`, `"attributes"`, `"branding"`, `"product"`, `"menu"`. Object forms available for `json`, `question`, `highlights`, `screenshot`, `changeTracking`, `attributes`. |
 | `onlyMainContent` | `boolean` | Strip headers, navs, footers. Default: `true`. |
 | `includeTags` | `string[]` | HTML tags to exclusively include. |
 | `excludeTags` | `string[]` | HTML tags to exclude. |
@@ -116,12 +127,21 @@ console.log(doc.links);
 | `skipTlsVerification` | `boolean` | Skip TLS verification. Default: `true`. |
 | `removeBase64Images` | `boolean` | Remove base64 images from markdown. Default: `true`. |
 | `blockAds` | `boolean` | Block ads and cookie popups. Default: `true`. |
-| `proxy` | `string` | Proxy type: `"basic"`, `"enhanced"`, `"auto"`. Default: `"auto"`. |
+| `proxy` | `string` | Proxy type: `"basic"`, `"stealth"`, `"enhanced"`, `"auto"`, or a custom proxy URL. Default: `"auto"`. |
 | `maxAge` | `number` | Accept cached content younger than this (ms). Default: `172800000` (2 days). Set to `0` to bypass cache. |
 | `minAge` | `number` | Cache-only mode: return cached data at least this old (ms), never scrape fresh. |
 | `storeInCache` | `boolean` | Cache the result for future requests. Default: `true`. |
 | `lockdown` | `boolean` | Serve only from cache, never make outbound requests. Default: `false`. |
-| `checkPromptInjection` | `boolean` | Scan for prompt injection before LLM formats. Adds 4 credits. Default: `false`. |
+| `checkPromptInjection` | `boolean` | Scan for prompt injection before LLM formats. Adds 4 credits. |
+| `redactPII` | `boolean \| RedactPIIOptions` | Redact personally identifiable information. |
+| `auditMetadata` | `{ username: string }` | User attribution for SIEM logging. |
+| `profile` | `{ name: string, saveChanges?: boolean }` | Persistent browser profile shared across scrapes and interactions. |
+| `fastMode` | `boolean` | Faster scrapes with reduced fidelity. |
+| `domainTools` | `boolean` | Include domain-matched tool contracts in response. |
+| `toolDetail` | `"compact" \| "summary" \| "full"` | Detail level for tool contracts. |
+| `integration` | `string` | Integration identifier for server-side tracking. |
+| `threatProtection` | `ThreatProtectionOptions` | Per-request threat protection override. |
+| `autoResume` | `boolean` | SDK-only: auto-resume on server-side processing_continues. Default: `true`. |
 
 ## Interact
 
@@ -132,19 +152,26 @@ Interact lets you execute code in the browser session that was used for a scrape
 ### Preferred SDK method
 
 ```typescript
-firecrawl.interact(jobId, args)
+client.interact(jobId, args)
 ```
+
+Returns `ScrapeExecuteResponse` with `.output`, `.stdout`, `.stderr`, `.exitCode`, `.killed`.
+At least one of `code` or `prompt` must be provided (SDK throws otherwise).
+
+Stop session: `client.stopInteraction(jobId)`
 
 ### Example
 
 ```typescript
-// First, scrape with actions to keep the browser session alive
-const doc = await firecrawl.scrape("https://example.com", {
+const doc = await client.scrape("https://example.com", {
   formats: ["markdown"],
 });
 
 // Use the scrape job ID to interact with the browser
-const result = await firecrawl.interact(doc.metadata.scrapeId, {
+const jobId = doc.metadata?.scrapeId;
+if (!jobId) throw new Error("Missing scrapeId from scrape response");
+
+const result = await client.interact(jobId, {
   code: "document.querySelector('button.load-more').click();",
   language: "node",
   timeout: 30,
