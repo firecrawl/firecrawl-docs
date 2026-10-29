@@ -3,7 +3,7 @@ title: "Java Source of Truth"
 description: "Canonical Firecrawl Java source of truth for agents using key endpoints like search, scrape, and interact."
 ---
 
-Canonical Firecrawl Java source of truth for agents. Generated from SDK source and the v2 OpenAPI spec.
+Canonical Firecrawl Java source of truth for agents. Aligned with `firecrawl-java` **1.18.7** and the v2 OpenAPI spec. Method names, parameters, and types match the SDK public API.
 
 ## Install
 
@@ -23,6 +23,8 @@ Gradle:
 implementation("com.firecrawl:firecrawl-java:1.18.7")
 ```
 
+Requires Java 11+.
+
 ## Authenticate
 
 ```java
@@ -32,6 +34,14 @@ FirecrawlClient client = FirecrawlClient.builder()
     .apiKey(System.getenv("FIRECRAWL_API_KEY"))
     .build();
 ```
+
+Or read the key from the `FIRECRAWL_API_KEY` environment variable or `firecrawl.apiKey` system property automatically:
+
+```java
+FirecrawlClient client = FirecrawlClient.fromEnv();
+```
+
+A null or blank API key enables the keyless free tier (rate-limited per IP, supports scrape, search, and interact only).
 
 ## When To Use What
 
@@ -51,6 +61,7 @@ Use search to discover relevant pages from a query, then pick URLs to scrape or 
 
 - `client.search(query)`
 - `client.search(query, options)`
+- `client.searchAsync(query, options)` → `CompletableFuture<SearchData>`
 
 ### Return value
 
@@ -73,15 +84,17 @@ List<Map<String, Object>> web = results.getWeb();
 import com.firecrawl.models.SearchOptions;
 import com.firecrawl.models.ScrapeOptions;
 import com.firecrawl.models.JsonFormat;
-import com.firecrawl.models.LocationConfig;
 
 SearchOptions options = SearchOptions.builder()
     .sources(List.of("web", "news"))
     .categories(List.of("research"))
+    .includeDomains(List.of("docs.firecrawl.dev"))
     .limit(10)
     .tbs("qdr:m")
     .location("San Francisco,California,United States")
+    .country("US")
     .ignoreInvalidURLs(true)
+    .highlights(true)
     .timeout(60000)
     .scrapeOptions(
         ScrapeOptions.builder()
@@ -119,10 +132,21 @@ SearchData results = client.search("site:docs.firecrawl.dev crawl webhooks", opt
   - Type: List of category strings or maps
   - Use when: you want to filter results by category.
   - Confirmed values:
+    - `"github"`: GitHub results
     - `"developer"`: Developer Index results
     - `"research"`: research and academic results
     - `"pdf"`: PDF-focused results
-    - `{type: "developer" | "research" | "pdf"}`: typed category map form
+    - `{type: "github" | "developer" | "research" | "pdf"}`: typed category map form
+
+- `options.includeDomains`
+  - Type: `List<String>`
+  - Use when: you want to restrict results to specific domains.
+  - Notes: cannot be used together with `excludeDomains`.
+
+- `options.excludeDomains`
+  - Type: `List<String>`
+  - Use when: you want to exclude results from specific domains.
+  - Notes: cannot be used together with `includeDomains`.
 
 - `options.limit`
   - Type: Integer
@@ -136,6 +160,10 @@ SearchData results = client.search("site:docs.firecrawl.dev crawl webhooks", opt
   - Type: String
   - Use when: you want localized results.
 
+- `options.country`
+  - Type: String
+  - Use when: you want ISO 3166-1 alpha-2 geo-targeting (for example `"US"`).
+
 - `options.ignoreInvalidURLs`
   - Type: Boolean
   - Use when: you want to drop URLs that cannot be scraped by other endpoints.
@@ -143,6 +171,11 @@ SearchData results = client.search("site:docs.firecrawl.dev crawl webhooks", opt
 - `options.timeout`
   - Type: Integer
   - Use when: you need a request timeout in milliseconds.
+
+- `options.highlights`
+  - Type: Boolean
+  - Use when: you want query-relevant highlights in search results.
+  - Notes: defaults to true.
 
 - `options.scrapeOptions`
   - Type: `ScrapeOptions`
@@ -162,6 +195,7 @@ Use scrape when you already have a URL and want structured content in one or mor
 
 - `client.scrape(url)`
 - `client.scrape(url, options)`
+- `client.scrapeAsync(url, options)` → `CompletableFuture<Document>`
 
 ### Return value
 
@@ -181,6 +215,7 @@ Document doc = client.scrape(
 ```java
 import com.firecrawl.models.ScrapeOptions;
 import com.firecrawl.models.JsonFormat;
+import com.firecrawl.models.LocationConfig;
 
 List<Map<String, Object>> actions = List.of(
     Map.of("type", "click", "selector", "#accept"),
@@ -210,6 +245,7 @@ ScrapeOptions options = ScrapeOptions.builder()
     .proxy("auto")
     .maxAge(86400000L)
     .storeInCache(true)
+    .checkPromptInjection(true)
     .build();
 
 Document doc = client.scrape("https://example.com/pricing", options);
@@ -238,7 +274,11 @@ Document doc = client.scrape("https://example.com/pricing", options);
     - `"branding"`: branding profile output
     - `"audio"`: audio extraction
     - `"video"`: video extraction
-  - Format object fields:
+  - Typed format objects:
+    - `JsonFormat.builder().prompt("...").schema("...").build()`: JSON extraction
+    - `QuestionFormat.builder().question("...").build()`: question-answer extraction
+    - `HighlightsFormat.builder().query("...").build()`: relevant source-text extraction
+  - Format map fields:
     - `type`: one of the format strings above
     - `prompt`, `schema`: JSON extraction options for `type: "json"`
     - `modes`, `schema`, `prompt`, `tag`: change tracking options for `type: "changeTracking"`
@@ -323,6 +363,23 @@ Document doc = client.scrape("https://example.com/pricing", options);
   - Type: Boolean
   - Use when: you want Firecrawl to cache the result.
 
+- `options.lockdown`
+  - Type: Boolean
+  - Use when: you want to serve only previously cached results (404 on cache miss).
+
+- `options.checkPromptInjection`
+  - Type: Boolean
+  - Use when: you want to scan the page for prompt injection before LLM-backed formats run. Adds 4 credits.
+
+- `options.redactPII`
+  - Type: Boolean
+  - Use when: you want to redact personally identifiable information from output.
+
+- `options.auditMetadata`
+  - Type: `AuditMetadata`
+  - Use when: you need user attribution for SIEM logging events.
+  - Confirmed field: `username` (String).
+
 - `options.integration`
   - Type: String
   - Use when: the API expects an integration identifier on the request.
@@ -335,9 +392,10 @@ Use interact when a page requires browser actions or code execution after a scra
 
 ### Preferred SDK methods
 
-- `client.interact(jobId, code)` — uses default language `node` and API default execution timeout
-- `client.interact(jobId, code, language, timeout)` — `timeout` is seconds (1–300), or null to omit and use the API default (30 seconds)
-- `client.interact(jobId, code, language, timeout, origin)` — optional `origin` string is sent only when non-null (request attribution)
+- `client.interact(jobId, code)` — uses default language `node` and default timeout (30 seconds)
+- `client.interact(jobId, code, language, timeout)` — `timeout` is seconds (1-300), or null to use the API default
+- `client.interact(jobId, code, language, timeout, origin)` — optional `origin` string for request attribution
+- `client.interactAsync(...)` — async variants of all three overloads returning `CompletableFuture<BrowserExecuteResponse>`
 
 ### Simple Example
 
@@ -357,7 +415,7 @@ BrowserExecuteResponse result = client.interact(
 ```java
 BrowserExecuteResponse result = client.interact(
     "<scrapeJobId>",
-    "// Use Playwright page methods here",
+    "const rows = await page.$$eval('table tr', trs => trs.map(tr => tr.textContent));\nconsole.log(JSON.stringify(rows));",
     "node",
     120
 );
@@ -396,7 +454,7 @@ BrowserDeleteResponse stopped = client.stopInteractiveBrowser("<scrapeJobId>");
   - Use when: you have a scrape job ID.
 
 - `code`
-  - Type: String
+  - Type: String (required)
   - Use when: you want to run code in the browser session.
 
 - `language`
@@ -407,16 +465,105 @@ BrowserDeleteResponse stopped = client.stopInteractiveBrowser("<scrapeJobId>");
 
 - `timeout`
   - Type: Integer
-  - Use when: you need an execution timeout in seconds (1–300). Null omits the field and uses the API default.
+  - Use when: you need an execution timeout in seconds (1-300). Null omits the field and uses the API default (30 seconds).
 
 - `origin`
   - Type: String
   - Use when: you need an optional origin label on the request. Prefer omitting unless your integration requires it.
 
+## Ask (Agentic Debugging)
+
+### Why use it
+
+Use ask when a Firecrawl API call fails or returns unexpected results. The AI support agent diagnoses the issue, proposes fix parameters, and optionally validates the fix against the live API. Typical latency: 15-30 seconds.
+
+### Preferred SDK method
+
+Not yet available in the Java SDK. Use `OkHttpClient` or any HTTP client directly.
+
+### Simple Example
+
+```java
+import okhttp3.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+OkHttpClient http = new OkHttpClient();
+ObjectMapper mapper = new ObjectMapper();
+
+RequestBody body = RequestBody.create(
+    mapper.writeValueAsString(Map.of(
+        "question", "my scrape returned empty markdown for https://example.com"
+    )),
+    MediaType.parse("application/json")
+);
+
+Request request = new Request.Builder()
+    .url("https://api.firecrawl.dev/v2/support/ask")
+    .addHeader("Authorization", "Bearer " + System.getenv("FIRECRAWL_API_KEY"))
+    .post(body)
+    .build();
+
+try (Response response = http.newCall(request).execute()) {
+    Map<String, Object> result = mapper.readValue(response.body().string(), Map.class);
+    System.out.println(result.get("answer"));
+    System.out.println(result.get("fixParameters"));
+}
+```
+
+### Parameters
+
+- `question`
+  - Type: String (required, 1-8000 chars)
+  - Use when: you need to describe the issue.
+
+- `rationale`
+  - Type: String (1-2000 chars)
+  - Use when: you are an AI agent calling on behalf of a user.
+
+- `context`
+  - Type: Object (free-form)
+  - Use when: you want to pass metadata into the debugging prompt.
+
+## Docs Search
+
+### Why use it
+
+Use docs-search to look up Firecrawl documentation.
+
+### Simple Example
+
+```java
+RequestBody body = RequestBody.create(
+    mapper.writeValueAsString(Map.of(
+        "question", "how do I verify webhook signatures?"
+    )),
+    MediaType.parse("application/json")
+);
+
+Request request = new Request.Builder()
+    .url("https://api.firecrawl.dev/v2/support/docs-search")
+    .addHeader("Authorization", "Bearer " + System.getenv("FIRECRAWL_API_KEY"))
+    .post(body)
+    .build();
+
+try (Response response = http.newCall(request).execute()) {
+    Map<String, Object> result = mapper.readValue(response.body().string(), Map.class);
+    System.out.println(result.get("answer"));
+}
+```
+
+### Parameters
+
+- `question`
+  - Type: String (required, 1-8000 chars)
+  - Use when: you need a docs-grounded answer.
+
 ## Notes
 
 - Deprecated aliases: `scrapeExecute` → `interact`, `deleteScrapeBrowser` → `stopInteractiveBrowser` (and the corresponding `*Async` helpers).
 - The Java SDK exposes code-based interactions only: there is no `prompt` parameter on `interact` (unlike some other language SDKs).
+- Every synchronous method has an `*Async` variant returning `CompletableFuture`.
+- All option classes use the builder pattern (`ScrapeOptions.builder()...build()`).
 
 ## Source Of Truth
 
