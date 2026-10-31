@@ -174,8 +174,8 @@ Search the web and optionally scrape the results.
 | Option                       | Description                                                                                 |
 | ---------------------------- | ------------------------------------------------------------------------------------------- |
 | `--limit <number>`           | Maximum results (default: 5, max: 100)                                                      |
-| `--sources <sources>`        | Sources to search: `web`, `images`, `news`, `alexandria` (comma-separated, default: `web,alexandria`). Use `web` to omit Alexandria tools |
-| `--domain-tools`             | Include Alexandria tools for the domains in web results (on by default with `alexandria`)   |
+| `--sources <sources>`        | Sources to search: `web`, `images`, `news`, `alexandria` (comma-separated, default: `web`). With an API key, `alexandria` is always added |
+| `--domain-tools`             | Include Alexandria tools for the domains in web results (on by default when `alexandria` is combined with another source) |
 | `--no-domain-tools`          | Turn off domain matching for Alexandria tools                                               |
 | `--tool-detail <detail>`     | Alexandria tool detail: `compact` (default), `summary`, or `full` (includes contracts)      |
 | `--categories <categories>`  | Filter by category: `research`, `pdf`, `developer`, `gov` (comma-separated)                    |
@@ -211,6 +211,8 @@ firecrawl find-tools --options '{"providers":["particle"],"capabilities":["podca
 # Run the tool
 firecrawl scrape particle/podcasts/episodes/search --options '{"semantic_search":"AI agents","limit":2}'
 ```
+
+The CLI hides per-tool credit prices by default. Add `--include-costs` to `find-tools` or `list` to show them.
 
 `firecrawl scrape provider/capability` is a short form of `firecrawl scrape --alexandria provider/capability`. Tool addresses go directly to Alexandria. They never fall back to a URL scrape.
 
@@ -334,6 +336,10 @@ Crawl an entire website starting from a URL.
 
 <CrawlStatus />
 
+Passing a job ID prints the full crawl job as JSON, including the pages collected so far in `data`. Add `--wait` to poll an existing job until it is `completed`, `failed` or `cancelled`. If `--timeout` runs out first, the CLI prints the command to resume waiting.
+
+With `--wait`, a crawl that ends `failed` or `cancelled` still prints the job JSON, then writes `Error: Crawl <status>.` to stderr and exits with code 1.
+
 #### Crawl Options
 
 <CrawlOptions />
@@ -343,11 +349,11 @@ Crawl an entire website starting from a URL.
 | Option                         | Description                                       |
 | ------------------------------ | ------------------------------------------------- |
 | `--url <url>`                  | URL to crawl (alternative to positional argument) |
-| `--wait`                       | Wait for crawl to complete                        |
+| `--wait`                       | Wait for the crawl (new or by job ID) to finish; exits 1 if it fails or is cancelled |
 | `--progress`                   | Show progress indicator while waiting             |
 | `--poll-interval <seconds>`    | Polling interval (default: 5)                     |
 | `--timeout <seconds>`          | Timeout when waiting                              |
-| `--status`                     | Check status of existing crawl job                |
+| `--status`                     | Read the status and pages of an existing crawl job |
 | `--limit <number>`             | Maximum pages to crawl                            |
 | `--max-depth <number>`         | Maximum crawl depth                               |
 | `--include-paths <paths>`      | Paths to include (comma-separated)                |
@@ -365,6 +371,56 @@ Crawl an entire website starting from a URL.
 | `--cancel`                     | Cancel an active crawl job by job ID              |
 | `--output <path>`              | Save output to file                               |
 | `--pretty`                     | Pretty print JSON output                          |
+
+---
+
+### Batch scrape
+
+Scrape a list of known URLs as one async job. `firecrawl batch-scrape` keeps every requested format and supports JSON extraction, webhooks and cancellation. Without `--wait`, it prints a job ID that you can check later.
+
+```bash CLI
+# Start a batch scrape (returns job ID)
+firecrawl batch-scrape https://example.com https://example.org
+
+# Read URLs from a file and wait for results
+firecrawl batch-scrape --urls-file urls.txt --format markdown,links --wait --progress
+
+# Check status (returns documents scraped so far), or cancel
+firecrawl batch-scrape <job-id>
+firecrawl batch-scrape <job-id> --cancel
+
+# Extract the same fields from every page
+firecrawl batch-scrape --urls-file products.txt --wait \
+  --schema '{"type":"object","properties":{"name":{"type":"string"},"price":{"type":"string"}}}'
+```
+
+`--urls-file` takes one URL per line and ignores blank lines and lines starting with `#`. `--schema`, `--schema-file` and `--prompt` add the `json` format. Passing `--format json` without one of them fails before the job starts.
+
+**Available Options:**
+
+| Option                         | Description                                          |
+| ------------------------------ | ---------------------------------------------------- |
+| `--urls-file <path>`           | File with one URL per line                           |
+| `-f, --format <formats>`       | Output format(s), comma-separated (default: `markdown`) |
+| `--only-main-content`          | Include only main content                            |
+| `--wait-for <ms>`              | Wait time before scraping each page                  |
+| `--max-age <milliseconds>`     | Maximum age of cached content in milliseconds        |
+| `--schema <json>`              | JSON schema for extraction (adds `json` format)      |
+| `--schema-file <path>`         | Path to JSON schema file                             |
+| `--prompt <text>`              | Extraction prompt (adds `json` format)               |
+| `--scrape-options <json>`      | JSON scrape options applied to every URL             |
+| `--scrape-options-file <path>` | Path to scrape options JSON file                     |
+| `--wait`                       | Wait for the job to complete                         |
+| `--progress`                   | Show progress while waiting                          |
+| `--poll-interval <seconds>`    | Status check interval (default: 2)                   |
+| `--timeout <seconds>`          | Timeout when waiting                                 |
+| `--webhook <url-or-json>`      | Webhook URL or configuration                         |
+| `--max-concurrency <number>`   | Maximum concurrent scrapes for this job              |
+| `--ignore-invalid-urls`        | Skip invalid URLs instead of failing the job         |
+| `--status`                     | Check status of a job by job ID                      |
+| `--cancel`                     | Cancel an active job by job ID                       |
+| `-o, --output <path>`          | Save output to file                                  |
+| `--pretty`                     | Pretty print JSON output                             |
 
 ---
 
@@ -563,6 +619,18 @@ firecrawl https://example.com --format links --json | jq -r '.links[]'
 # Count URLs from map
 firecrawl map https://example.com | wc -l
 ```
+
+## Request attribution
+
+Requests from the CLI are tagged with `integration: cli`. If you build a tool that wraps the CLI, set `FIRECRAWL_INTEGRATION` to attribute its requests to your tool instead:
+
+```bash CLI
+export FIRECRAWL_INTEGRATION=_my-tool
+```
+
+The CLI sends the value as the `X-Integration` header on every API request. Firecrawl uses it when it is a recognized integration name or starts with an underscore, and ignores any other value without failing the request.
+
+CLI requests also carry an origin of `cli@<version>`. When a coding agent such as Claude Code, Codex or Cursor runs the CLI, the origin names the agent too, for example `cli.codex@<version>`. To send plain `cli@<version>`, set `FIRECRAWL_CLI_DISABLE_AGENT_ORIGIN` to `1`, `true`, `yes` or `on`.
 
 ## Telemetry
 
