@@ -11,26 +11,17 @@
 // "not logged in" result (mirroring the dashboard's not-logged-in response
 // shape) that tells the agent to send the user to the dashboard to debug a job.
 (function () {
-  var DASHBOARD_URL = "https://www.firecrawl.dev/app";
-
-  // Chatbase client-side action contract: return { status: "success", data }
-  // or { status: "error", error }. We return a successful result whose payload
-  // carries a "not_logged_in" discriminator plus a human-readable message, so
-  // the agent reports the sign-in guidance rather than an error.
+  // Match the dashboard's debug_job contract (firecrawl-web
+  // lib/chatbase/debug-job.ts): the result is
+  // { status: "error", error: DebugJobError }, and an unauthenticated request
+  // (HTTP 401) returns { status: "error", error: "not_logged_in" }. The docs
+  // site has no session, so debug_job is always unauthenticated here; returning
+  // the exact "not_logged_in" error makes the agent follow its configured
+  // instruction ("ask them to open this chat from the dashboard while signed
+  // in") instead of replying "Tool debug_job not found".
   var tools = {
     debug_job: function () {
-      return {
-        status: "success",
-        data: {
-          status: "not_logged_in",
-          message:
-            "The user is not signed in on the Firecrawl documentation site, so " +
-            "a job cannot be debugged from here. Ask the user to open the " +
-            "Firecrawl dashboard at " + DASHBOARD_URL + " and sign in to have " +
-            "their job debugged.",
-          dashboardUrl: DASHBOARD_URL,
-        },
-      };
+      return { status: "error", error: "not_logged_in" };
     },
   };
 
