@@ -1,0 +1,278 @@
+---
+title: "GitHub Actions"
+description: "Run Firecrawl scrape, crawl, map, search and llms.txt generation from GitHub Actions workflows."
+og:title: "GitHub Actions | Firecrawl"
+og:description: "Run Firecrawl scrape, crawl, map, search and llms.txt generation from GitHub Actions workflows."
+---
+
+<Note>
+**Official action:** [firecrawl/firecrawl-action](https://github.com/firecrawl/firecrawl-action) · [GitHub Marketplace](https://github.com/marketplace/actions/firecrawl)
+
+Add Firecrawl to any workflow with `uses: firecrawl/firecrawl-action@v1`.
+</Note>
+
+## Overview
+
+The Firecrawl GitHub Action runs `scrape`, `crawl`, `map`, `search` or `llmstxt` from a workflow step and writes the results to your workspace: one Markdown file per page plus a `manifest.json`. Later steps can commit, upload or index those files, so the action fits jobs like:
+
+- Keeping a Markdown snapshot of a documentation site in a repository
+- Generating `llms.txt` and `llms-full.txt` on a schedule
+- Refreshing a RAG corpus before an indexing step
+
+## Setup
+
+1. Create an API key on the [API Keys page](https://www.firecrawl.dev/app/api-keys).
+2. In your repository, open **Settings**, then **Secrets and variables**, then **Actions**, and click **New repository secret**.
+3. Name the secret `FIRECRAWL_API_KEY`, paste the key as its value, and save.
+
+Pass the key to the action with `${{ secrets.FIRECRAWL_API_KEY }}`. The action registers it as a secret with the runner, so it is masked in logs and never written to outputs or files. Never paste the key into the workflow file itself.
+
+<Tip>
+To share one key across several repositories, add `FIRECRAWL_API_KEY` as an organization secret instead and grant those repositories access.
+</Tip>
+
+## Quick start
+
+```yaml
+- uses: firecrawl/firecrawl-action@v1
+  with:
+    api-key: ${{ secrets.FIRECRAWL_API_KEY }}
+    command: scrape
+    url: https://example.com
+```
+
+The page is written to `firecrawl-output/example-com.md`.
+
+## Commands
+
+### scrape
+
+Fetch one page. See [Scrape](/features/scrape).
+
+```yaml
+- uses: firecrawl/firecrawl-action@v1
+  with:
+    api-key: ${{ secrets.FIRECRAWL_API_KEY }}
+    command: scrape
+    url: https://example.com/pricing
+    formats: markdown,links
+```
+
+### crawl
+
+Crawl a site starting from `url` and write every page. The action starts the crawl, polls it, and cancels it if `crawl-timeout` passes first. See [Crawl](/features/crawl).
+
+```yaml
+- uses: firecrawl/firecrawl-action@v1
+  with:
+    api-key: ${{ secrets.FIRECRAWL_API_KEY }}
+    command: crawl
+    url: https://docs.example.com/guides
+    limit: 50
+    crawl-timeout: 900
+    output-dir: docs-snapshot
+```
+
+### map
+
+List the URLs of a site without fetching their content. Writes `urls.txt` and `manifest.json`. See [Map](/features/map).
+
+```yaml
+- uses: firecrawl/firecrawl-action@v1
+  with:
+    api-key: ${{ secrets.FIRECRAWL_API_KEY }}
+    command: map
+    url: https://docs.example.com
+    limit: 500
+```
+
+### search
+
+Search the web and write the result pages. Results include page content in the requested `formats`, so a search uses more credits than a plain result list. See [Search](/features/search).
+
+```yaml
+- uses: firecrawl/firecrawl-action@v1
+  with:
+    api-key: ${{ secrets.FIRECRAWL_API_KEY }}
+    command: search
+    query: model context protocol servers
+    limit: 5
+```
+
+### llmstxt
+
+Build `llms.txt` and `llms-full.txt` for a site. The action maps the site, scrapes the pages and assembles both files itself. `llms.txt` lists each page with its title and description; `llms-full.txt` holds the full Markdown of every page.
+
+```yaml
+- uses: firecrawl/firecrawl-action@v1
+  with:
+    api-key: ${{ secrets.FIRECRAWL_API_KEY }}
+    command: llmstxt
+    url: https://docs.example.com
+    limit: 50
+    output-dir: public
+```
+
+## Inputs
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `api-key` | Yes | | Firecrawl API key. Store it as a repository secret. |
+| `command` | Yes | | What to run: `scrape`, `crawl`, `map`, `search` or `llmstxt`. |
+| `url` | No | | Target URL. Required for `scrape`, `crawl`, `map` and `llmstxt`. |
+| `query` | No | | Search query. Required for `search`. |
+| `formats` | No | `markdown` | Comma-separated output formats: `markdown`, `html`, `rawHtml`, `summary`, `links`, `images`. |
+| `limit` | No | Per command | Maximum number of results or pages. Defaults: `crawl` 10, `search` 5, `map` 100, `llmstxt` 20. |
+| `output-dir` | No | `firecrawl-output` | Directory the results are written to, relative to the workspace. |
+| `crawl-timeout` | No | `600` | Seconds to wait for a crawl or `llmstxt` batch to finish before cancelling it. |
+| `fail-on-error` | No | `true` | Fail the step when the command fails. Set to `false` to log a warning instead. |
+| `api-url` | No | | Firecrawl API base URL. Set only for a self-hosted deployment. |
+
+## Outputs
+
+| Output | Description |
+|--------|-------------|
+| `output-dir` | Absolute path of the directory the results were written to. |
+| `count` | Number of pages or results written. |
+| `credits-used` | Credits reported by the API for the run. Set only when the API returns it. |
+
+Read outputs from a later step with `steps.<id>.outputs.<name>`, for example `${{ steps.firecrawl.outputs.count }}`.
+
+## Output files
+
+Each page is written as `<slug>.md`, where the slug is built from the page URL: `https://docs.example.com/guide/intro` becomes `docs-example-com-guide-intro.md`. Other formats add a suffix: `.html`, `.raw.html`, `.summary.md`, `.links.json`, `.images.json`.
+
+`manifest.json` lists every item with its URL, title, description and files. It contains no timestamps, so an unchanged site produces an unchanged manifest and a clean `git diff`.
+
+The action never deletes files. Use a dedicated `output-dir` and clear it yourself if you want removed pages to disappear.
+
+## Example: weekly docs snapshot committed as Markdown
+
+This workflow crawls a documentation section every Monday, replaces the snapshot directory, and commits only when something changed.
+
+```yaml
+name: Docs snapshot
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Clear the previous snapshot
+        run: rm -rf docs-snapshot
+
+      - uses: firecrawl/firecrawl-action@v1
+        id: firecrawl
+        with:
+          api-key: ${{ secrets.FIRECRAWL_API_KEY }}
+          command: crawl
+          url: https://docs.example.com/guides
+          limit: 100
+          crawl-timeout: 900
+          output-dir: docs-snapshot
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A docs-snapshot
+          git diff --cached --quiet || git commit -m "docs: refresh snapshot (${{ steps.firecrawl.outputs.count }} pages)"
+          git push
+```
+
+## Example: nightly llms.txt
+
+This workflow regenerates `llms.txt` and `llms-full.txt` every night and commits them only when they changed.
+
+```yaml
+name: Refresh llms.txt
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  llms:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: firecrawl/firecrawl-action@v1
+        with:
+          api-key: ${{ secrets.FIRECRAWL_API_KEY }}
+          command: llmstxt
+          url: https://docs.example.com
+          limit: 50
+          output-dir: public
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/llms.txt public/llms-full.txt
+          git diff --cached --quiet || git commit -m "chore: refresh llms.txt"
+          git push
+```
+
+## Forked pull requests and secrets
+
+Workflows triggered by pull requests from forks do not receive repository secrets, so `api-key` is empty and the action stops with a message saying so. Run Firecrawl steps on `push`, `schedule` or `workflow_dispatch`, or skip the step when the secret is missing:
+
+```yaml
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    env:
+      FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
+    steps:
+      - if: ${{ env.FIRECRAWL_API_KEY != '' }}
+        uses: firecrawl/firecrawl-action@v1
+        with:
+          api-key: ${{ env.FIRECRAWL_API_KEY }}
+          command: scrape
+          url: https://example.com
+```
+
+Setting `fail-on-error: false` also turns the empty-key error into a warning.
+
+## Limits and timeouts for long crawls
+
+- **Start small.** `crawl` defaults to 10 pages and `llmstxt` to 20, so a first run is quick. Raise `limit` once the output looks right, and run `map` first to see how big a site is.
+- **Bound the wait.** `crawl-timeout` limits how long the action waits for `crawl` and `llmstxt`. When it passes, the action cancels the job and fails the step, or warns with `fail-on-error: false`. Size it to your `limit` and set a job-level `timeout-minutes` slightly above it.
+- **Scope the crawl.** Start from a section such as `https://docs.example.com/guides` rather than the site root to keep unrelated or translated pages out of the results.
+- **Watch credits.** Every page counts against your Firecrawl plan, so a nightly schedule with a large `limit` adds up. Your plan's [rate limits](/rate-limits) and concurrency apply, so avoid running several large crawls from one repository at once.
+
+## Self-hosted Firecrawl
+
+Set `api-url` to the base URL of your deployment. See [Self-hosting](/contributing/self-host).
+
+```yaml
+- uses: firecrawl/firecrawl-action@v1
+  with:
+    api-key: ${{ secrets.FIRECRAWL_API_KEY }}
+    api-url: https://firecrawl.internal.example.com
+    command: scrape
+    url: https://example.com
+```
+
+## Resources
+
+- [firecrawl/firecrawl-action on GitHub](https://github.com/firecrawl/firecrawl-action)
+- [Firecrawl on the GitHub Marketplace](https://github.com/marketplace/actions/firecrawl)
+- [Using secrets in GitHub Actions](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions)
+- Questions: [help@firecrawl.dev](mailto:help@firecrawl.dev)
