@@ -1,0 +1,788 @@
+---
+title: Migrating from v1 to v2
+description: "Move off the deprecated v1 API: endpoint and parameter mappings, SDK upgrades, and before/after examples for the REST API, SDKs, CLI, MCP server, and n8n."
+og:title: "Migrating from v1 to v2 | Firecrawl"
+og:description: "Move off the deprecated v1 API: endpoint and parameter mappings, SDK upgrades, and before/after examples for the REST API, SDKs, CLI, MCP server, and n8n."
+---
+
+The v1 API (`https://api.firecrawl.dev/v1/...`) is deprecated. v2 replaces every v1 scrape, crawl, batch scrape, search, map, and account endpoint, and the current SDKs, CLI, MCP server, and n8n node all call v2. Your API key works on v2 as is.
+
+This page shows how to tell whether you are on v1, then what to change for each way of calling Firecrawl: the [REST API](#rest-api), the [Node](#node-and-typescript), [Python](#python), [Go](#go), and [Rust](#rust) SDKs, the [other SDKs](#java-php-ruby-elixir-and-net), the [CLI](#cli), the [MCP server](#mcp-server), and [n8n](#n8n).
+
+## Why v2
+
+- **Faster by default**: v2 returns a recent cached copy of a page when one exists. Set `maxAge: 0` when you need a fresh scrape. See [Faster scraping](/features/fast-scraping).
+- **New formats**: `summary` returns a concise summary of the page, and JSON extraction, change tracking, and screenshots each take their options in one format object, such as `{ "type": "json", "prompt": "..." }`.
+- **Search sources and categories**: search `news` and `images` as well as the web with `sources`, and narrow results with `categories` such as `github`, `research`, and `pdf`. See [Search](/features/search).
+- **Crawl with a prompt**: describe what you want in `prompt` and v2 derives the crawl options. Preview them with `/v2/crawl/params-preview`. See [Crawl](/features/crawl).
+- **Smarter defaults**: batch scrape skips invalid URLs and lists them in `invalidURLs` instead of failing the whole batch.
+- **New endpoints are v2 only**: [Agent](/features/agent), [Interact](/features/interact), [Parse](/features/parse), and [Monitoring](/features/monitoring) have no v1 version, and the v1 SDK clients no longer get new features.
+
+## Are you on v1?
+
+You are calling v1 if any of these match:
+
+| You use | You are on v1 if |
+|---|---|
+| REST API, including an n8n HTTP Request node | Your URLs start with `https://api.firecrawl.dev/v1/` |
+| Node SDK (`@mendable/firecrawl-js` or `firecrawl` on npm) | Your version is 1.x (up to 1.29.3), or your code uses `firecrawl.v1` or `FirecrawlAppV1` on any version |
+| Python SDK (`firecrawl-py` or `firecrawl` on PyPI) | Your version is 1.x or 2.x (up to 2.16.5), or your code uses `firecrawl.v1`, `V1FirecrawlApp`, or `AsyncV1FirecrawlApp` on any version |
+| Go SDK | You import `github.com/mendableai/firecrawl-go` or `github.com/mendableai/firecrawl-go/v2` |
+| Rust SDK (`firecrawl` crate) | Your version is 1.x (1.0.0 to 1.2.1) |
+| CLI | Never. Every version of the CLI calls v2, but update it anyway (see [CLI](#cli)) |
+| MCP server (`firecrawl-mcp`) | Your version is 1.x (1.3.0 to 1.12.0) |
+| n8n Firecrawl node | Your Firecrawl API credential's **Base URL** is `https://api.firecrawl.dev/v1`, or you use the third-party `n8n-nodes-firecrawl` community node |
+
+The Java, PHP, Ruby, Elixir, and .NET SDKs have always called v2.
+
+<Note>
+Versions 0.x of the Node, Python, and Rust SDKs and v0.0.1 of the old Go module call the older v0 API. Upgrade them straight to the latest version with the steps below.
+</Note>
+
+## Quick checklist
+
+1. Change the base URL from `/v1` to `/v2`, or upgrade your SDK, CLI, MCP server, or n8n node to the latest version.
+2. Move format options into format objects: `"extract"` and `jsonOptions` become `{ "type": "json", ... }`, `"screenshot@fullPage"` becomes `{ "type": "screenshot", "fullPage": true }`, and `changeTrackingOptions` moves into `{ "type": "changeTracking", ... }`.
+3. Rename crawl and map options: `allowBackwardLinks` is `crawlEntireDomain`, and `ignoreSitemap` and `sitemapOnly` are `sitemap`. Replace crawl `maxDepth` (see [No exact equivalent](#no-exact-equivalent)).
+4. Update code that reads responses: search results are under `data.web`, map `links` are objects, extracted JSON is under `data.json`, and account endpoints return camelCase fields.
+5. Remove any explicit v1 client (`.v1`, `FirecrawlAppV1`, `V1FirecrawlApp`, `AsyncV1FirecrawlApp`). These still call v1.
+
+## REST API
+
+Change the base URL. Authentication is unchanged: send your key as `Authorization: Bearer fc-YOUR-API-KEY`.
+
+| v1 | v2 |
+|---|---|
+| `https://api.firecrawl.dev/v1` | `https://api.firecrawl.dev/v2` |
+
+### Endpoints
+
+Every v1 endpoint keeps its path under `/v2`, except `/crawl/ongoing`, which becomes `/crawl/active`.
+
+| v1 endpoint | v2 endpoint |
+|---|---|
+| `POST /v1/scrape` | [`POST /v2/scrape`](/api-reference/endpoint/scrape) |
+| `GET /v1/scrape/{id}` | `GET /v2/scrape/{id}` |
+| `POST /v1/crawl` | [`POST /v2/crawl`](/api-reference/endpoint/crawl-post) |
+| `GET /v1/crawl/{id}` | [`GET /v2/crawl/{id}`](/api-reference/endpoint/crawl-get) |
+| `DELETE /v1/crawl/{id}` | [`DELETE /v2/crawl/{id}`](/api-reference/endpoint/crawl-delete) |
+| `GET /v1/crawl/{id}/errors` | [`GET /v2/crawl/{id}/errors`](/api-reference/endpoint/crawl-get-errors) |
+| `GET /v1/crawl/active` | [`GET /v2/crawl/active`](/api-reference/endpoint/crawl-active) |
+| `GET /v1/crawl/ongoing` | [`GET /v2/crawl/active`](/api-reference/endpoint/crawl-active) |
+| WebSocket `/v1/crawl/{id}` | WebSocket `/v2/crawl/{id}` |
+| `POST /v1/batch/scrape` | [`POST /v2/batch/scrape`](/api-reference/endpoint/batch-scrape) |
+| `GET /v1/batch/scrape/{id}` | [`GET /v2/batch/scrape/{id}`](/api-reference/endpoint/batch-scrape-get) |
+| `DELETE /v1/batch/scrape/{id}` | [`DELETE /v2/batch/scrape/{id}`](/api-reference/endpoint/batch-scrape-delete) |
+| `GET /v1/batch/scrape/{id}/errors` | [`GET /v2/batch/scrape/{id}/errors`](/api-reference/endpoint/batch-scrape-get-errors) |
+| `POST /v1/search` | [`POST /v2/search`](/api-reference/endpoint/search) |
+| `POST /v1/map` | [`POST /v2/map`](/api-reference/endpoint/map) |
+| `GET /v1/concurrency-check` | `GET /v2/concurrency-check` |
+| `GET /v1/team/credit-usage` | [`GET /v2/team/credit-usage`](/api-reference/endpoint/credit-usage) |
+| `GET /v1/team/credit-usage/historical` | [`GET /v2/team/credit-usage/historical`](/api-reference/endpoint/credit-usage-historical) |
+| `GET /v1/team/token-usage` | [`GET /v2/team/token-usage`](/api-reference/endpoint/token-usage) |
+| `GET /v1/team/token-usage/historical` | [`GET /v2/team/token-usage/historical`](/api-reference/endpoint/token-usage-historical) |
+| `GET /v1/team/queue-status` | [`GET /v2/team/queue-status`](/api-reference/endpoint/queue-status) |
+
+This guide does not cover `/v1/extract`, `/v1/deep-research`, or `/v1/llmstxt`. For structured data on v2, use the `json` format on `/v2/scrape` ([JSON mode](/features/llm-extract)).
+
+### Scrape options
+
+These options apply wherever scrape options appear: `/scrape`, `/batch/scrape`, crawl `scrapeOptions`, and search `scrapeOptions`. v2 rejects unknown fields with a 400 error, so a leftover `jsonOptions` or `parsePDF` fails loudly instead of being ignored.
+
+| v1 | v2 |
+|---|---|
+| `"extract"` in `formats` plus `extract: { prompt, schema }` | `{ "type": "json", "prompt": "...", "schema": {...} }` in `formats` |
+| `"json"` in `formats` plus `jsonOptions: { prompt, schema }` | `{ "type": "json", "prompt": "...", "schema": {...} }` in `formats` |
+| `systemPrompt` in `extract` or `jsonOptions` | Not accepted. Put your instructions in `prompt`. |
+| `"screenshot@fullPage"` in `formats` | `{ "type": "screenshot", "fullPage": true }` in `formats`, which also takes `quality` and `viewport` |
+| `"changeTracking"` in `formats` plus `changeTrackingOptions: { modes, schema, prompt, tag }` | `{ "type": "changeTracking", "modes": [...], "schema": {...}, "prompt": "...", "tag": "..." }` in `formats`. Keep `"markdown"` in `formats`: change tracking needs it. |
+| `parsePDF: true` (the default) | `parsers: ["pdf"]` (the default) |
+| `parsePDF: false` | `parsers: []` |
+| `geolocation: { country, languages }` | `location: { country, languages }` |
+| `__experimental_cache` | Removed. Use `maxAge`. |
+
+The string formats `"markdown"`, `"html"`, `"rawHtml"`, `"links"`, and `"screenshot"` work as before. A request can include only one screenshot format.
+
+<CodeGroup>
+
+```bash v1
+curl -s -X POST "https://api.firecrawl.dev/v1/scrape" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://firecrawl.dev",
+    "formats": ["markdown", "json", "screenshot@fullPage"],
+    "jsonOptions": { "prompt": "Extract the company mission." },
+    "parsePDF": false
+  }'
+```
+
+```bash v2
+curl -s -X POST "https://api.firecrawl.dev/v2/scrape" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://firecrawl.dev",
+    "formats": [
+      "markdown",
+      { "type": "json", "prompt": "Extract the company mission." },
+      { "type": "screenshot", "fullPage": true }
+    ],
+    "parsers": []
+  }'
+```
+
+</CodeGroup>
+
+The response keeps `data.markdown`, `data.screenshot`, and `data.metadata`. Extracted JSON is always under `data.json` in v2. If you used the v1 `"extract"` format, read `data.json` instead of `data.extract`.
+
+### Crawl
+
+| v1 | v2 |
+|---|---|
+| `allowBackwardLinks` | `crawlEntireDomain` |
+| `ignoreSitemap: true` | `sitemap: "skip"` |
+| `ignoreSitemap: false` (the default) | `sitemap: "include"` (the default) |
+| (none) | `sitemap: "only"` crawls only the URLs in the sitemap |
+| `maxDepth` | No exact equivalent. See [No exact equivalent](#no-exact-equivalent). |
+| `maxDiscoveryDepth` | `maxDiscoveryDepth` (unchanged) |
+| (none) | `prompt` derives crawl options from a natural-language description |
+| `scrapeOptions` | `scrapeOptions`, using the v2 [scrape options](#scrape-options) |
+
+`includePaths`, `excludePaths`, `limit`, `allowExternalLinks`, `allowSubdomains`, `ignoreRobotsTxt`, `deduplicateSimilarURLs`, `ignoreQueryParameters`, `regexOnFullURL`, `delay`, `maxConcurrency`, `webhook`, and `zeroDataRetention` are unchanged.
+
+<CodeGroup>
+
+```bash v1
+curl -s -X POST "https://api.firecrawl.dev/v1/crawl" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://docs.firecrawl.dev",
+    "limit": 50,
+    "allowBackwardLinks": true,
+    "ignoreSitemap": true,
+    "scrapeOptions": { "formats": ["markdown"] }
+  }'
+```
+
+```bash v2
+curl -s -X POST "https://api.firecrawl.dev/v2/crawl" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://docs.firecrawl.dev",
+    "limit": 50,
+    "crawlEntireDomain": true,
+    "sitemap": "skip",
+    "scrapeOptions": { "formats": ["markdown"] }
+  }'
+```
+
+</CodeGroup>
+
+The start response is still `{ "success": true, "id": "...", "url": "..." }`, and `url` now points at `/v2/crawl/{id}`. Crawl status responses keep `status`, `completed`, `total`, `creditsUsed`, `expiresAt`, `next`, and `data`, so code that follows `next` keeps working. Batch scrape status works the same way.
+
+### No exact equivalent
+
+v2 has no option for v1 crawl `maxDepth`. In v1, a URL was skipped when its path had more than M non-empty segments, where M is `maxDepth` plus the number of segments in the starting URL's path. `index.html` and `index.php` segments did not count, and the query string is not part of the path. With `maxDepth: 2` from `https://example.com/docs`, M is 3, so `/docs/a/b` was crawled and `/docs/a/b/c` was not.
+
+To keep the same limit in v2, leave `regexOnFullURL` at its default of `false` and add two `includePaths` patterns, with M written as a number: `^(/+[^/]+){0,M}/*$` and `^(/+[^/]+){0,M}/+index\.(html|php)/*$`. For `maxDepth: 2` from `https://example.com/docs`:
+
+```json
+{
+  "url": "https://example.com/docs",
+  "includePaths": [
+    "^(/+[^/]+){0,3}/*$",
+    "^(/+[^/]+){0,3}/+index\\.(html|php)/*$"
+  ]
+}
+```
+
+JSON escapes the backslash, so the second regular expression is `index\.(html|php)`. Keep in mind:
+
+- `includePaths` patterns are combined with OR. If you already use `includePaths`, add the depth limit to each of your patterns, or use `excludePaths` with `^(/+[^/]+){N}`, where N is M + 1 (`"excludePaths": ["^(/+[^/]+){4}"]` in the example above). That skips every path deeper than M and works alongside your existing `includePaths`, but it also skips paths that end in `index.html` or `index.php` at exactly depth M.
+- With `allowExternalLinks`, links to other sites are not depth-limited in v2.
+- Patterns use Rust regular expression syntax, which has no lookahead or lookbehind.
+
+`maxDiscoveryDepth` is not a replacement: it counts link hops from the starting page, not path segments.
+
+### Batch scrape
+
+The request body is unchanged apart from the [scrape options](#scrape-options). `ignoreInvalidURLs` now defaults to `true`: invalid URLs are skipped and listed in `invalidURLs` instead of failing the request. Send `"ignoreInvalidURLs": false` to keep the v1 behavior.
+
+### Map
+
+| v1 | v2 |
+|---|---|
+| `ignoreSitemap: true` | `sitemap: "skip"` |
+| `sitemapOnly: true` | `sitemap: "only"` |
+| Neither set | `sitemap: "include"` (the default) |
+| `maxDepth`, `allowBackwardLinks` | Not accepted on map. Remove them. |
+
+`search`, `includeSubdomains`, `ignoreQueryParameters`, `limit`, `timeout`, and `location` are unchanged.
+
+`links` changes from an array of strings to an array of objects:
+
+<CodeGroup>
+
+```json v1 response
+{
+  "success": true,
+  "links": ["https://firecrawl.dev", "https://firecrawl.dev/pricing"]
+}
+```
+
+```json v2 response
+{
+  "success": true,
+  "links": [
+    { "url": "https://firecrawl.dev", "title": "Firecrawl", "description": "..." },
+    { "url": "https://firecrawl.dev/pricing", "title": "Pricing", "description": "..." }
+  ]
+}
+```
+
+</CodeGroup>
+
+### Search
+
+The request body is unchanged apart from `scrapeOptions`, which takes the v2 [scrape options](#scrape-options). v2 adds `sources` (`web`, `news`, `images`) and `categories`. The default `limit` changes from 5 to 10.
+
+Results move from `data` to `data.web`, and to `data.news` and `data.images` when you request those sources:
+
+<CodeGroup>
+
+```json v1 response
+{
+  "success": true,
+  "data": [
+    { "url": "https://firecrawl.dev", "title": "Firecrawl", "description": "..." }
+  ]
+}
+```
+
+```json v2 response
+{
+  "success": true,
+  "data": {
+    "web": [
+      { "url": "https://firecrawl.dev", "title": "Firecrawl", "description": "..." }
+    ]
+  }
+}
+```
+
+</CodeGroup>
+
+### Account endpoints
+
+`/team/credit-usage` and `/team/token-usage` return camelCase fields in v2:
+
+| v1 field | v2 field |
+|---|---|
+| `remaining_credits` | `remainingCredits` |
+| `plan_credits` | `planCredits` |
+| `remaining_tokens` | `remainingTokens` |
+| `plan_tokens` | `planTokens` |
+| `billing_period_start` | `billingPeriodStart` |
+| `billing_period_end` | `billingPeriodEnd` |
+
+`/concurrency-check` and `/team/queue-status` return the same fields as in v1.
+
+### Changed defaults
+
+| Option | v1 default | v2 default |
+|---|---|---|
+| Search `limit` | 5 | 10 |
+| Batch scrape `ignoreInvalidURLs` | `false` | `true` |
+| `maxAge` | 1 day | A recent cached copy is reused. See [Faster scraping](/features/fast-scraping). |
+| `proxy` when `location.country` is set | `basic` | `auto` |
+
+## Node and TypeScript
+
+The Node SDK is published as `@mendable/firecrawl-js` and, with the same code, as `firecrawl`.
+
+| Versions | API |
+|---|---|
+| 1.x (up to 1.29.3) | v1 only |
+| 3.0.1 and later (`firecrawl`: 3.0.2 and later) | v2 by default, with v1 under `.v1` |
+
+There was no 2.x release. Upgrade to the latest version:
+
+```bash
+npm install @mendable/firecrawl-js@latest
+# or, if you use the unscoped package:
+npm install firecrawl@latest
+```
+
+<CodeGroup>
+
+```js v1 (1.x)
+import FirecrawlApp from '@mendable/firecrawl-js';
+
+const app = new FirecrawlApp({ apiKey: 'fc-YOUR-API-KEY' });
+
+const doc = await app.scrapeUrl('https://firecrawl.dev', {
+  formats: ['markdown', 'json'],
+  jsonOptions: { prompt: 'Extract the company mission.' },
+});
+console.log(doc.markdown, doc.json);
+
+const crawl = await app.crawlUrl('https://docs.firecrawl.dev', {
+  limit: 50,
+  allowBackwardLinks: true,
+  ignoreSitemap: true,
+  scrapeOptions: { formats: ['markdown'] },
+});
+console.log(crawl.data);
+
+const map = await app.mapUrl('https://firecrawl.dev');
+console.log(map.links); // strings
+
+const results = await app.search('firecrawl', { limit: 5 });
+console.log(results.data);
+```
+
+```js v2 (latest)
+import Firecrawl from '@mendable/firecrawl-js';
+
+const firecrawl = new Firecrawl({ apiKey: 'fc-YOUR-API-KEY' });
+
+const doc = await firecrawl.scrape('https://firecrawl.dev', {
+  formats: ['markdown', { type: 'json', prompt: 'Extract the company mission.' }],
+});
+console.log(doc.markdown, doc.json);
+
+const crawl = await firecrawl.crawl('https://docs.firecrawl.dev', {
+  limit: 50,
+  crawlEntireDomain: true,
+  sitemap: 'skip',
+  scrapeOptions: { formats: ['markdown'] },
+});
+console.log(crawl.data);
+
+const map = await firecrawl.map('https://firecrawl.dev');
+console.log(map.links.map((link) => link.url));
+
+const results = await firecrawl.search('firecrawl', { limit: 5 });
+console.log(results.web);
+```
+
+</CodeGroup>
+
+v2 methods return the data directly, without a `success` field, and throw an `SdkError` when a request fails. With the `firecrawl` package, import the client as `import { Firecrawl } from 'firecrawl'`.
+
+| v1 method | v2 method |
+|---|---|
+| `scrapeUrl(url, params)` | `scrape(url, options)` |
+| `search(query, params)` | `search(query, options)`, results under `web`, `news`, `images` |
+| `mapUrl(url, params)` | `map(url, options)`, `links` are objects |
+| `crawlUrl(url, params, pollInterval)` | `crawl(url, { ...options, pollInterval, timeout })` |
+| `asyncCrawlUrl(url, params)` | `startCrawl(url, options)` |
+| `checkCrawlStatus(id)` | `getCrawlStatus(id)` |
+| `checkCrawlErrors(id)` | `getCrawlErrors(id)` |
+| `cancelCrawl(id)` | `cancelCrawl(id)` |
+| `crawlUrlAndWatch(url, params)` | `startCrawl(url, options)`, then `watcher(id)` |
+| `batchScrapeUrls(urls, params)` | `batchScrape(urls, { options })` |
+| `asyncBatchScrapeUrls(urls, params)` | `startBatchScrape(urls, { options })` |
+| `checkBatchScrapeStatus(id)` | `getBatchScrapeStatus(id)` |
+| `checkBatchScrapeErrors(id)` | `getBatchScrapeErrors(id)` |
+| `batchScrapeUrlsAndWatch(urls, params)` | `startBatchScrape(urls, { options })`, then `watcher(id)` |
+
+<Warning>
+In v2 batch scrape, scrape options go under `options`: `batchScrape(urls, { options: { formats: ['markdown'] } })`. A `formats` key at the top level is ignored.
+</Warning>
+
+If you upgrade in place:
+
+- **Old method names**: `scrapeUrl`, `crawlUrl`, `asyncCrawlUrl`, `checkCrawlStatus`, `checkCrawlErrors`, `mapUrl`, `batchScrapeUrls`, `asyncBatchScrapeUrls`, `checkBatchScrapeStatus`, and `checkBatchScrapeErrors` exist on the v2 client from 4.25.0 as aliases that call v2 with v2 options. Since 4.49.0 they are deprecated: they print a one-time deprecation warning and add `success: true` to results. Only `crawlUrl` and `asyncCrawlUrl` rename options: `allowBackwardLinks` to `crawlEntireDomain`, `ignoreSitemap` to `sitemap`, and `maxDepth` to `maxDiscoveryDepth`, which counts link hops rather than path segments. Formats such as `'extract'` and options such as `jsonOptions` are not converted. Use the aliases as a stopgap and switch to the v2 names.
+- **Explicit v1 clients**: `firecrawl.v1` and the `FirecrawlAppV1` export still call the v1 API. Replace them with the top-level client.
+
+## Python
+
+The Python SDK is published as `firecrawl-py` and, with the same code, as `firecrawl`.
+
+| Versions | API |
+|---|---|
+| 1.x and 2.x (up to 2.16.5) | v1 only |
+| 3.0.2 and later (`firecrawl`: 3.0.3 and later) | v2 by default, with v1 under `.v1` |
+
+Upgrade to the latest version:
+
+```bash
+pip install --upgrade firecrawl-py
+# or, if you use the unscoped package:
+pip install --upgrade firecrawl
+```
+
+<CodeGroup>
+
+```python v1 (2.x)
+from firecrawl import FirecrawlApp, JsonConfig, ScrapeOptions
+
+app = FirecrawlApp(api_key="fc-YOUR-API-KEY")
+
+doc = app.scrape_url(
+    "https://firecrawl.dev",
+    formats=["markdown", "json"],
+    json_options=JsonConfig(prompt="Extract the company mission."),
+)
+print(doc.markdown, doc.json_field)
+
+crawl = app.crawl_url(
+    "https://docs.firecrawl.dev",
+    limit=50,
+    allow_backward_links=True,
+    ignore_sitemap=True,
+    scrape_options=ScrapeOptions(formats=["markdown"]),
+)
+print(crawl.data)
+
+links = app.map_url("https://firecrawl.dev").links  # strings
+results = app.search("firecrawl", limit=5).data
+```
+
+```python v2 (latest)
+from firecrawl import Firecrawl
+from firecrawl.v2.types import ScrapeOptions
+
+firecrawl = Firecrawl(api_key="fc-YOUR-API-KEY")
+
+doc = firecrawl.scrape(
+    "https://firecrawl.dev",
+    formats=["markdown", {"type": "json", "prompt": "Extract the company mission."}],
+)
+print(doc.markdown, doc.json)
+
+crawl = firecrawl.crawl(
+    "https://docs.firecrawl.dev",
+    limit=50,
+    crawl_entire_domain=True,
+    sitemap="skip",
+    scrape_options=ScrapeOptions(formats=["markdown"]),
+)
+print(crawl.data)
+
+links = [link.url for link in firecrawl.map("https://firecrawl.dev").links]
+results = firecrawl.search("firecrawl", limit=5).web
+```
+
+</CodeGroup>
+
+Versions 1.x passed options as a `params` dictionary, for example `app.scrape_url(url, params={"formats": ["markdown"]})`. In v2, pass them as keyword arguments as shown above.
+
+| v1 method | v2 method |
+|---|---|
+| `scrape_url(url, ...)` | `scrape(url, ...)` |
+| `search(query, ...)` | `search(query, ...)`, results under `web`, `news`, `images` |
+| `map_url(url, ...)` | `map(url, ...)`, `links` are objects |
+| `crawl_url(url, ...)` | `crawl(url, ...)` |
+| `async_crawl_url(url, ...)` | `start_crawl(url, ...)` |
+| `check_crawl_status(id)` | `get_crawl_status(id)` |
+| `check_crawl_errors(id)` | `get_crawl_errors(id)` |
+| `cancel_crawl(id)` | `cancel_crawl(id)` |
+| `crawl_url_and_watch(url, ...)` | `start_crawl(url, ...)`, then `watcher(id)` |
+| `batch_scrape_urls(urls, ...)` | `batch_scrape(urls, ...)` |
+| `async_batch_scrape_urls(urls, ...)` | `start_batch_scrape(urls, ...)` |
+| `check_batch_scrape_status(id)` | `get_batch_scrape_status(id)` |
+| `check_batch_scrape_errors(id)` | `get_batch_scrape_errors(id)` |
+| `batch_scrape_urls_and_watch(urls, ...)` | `start_batch_scrape(urls, ...)`, then `watcher(id)` |
+
+For async code, replace `AsyncFirecrawlApp` with `AsyncFirecrawl`. It has the same methods as `Firecrawl`, all awaitable.
+
+If you upgrade in place:
+
+- **`FirecrawlApp` now means v2**: from 3.x, `FirecrawlApp` is an alias of `Firecrawl` and `AsyncFirecrawlApp` is an alias of `AsyncFirecrawl`. After you upgrade, `FirecrawlApp(api_key=...)` calls v2.
+- **Old method names**: the v1 names `scrape_url`, `crawl_url`, `async_crawl_url`, `check_crawl_status`, `check_crawl_errors`, `map_url`, `batch_scrape_urls`, `async_batch_scrape_urls`, `check_batch_scrape_status`, and `check_batch_scrape_errors` exist on the v2 client from 4.27.2 as aliases that call v2 with v2 options. Since 4.53.0 they are deprecated: they emit a `DeprecationWarning`, accept a v1 `params` dictionary and camelCase option names, and rename `allow_backward_links` to `crawl_entire_domain`, `ignore_sitemap` and `sitemap_only` to `sitemap`, and `max_depth` to `max_discovery_depth`, which counts link hops rather than path segments. Formats and options that changed shape, such as `json_options` and the `"extract"` format, are not converted. Use the aliases as a stopgap and switch to the v2 names.
+- **Explicit v1 clients**: `firecrawl.v1`, `V1FirecrawlApp`, and `AsyncV1FirecrawlApp` still call the v1 API. Replace them with `Firecrawl` or `AsyncFirecrawl`.
+
+## Go
+
+The old Go module calls v1 in every usable version: `github.com/mendableai/firecrawl-go` v1.0.0, and `github.com/mendableai/firecrawl-go/v2` v2.0.0 to v2.4.0. The `/v2` in that module path is a Go major version, not the Firecrawl v2 API. The current SDK is a different module, `github.com/firecrawl/firecrawl/apps/go-sdk`, and every version of it calls v2. It requires Go 1.23 or later.
+
+Add the new module, change the import path in every file, then remove the old module with `go mod tidy`:
+
+```bash
+go get github.com/firecrawl/firecrawl/apps/go-sdk@latest
+```
+
+<CodeGroup>
+
+```go v1 (old module)
+import firecrawl "github.com/mendableai/firecrawl-go/v2"
+
+app, err := firecrawl.NewFirecrawlApp("fc-YOUR-API-KEY", "https://api.firecrawl.dev")
+if err != nil {
+	log.Fatal(err)
+}
+
+doc, err := app.ScrapeURL("https://firecrawl.dev", &firecrawl.ScrapeParams{
+	Formats: []string{"markdown"},
+})
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(doc.Markdown)
+
+limit := 50
+crawl, err := app.CrawlURL("https://docs.firecrawl.dev", &firecrawl.CrawlParams{
+	Limit:        &limit,
+	ExcludePaths: []string{"blog/*"},
+}, nil)
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(len(crawl.Data))
+```
+
+```go v2 (current module)
+import (
+	firecrawl "github.com/firecrawl/firecrawl/apps/go-sdk"
+	"github.com/firecrawl/firecrawl/apps/go-sdk/option"
+)
+
+client, err := firecrawl.NewClient(option.WithAPIKey("fc-YOUR-API-KEY"))
+if err != nil {
+	log.Fatal(err)
+}
+ctx := context.Background()
+
+doc, err := client.Scrape(ctx, "https://firecrawl.dev", &firecrawl.ScrapeOptions{
+	Formats: []string{"markdown"},
+})
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(doc.Markdown)
+
+job, err := client.Crawl(ctx, "https://docs.firecrawl.dev", &firecrawl.CrawlOptions{
+	Limit:         firecrawl.Int(50),
+	ExcludePaths:  []string{"blog/*"},
+	ScrapeOptions: &firecrawl.ScrapeOptions{Formats: []string{"markdown"}},
+})
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(len(job.Data))
+```
+
+</CodeGroup>
+
+| Old module | Current module |
+|---|---|
+| `NewFirecrawlApp(apiKey, apiURL)` | `NewClient(option.WithAPIKey(apiKey))`, with `option.WithAPIURL(url)` for a self-hosted instance |
+| `ScrapeURL(url, *ScrapeParams)` | `Scrape(ctx, url, *ScrapeOptions)` |
+| `CrawlURL(url, *CrawlParams, idempotencyKey)` | `Crawl(ctx, url, *CrawlOptions)`, or `StartCrawl` and `GetCrawlStatus` |
+| `CrawlParams.AllowBackwardLinks` | `CrawlOptions.CrawlEntireDomain` |
+| `CrawlParams.IgnoreSitemap` | `CrawlOptions.Sitemap` |
+| `CrawlParams.MaxDepth` | No exact equivalent. See [No exact equivalent](#no-exact-equivalent). |
+
+Every method now takes a `context.Context` first, and crawl `ScrapeOptions` is a pointer. The old and new modules have different paths, so you can move one package at a time.
+
+## Rust
+
+Versions 1.0.0 to 1.2.1 of the `firecrawl` crate call v1. Version 2.0.0 and later call v2, and replace `FirecrawlApp` with `Client`. Update the dependency:
+
+```toml
+[dependencies]
+firecrawl = "2"
+```
+
+<CodeGroup>
+
+```rust v1 (1.x)
+use firecrawl::{crawl::CrawlOptions, FirecrawlApp};
+
+let app = FirecrawlApp::new("fc-YOUR-API-KEY")?;
+
+let doc = app.scrape_url("https://firecrawl.dev", None).await?;
+println!("{}", doc.markdown.unwrap_or_default());
+
+let crawl = app
+    .crawl_url(
+        "https://docs.firecrawl.dev",
+        CrawlOptions {
+            limit: Some(50),
+            exclude_paths: Some(vec!["blog/*".to_string()]),
+            ..Default::default()
+        },
+    )
+    .await?;
+println!("{}", crawl.data.len());
+```
+
+```rust v2 (2.x)
+use firecrawl::{Client, CrawlOptions, Format, ScrapeOptions};
+
+let client = Client::new("fc-YOUR-API-KEY")?;
+
+let doc = client
+    .scrape(
+        "https://firecrawl.dev",
+        ScrapeOptions {
+            formats: Some(vec![Format::Markdown]),
+            ..Default::default()
+        },
+    )
+    .await?;
+println!("{}", doc.markdown.unwrap_or_default());
+
+let job = client
+    .crawl(
+        "https://docs.firecrawl.dev",
+        CrawlOptions {
+            limit: Some(50),
+            exclude_paths: Some(vec!["blog/*".to_string()]),
+            ..Default::default()
+        },
+    )
+    .await?;
+println!("{}", job.data.len());
+```
+
+</CodeGroup>
+
+| 1.x | 2.x |
+|---|---|
+| `FirecrawlApp::new(api_key)` | `Client::new(api_key)`, or `Client::new_selfhosted` for a self-hosted instance |
+| `scrape_url(url, options)` | `scrape(url, options)`, with formats as the `Format` enum |
+| `crawl_url(url, options)` | `crawl(url, options)`, or `start_crawl` and `get_crawl_status` |
+| `firecrawl::crawl::CrawlOptions` and other module paths | Types are exported from the crate root, for example `firecrawl::CrawlOptions` |
+| `allow_backward_links` | `crawl_entire_domain` |
+| `ignore_sitemap` | `sitemap` |
+| `max_depth` | No exact equivalent. See [No exact equivalent](#no-exact-equivalent). |
+
+## Java, PHP, Ruby, Elixir, and .NET
+
+Every published version of these SDKs calls v2, so there is nothing to migrate. Update to the latest version to get new features:
+
+| SDK | Package | Install |
+|---|---|---|
+| [Java](/sdks/java) | `com.firecrawl:firecrawl-java` on Maven Central | Use the latest version in Gradle or Maven |
+| [PHP](/sdks/php) | `firecrawl/firecrawl-sdk` on Packagist | `composer require firecrawl/firecrawl-sdk` |
+| [Ruby](/sdks/ruby) | `firecrawl-sdk` on RubyGems | `gem install firecrawl-sdk` |
+| [Elixir](/sdks/elixir) | `firecrawl` on Hex | Use the latest version in `mix.exs` |
+| [.NET](/sdks/dotnet) | `firecrawl-sdk` on NuGet | `dotnet add package firecrawl-sdk` |
+
+Packages with similar names, such as the `firecrawl` gem on RubyGems and the `Firecrawl` package on NuGet, are not published by Firecrawl.
+
+## CLI
+
+Every published version of the Firecrawl CLI (`firecrawl-cli`) calls v2, so no CLI command needs to change. Older installs miss newer commands and fixes, and versions before 1.27.0 never update themselves, so update explicitly:
+
+```bash
+npm install -g firecrawl-cli@latest
+```
+
+Check the installed version with `firecrawl --version`. From 1.27.0, `firecrawl update` also updates the CLI in place. If you run the CLI through npx, use `npx -y firecrawl-cli@latest`.
+
+## MCP server
+
+Versions 1.x of the MCP server (`firecrawl-mcp` 1.3.0 to 1.12.0) are built on the v1 Node SDK and call v1 only. Version 2.0.0 and later call v2 when run with npx, and 3.0.0 and later contain no v1 code.
+
+Pin `@latest` in your MCP client config so the client runs the current release rather than an older copy:
+
+<CodeGroup>
+
+```json Before
+{
+  "mcpServers": {
+    "firecrawl-mcp": {
+      "command": "npx",
+      "args": ["-y", "firecrawl-mcp"],
+      "env": {
+        "FIRECRAWL_API_KEY": "fc-YOUR-API-KEY"
+      }
+    }
+  }
+}
+```
+
+```json After
+{
+  "mcpServers": {
+    "firecrawl-mcp": {
+      "command": "npx",
+      "args": ["-y", "firecrawl-mcp@latest"],
+      "env": {
+        "FIRECRAWL_API_KEY": "fc-YOUR-API-KEY"
+      }
+    }
+  }
+}
+```
+
+</CodeGroup>
+
+If you installed the server globally, reinstall it with `npm install -g firecrawl-mcp@latest`. The `FIRECRAWL_RETRY_*`, `FIRECRAWL_CREDIT_WARNING_THRESHOLD`, and `FIRECRAWL_CREDIT_CRITICAL_THRESHOLD` variables from 1.x configs are no longer read, so you can remove them.
+
+You can also skip the local install and use the hosted server, which always runs the current version:
+
+```json
+{
+  "mcpServers": {
+    "firecrawl": {
+      "type": "http",
+      "url": "https://mcp.firecrawl.dev/v2/mcp",
+      "headers": {
+        "Authorization": "Bearer fc-YOUR-API-KEY"
+      }
+    }
+  }
+}
+```
+
+If your config uses an older hosted URL that puts your API key in the URL path, replace it with the URL above. To sign in through the browser instead of using an API key, see [MCP server](/mcp-server).
+
+## n8n
+
+How you move depends on how your workflow calls Firecrawl.
+
+### HTTP Request node
+
+If an HTTP Request node calls `https://api.firecrawl.dev/v1/...` directly, change the URL to `/v2/...` and update the JSON body with the [REST API](#rest-api) mappings above. The `Authorization` header stays the same.
+
+For example, a scrape that asked for markdown, extracted JSON, and a full-page screenshot:
+
+<CodeGroup>
+
+```json v1 body (POST https://api.firecrawl.dev/v1/scrape)
+{
+  "url": "https://firecrawl.dev",
+  "formats": ["markdown", "extract", "screenshot@fullPage"],
+  "extract": { "prompt": "Extract the company mission." }
+}
+```
+
+```json v2 body (POST https://api.firecrawl.dev/v2/scrape)
+{
+  "url": "https://firecrawl.dev",
+  "formats": [
+    "markdown",
+    { "type": "json", "prompt": "Extract the company mission." },
+    { "type": "screenshot", "fullPage": true }
+  ]
+}
+```
+
+</CodeGroup>
+
+Then check the expressions in later nodes. `{{ $json.data.markdown }}` still works for a scrape, but extracted data is now `{{ $json.data.json }}` instead of `data.extract`, search results are under `{{ $json.data.web }}`, and map `links` are objects with a `url` field.
+
+### Official Firecrawl node
+
+The official Firecrawl node is `@mendable/n8n-nodes-firecrawl`.
+
+1. Update it to the latest version (2.2.0 or later). On self-hosted n8n, go to **Settings** > **Community nodes** and select **Update** on the Firecrawl node.
+2. Open your **Firecrawl API** credential and set **Base URL** to `https://api.firecrawl.dev/v2`. Releases 1.0.0 to 1.0.4 of the node defaulted this field to `https://api.firecrawl.dev/v1`, and credentials created with them keep that value after you update the node. Current versions of the node also fall back to v2 when the field is empty, but the credential's connection test needs the full URL.
+
+See [Connect your Firecrawl API key](/integrations/n8n#connect-your-firecrawl-api-key) in the n8n guide for the credential settings.
+
+### Third-party FireCrawl community node
+
+The community node named **FireCrawl** (npm package `n8n-nodes-firecrawl`) is not maintained by Firecrawl and has not been updated since 2024. It defaults to the v1 Base URL and sends v1-only fields such as the `"extract"` format with its `extract` options and the crawl `allowBackwardLinks` option, so pointing it at `/v2` does not fix it. Replace it with the official node:
+
+1. Install the official Firecrawl node (`@mendable/n8n-nodes-firecrawl`) as described in [Install and configure the Firecrawl node](/integrations/n8n#step-3-install-and-configure-the-firecrawl-node).
+2. In each workflow, replace every FireCrawl node with the matching Firecrawl node operation, using a Firecrawl API credential whose Base URL is `https://api.firecrawl.dev/v2`.
+3. Uninstall the old package: go to **Settings** > **Community nodes**, open the options menu on `n8n-nodes-firecrawl`, and select **Uninstall package**.
