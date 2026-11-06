@@ -1,254 +1,59 @@
 ---
 title: "Migrating from LLMs.txt generation"
-description: "Replace the deprecated /v1/llmstxt endpoint with /v2/map and /v2/batch/scrape"
+description: "Build llms.txt with /v2/map and /v2/batch/scrape instead of /v1/llmstxt"
 og:title: "Migrating from LLMs.txt generation | Firecrawl"
-og:description: "Replace the deprecated /v1/llmstxt endpoint with /v2/map and /v2/batch/scrape"
-sidebarTitle: "Migrating from LLMs.txt"
+og:description: "Build llms.txt with /v2/map and /v2/batch/scrape instead of /v1/llmstxt"
+noindex: true
 ---
 
-<Warning>
-`/v1/llmstxt` and `/v1/llmstxt/{id}` are deprecated and will be removed on Thursday, December 10, 2026, 15:00 UTC. Generate the files with [`/v2/map`](/features/map) and [`/v2/batch/scrape`](/features/batch-scrape) instead, using the script on this page. The SDK methods that call this endpoint stop working when it is removed: `generateLLMsText`, `asyncGenerateLLMsText` and `checkGenerateLLMsTextStatus` in Node, and `generate_llms_text`, `async_generate_llms_text` and `check_generate_llms_text_status` in Python. The [`generate-llmstxt` npx package](/features/alpha/llmstxt-npx) calls it too.
-</Warning>
+`/v1/llmstxt` stops working on Thursday, December 10, 2026, 15:00 UTC, and returns `410 Gone` after that, so build the files with [`/v2/map`](/features/map) and [`/v2/batch/scrape`](/features/batch-scrape) instead.
 
-## What the endpoint did
+## Migrate with your coding agent
 
-`/v1/llmstxt` ran three steps for you:
+Copy this prompt into Claude Code, Cursor or Codex:
 
-1. It mapped the site to find up to `maxUrls` pages, leaving out subdomains.
-2. It scraped the main content of each page as markdown and asked a model for a 3 to 4 word title and a 9 to 10 word description of the page.
-3. It wrote `llms.txt` as a `# <url> llms.txt` heading followed by one `- [title](url): description` line per page, and `llms-full.txt` as a `# <url> llms-full.txt` heading followed by each page's markdown under a `## title` heading.
+```text
+Migrate this codebase off Firecrawl's LLMs.txt API (/v1/llmstxt), which stops working on December 10, 2026. It has no single replacement: build llms.txt and llms-full.txt from the v2 Map and Batch Scrape APIs.
 
-The script below runs the same three steps on v2 and writes the same two files.
+1. Find every LLMs.txt call:
+   - Node SDK: generateLLMsText, asyncGenerateLLMsText, checkGenerateLLMsTextStatus
+   - Python SDK: generate_llms_text, async_generate_llms_text, check_generate_llms_text_status
+   - These may be called on firecrawl.v1, FirecrawlAppV1, V1FirecrawlApp or an older FirecrawlApp
+   - Raw HTTP: POST /v1/llmstxt and GET /v1/llmstxt/{id}
+   - The generate-llmstxt npx package
+2. Upgrade the Firecrawl SDK to the latest version: npm install firecrawl@latest, or pip install -U firecrawl-py.
+3. Replace each call with these steps on the v2 client, new Firecrawl({ apiKey }) in Node or Firecrawl(api_key=...) in Python:
+   a. List the pages: map(url, { limit: maxUrls, includeSubdomains: false }) in Node, map(url, limit=max_urls, include_subdomains=False) in Python. Use the old maxUrls value (default 10) as limit. Take the URLs from links[].url.
+   b. Scrape them: batchScrape(urls, { options: { formats } }) in Node, batch_scrape(urls, formats=formats) in Python, with
+      formats = ["markdown", { "type": "json", "prompt": "Write a 3-4 word title and a 9-10 word description of this page.", "schema": { "type": "object", "properties": { "title": { "type": "string" }, "description": { "type": "string" } }, "required": ["title", "description"] } }]
+      batchScrape waits for the job. For asyncGenerateLLMsText / async_generate_llms_text use startBatchScrape / start_batch_scrape, and replace checkGenerateLLMsTextStatus / check_generate_llms_text_status with getBatchScrapeStatus(id) / get_batch_scrape_status(id).
+   c. Drop pages whose metadata.statusCode (metadata.status_code in Python) is 400 or more, and sort the rest back into map order by metadata.sourceURL (metadata.source_url in Python). Batch results come back in the order they finish.
+   d. llms.txt (what data.llmstxt held): "# {url} llms.txt", a blank line, then one "- [{title}]({page url}): {description}" line per page. Use json.title and json.description, falling back to metadata.title and metadata.description.
+   e. llms-full.txt (what data.llmsfulltxt held when showFullText / show_full_text was true): "# {url} llms-full.txt", a blank line, then for each page "## {title}", a newline, its markdown and a blank line. If showFullText was false, drop "markdown" from formats and skip this file.
+   f. cache: false -> set maxAge: 0 in the scrape options (max_age=0 in Python).
+   g. Raw HTTP: POST /v2/map, then POST /v2/batch/scrape with { urls, formats }, then poll GET /v2/batch/scrape/{id} until status is "completed", following the "next" URL for more results.
+4. Keep the program's behavior the same: same inputs, same file contents and return values, same error handling.
+5. Run the project's tests and fix anything that breaks.
 
-## Why this is better
-
-- **You choose the pages.** Narrow `/v2/map` with `search`, `sitemap` and `includeSubdomains`, filter the URL list in your own code, or skip the map step and scrape a list you already have.
-- **You control the descriptions and the format.** Change the prompt or the schema, use each page's own title and meta description, or change the layout of the files, for example to follow the [llms.txt proposal](https://llmstxt.org/) with a site name and summary at the top.
-- **Standard v2 credits.** Each step is an ordinary map or scrape, billed at the rates on the [billing page](/billing), and you decide whether model-written descriptions are worth their cost. See [Credits](#credits).
-- **No alpha endpoint.** The script only uses `/v2/map` and `/v2/batch/scrape`, which are maintained v2 endpoints.
-
-## Generate llms.txt and llms-full.txt
-
-Set `site` to the site you want and `max_urls` (`maxUrls` in Node) to the `maxUrls` value you used before. The script writes `llms.txt` and `llms-full.txt` to the current directory. It needs a current SDK release, so upgrade first with `pip install -U firecrawl` or `npm install firecrawl@latest`.
-
-<CodeGroup>
-
-```python Python
-from firecrawl import Firecrawl
-
-firecrawl = Firecrawl(api_key="fc-YOUR_API_KEY")
-
-site = "https://docs.firecrawl.dev"
-max_urls = 10
-
-# 1. List the pages
-site_map = firecrawl.map(site, limit=max_urls, include_subdomains=False)
-urls = [link.url for link in site_map.links]
-
-# 2. Scrape them
-job = firecrawl.batch_scrape(
-    urls,
-    formats=[
-        "markdown",
-        {
-            "type": "json",
-            "prompt": "Write a 3-4 word title and a 9-10 word description of this page.",
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "title": {"type": "string"},
-                    "description": {"type": "string"},
-                },
-                "required": ["title", "description"],
-            },
-        },
-    ],
-)
-
-# 3. Write llms.txt and llms-full.txt
-order = {url: i for i, url in enumerate(urls)}
-docs = sorted(
-    (doc for doc in job.data if (doc.metadata.status_code or 200) < 400),
-    key=lambda doc: order.get(doc.metadata.source_url, len(urls)),
-)
-
-llms_txt = f"# {site} llms.txt\n\n"
-llms_full_txt = f"# {site} llms-full.txt\n\n"
-for doc in docs:
-    url = doc.metadata.source_url
-    page = doc.json or {}
-    title = page.get("title") or doc.metadata.title or url
-    description = page.get("description") or doc.metadata.description or ""
-    llms_txt += f"- [{title}]({url}): {description}\n"
-    llms_full_txt += f"## {title}\n{doc.markdown}\n\n"
-
-with open("llms.txt", "w", encoding="utf-8") as f:
-    f.write(llms_txt)
-with open("llms-full.txt", "w", encoding="utf-8") as f:
-    f.write(llms_full_txt)
+Reference: https://docs.firecrawl.dev/migrating-from-llmstxt.md
 ```
 
-```js Node
-import { writeFile } from 'node:fs/promises';
-import { Firecrawl } from 'firecrawl';
+## Migrate by hand
 
-const firecrawl = new Firecrawl({ apiKey: 'fc-YOUR_API_KEY' });
-
-const site = 'https://docs.firecrawl.dev';
-const maxUrls = 10;
-
-// 1. List the pages
-const siteMap = await firecrawl.map(site, { limit: maxUrls, includeSubdomains: false });
-const urls = siteMap.links.map((link) => link.url);
-
-// 2. Scrape them
-const job = await firecrawl.batchScrape(urls, {
-  options: {
-    formats: [
-      'markdown',
-      {
-        type: 'json',
-        prompt: 'Write a 3-4 word title and a 9-10 word description of this page.',
-        schema: {
-          type: 'object',
-          properties: {
-            title: { type: 'string' },
-            description: { type: 'string' }
-          },
-          required: ['title', 'description']
-        }
-      }
-    ]
-  }
-});
-
-// 3. Write llms.txt and llms-full.txt
-const order = new Map(urls.map((url, i) => [url, i]));
-const position = (doc) => order.get(doc.metadata?.sourceURL) ?? urls.length;
-const docs = job.data
-  .filter((doc) => (doc.metadata?.statusCode ?? 200) < 400)
-  .sort((a, b) => position(a) - position(b));
-
-let llmsTxt = `# ${site} llms.txt\n\n`;
-let llmsFullTxt = `# ${site} llms-full.txt\n\n`;
-for (const doc of docs) {
-  const url = doc.metadata?.sourceURL;
-  const title = doc.json?.title || doc.metadata?.title || url;
-  const description = doc.json?.description || doc.metadata?.description || '';
-  llmsTxt += `- [${title}](${url}): ${description}\n`;
-  llmsFullTxt += `## ${title}\n${doc.markdown}\n\n`;
-}
-
-await writeFile('llms.txt', llmsTxt);
-await writeFile('llms-full.txt', llmsFullTxt);
-```
-
-</CodeGroup>
-
-A few things the script handles for you:
-
-- **Subdomains.** `/v2/map` includes subdomains by default, so the script sets `includeSubdomains` to `false`, as `/v1/llmstxt` did. Remove it to cover subdomains too.
-- **Order.** A batch scrape returns pages in the order they finish, so the script sorts them back into the order the map returned them in.
-- **Failed pages.** Pages that fail to scrape are not in the results, and pages that come back with an error status, such as a 404, are skipped. Neither appears in the files.
-- **Waiting.** `batch_scrape` (`batchScrape` in Node) waits for the job to finish and collects every page of results. To start the job and check on it later, use `start_batch_scrape` and `get_batch_scrape_status` (`startBatchScrape` and `getBatchScrapeStatus` in Node).
-
-To keep each page at the base scrape cost, remove the `json` format. The script then uses each page's own title and meta description from its metadata. If you want a longer, model-written summary of each page as its description, use the `summary` format instead: add `"summary"` to `formats` and read it from `doc.summary`.
-
-### With cURL
-
-The same steps with cURL and [jq](https://jqlang.org/):
-
-```bash cURL
-# 1. List up to 10 pages of the site
-curl -s -X POST "https://api.firecrawl.dev/v2/map" \
-  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://docs.firecrawl.dev", "limit": 10, "includeSubdomains": false}' \
-  > map.json
-
-# 2. Start a batch scrape of those pages
-jq '{
-  urls: [.links[].url],
-  formats: [
-    "markdown",
-    {
-      type: "json",
-      prompt: "Write a 3-4 word title and a 9-10 word description of this page.",
-      schema: {
-        type: "object",
-        properties: { title: { type: "string" }, description: { type: "string" } },
-        required: ["title", "description"]
-      }
-    }
-  ]
-}' map.json > batch.json
-
-JOB_ID=$(curl -s -X POST "https://api.firecrawl.dev/v2/batch/scrape" \
-  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d @batch.json | jq -r '.id')
-
-# 3. Wait for the job to finish
-STATUS="scraping"
-while [ "$STATUS" = "scraping" ]; do
-  sleep 5
-  curl -s "https://api.firecrawl.dev/v2/batch/scrape/$JOB_ID" \
-    -H "Authorization: Bearer $FIRECRAWL_API_KEY" > results.json
-  STATUS=$(jq -r '.status' results.json)
-done
-
-# 4. Write llms.txt and llms-full.txt
-{
-  printf '# https://docs.firecrawl.dev llms.txt\n\n'
-  jq -r '.data[] | select((.metadata.statusCode // 200) < 400)
-    | "- [" + (.json.title // .metadata.title // .metadata.sourceURL) + "](" + .metadata.sourceURL + "): "
-      + (.json.description // .metadata.description // "")' results.json
-} > llms.txt
-{
-  printf '# https://docs.firecrawl.dev llms-full.txt\n\n'
-  jq -r '.data[] | select((.metadata.statusCode // 200) < 400)
-    | "## " + (.json.title // .metadata.title // .metadata.sourceURL) + "\n" + .markdown + "\n"' results.json
-} > llms-full.txt
-```
-
-This outline writes the pages in the order they finished scraping, while the SDK scripts above put them back in map order. For a large site, the status response can also be split into pages: if `results.json` has a `next` URL, fetch it as well and add its `data` before you write the files. The SDKs do both for you.
-
-## Parameter mapping
-
-| `/v1/llmstxt` | v2 | Notes |
+| v1 | v2 | Note |
 |---|---|---|
-| `url` | `url` on `/v2/map` | The script also uses it in the file headings. |
-| `maxUrls` (default 10) | `limit` on `/v2/map` | `/v2/map` returns up to 5,000 links by default, so always set `limit`. |
-| `showFullText` | Whether you write `llms-full.txt` | If you only need `llms.txt`, remove `markdown` from `formats` and the `llms-full.txt` lines. |
-| `cache` (default `true`) | `maxAge` on the scrape | A scrape can reuse a recent cached copy of a page, and `maxAge` sets how old, in milliseconds, that copy may be. Set `maxAge` to `0` to always fetch fresh pages, as `cache: false` did. Pages served from cache are billed like any other scrape. |
-| Subdomains left out | `includeSubdomains: false` on `/v2/map` | `/v2/map` includes subdomains by default. |
-| Main content only | `onlyMainContent` on the scrape | Defaults to `true`, as before. |
-| `data.llmstxt` | `llms.txt`, written by the script | |
-| `data.llmsfulltxt` | `llms-full.txt`, written by the script | |
-| `GET /v1/llmstxt/{id}` | `GET /v2/batch/scrape/{id}` | Only needed if you start the batch scrape and check on it later. |
+| `POST /v1/llmstxt` | `POST /v2/map`, then `POST /v2/batch/scrape` | Write the files from the results |
+| `GET /v1/llmstxt/{id}` | `GET /v2/batch/scrape/{id}` | |
+| `generateLLMsText` / `generate_llms_text` | `map`, then `batchScrape` / `batch_scrape` | |
+| `asyncGenerateLLMsText` / `async_generate_llms_text` | `map`, then `startBatchScrape` / `start_batch_scrape` | |
+| `checkGenerateLLMsTextStatus` / `check_generate_llms_text_status` | `getBatchScrapeStatus` / `get_batch_scrape_status` | |
+| `maxUrls` | `limit` on map | Map returns up to 5,000 links unless set |
+| Subdomains left out | `includeSubdomains: false` on map | Map includes them by default |
+| `cache: false` | `maxAge: 0` on the scrape | |
+| `showFullText` | `markdown` format | Needed only for llms-full.txt |
+| `data.llmstxt`, `data.llmsfulltxt` | Your own code | Format is in the prompt above |
+| `npx generate-llmstxt` | `map` and `batchScrape` in a short script | |
 
-## SDK methods
+Using n8n, Zapier, Make or another no-code tool? Update the Firecrawl node or app to its latest version.
 
-| v1 method | v2 replacement |
-|---|---|
-| Node `generateLLMsText(url, params)` | `map(url, { limit, includeSubdomains: false })`, then `batchScrape(urls, { options: { formats } })` |
-| Node `asyncGenerateLLMsText(url, params)` | `map(...)`, then `startBatchScrape(urls, { options: { formats } })` |
-| Node `checkGenerateLLMsTextStatus(id)` | `getBatchScrapeStatus(id)` |
-| Python `generate_llms_text(url, ...)` | `map(url, limit=..., include_subdomains=False)`, then `batch_scrape(urls, formats=[...])` |
-| Python `async_generate_llms_text(url, ...)` | `map(...)`, then `start_batch_scrape(urls, formats=[...])` |
-| Python `check_generate_llms_text_status(id)` | `get_batch_scrape_status(id)` |
-| `npx generate-llmstxt` | Run `npm install firecrawl`, save the Node script as `generate-llmstxt.mjs` and run `node generate-llmstxt.mjs` |
-
-The v2 methods are on the top-level client, `new Firecrawl(...)` in Node and `Firecrawl(...)` in Python. The v1 methods call `/v1/llmstxt` wherever your code reaches them: on `firecrawl.v1`, on a v1 client such as `FirecrawlAppV1` (Node) or `V1FirecrawlApp` (Python), or on `FirecrawlApp` in SDK releases from before the v2 API.
-
-## Credits
-
-`/v1/llmstxt` billed 1 credit for each page it found on the site, up to `maxUrls`, and nothing when it returned a cached result.
-
-The script is billed at the standard rates on the [billing page](/billing):
-
-- `/v2/map` costs 1 credit per call, whatever the `limit`.
-- `/v2/batch/scrape` costs 1 credit per page.
-- The `json` format adds 4 credits per page.
-
-As written, 10 pages cost 1 + 10 × 5 = 51 credits. Without the `json` format, the same 10 pages cost 11 credits, about what `/v1/llmstxt` charged.
+Questions? Email [help@firecrawl.com](mailto:help@firecrawl.com).

@@ -1,286 +1,67 @@
 ---
 title: "Migrating from Deep Research"
-description: "Move from the deprecated /v1/deep-research endpoint to /v2/agent, or build your own research loop on /v2/search"
+description: "Move /v1/deep-research calls to /v2/agent"
 og:title: "Migrating from Deep Research | Firecrawl"
-og:description: "Move from the deprecated /v1/deep-research endpoint to /v2/agent, or build your own research loop on /v2/search"
-sidebarTitle: "Migrating from Deep Research"
+og:description: "Move /v1/deep-research calls to /v2/agent"
+noindex: true
 ---
 
-<Warning>
-`/v1/deep-research` and `/v1/deep-research/{id}` are deprecated and will be removed on Thursday, December 10, 2026, 15:00 UTC. Migrate to [`/v2/agent`](/features/agent). The SDK methods that call this endpoint stop working when it is removed: `deepResearch`, `asyncDeepResearch` and `checkDeepResearchStatus` in Node, and `deep_research`, `async_deep_research` and `check_deep_research_status` in Python.
-</Warning>
+`/v1/deep-research` stops working on Thursday, December 10, 2026, 15:00 UTC, and returns `410 Gone` after that, so move your calls to [`/v2/agent`](/features/agent).
 
-Deep Research was an alpha endpoint: you sent a question, it searched and read the web for a while, and it returned a written analysis with its sources. [`/v2/agent`](/features/agent) is its maintained successor. You send a prompt, the agent searches, navigates and reads the web, and it returns the answer in the shape you ask for.
+## Migrate with your coding agent
 
-If you'd rather run the research loop yourself with your own model, use [`/v2/search`](/features/search) with `scrapeOptions` instead. See [Build your own research loop](#build-your-own-research-loop).
+Copy this prompt into Claude Code, Cursor or Codex:
 
-## Why move to Agent
+```text
+Migrate this codebase off Firecrawl's Deep Research API (/v1/deep-research), which stops working on December 10, 2026, to the v2 Agent API (/v2/agent).
 
-- **It's maintained.** Deep Research is an alpha endpoint that no longer gets updates. Agent is a maintained v2 endpoint.
-- **Structured output.** Pass a JSON schema (a Pydantic or Zod model in the SDKs) and `data` comes back in that shape. You can still get a written report by adding a `report` field to the schema.
-- **Current models.** Agent runs on [Spark 2](/features/agent#model-selection), and `effort` (`low`, `medium` or `high`) sets how hard it reasons. Deep Research used a combination of small models.
-- **Budget control.** `maxCredits` caps what a run can spend. A run that reaches the cap stops with `stopReason: "credit_limit_reached"`, and failed runs are not billed.
-- **Follow-up turns.** Every run returns a `threadId`. Send a new prompt with that `threadId` to refine or extend the result without starting over.
-- **Traces.** `GET /v2/agent/{jobId}/trace` returns what a run did: its tool calls, such as searches and page visits, with their results, plus reasoning summaries and progress updates. It replaces the `activities` log.
+1. Find every Deep Research call:
+   - Node SDK: deepResearch, asyncDeepResearch, checkDeepResearchStatus
+   - Python SDK: deep_research, async_deep_research, check_deep_research_status
+   - These may be called on firecrawl.v1, FirecrawlAppV1, V1FirecrawlApp or an older FirecrawlApp
+   - Raw HTTP: POST /v1/deep-research and GET /v1/deep-research/{id}
+2. Upgrade the Firecrawl SDK to the latest version: npm install firecrawl@latest, or pip install -U firecrawl-py.
+3. Rewrite each call on the v2 client, new Firecrawl({ apiKey }) in Node or Firecrawl(api_key=...) in Python:
+   - deepResearch(query, params) -> agent({ prompt, schema, maxCredits }); Python deep_research(query, ...) -> agent(prompt=..., schema=..., max_credits=...). It starts the run and waits for it.
+   - asyncDeepResearch -> startAgent; async_deep_research -> start_agent. Same arguments as agent; returns the job id.
+   - checkDeepResearchStatus(id) -> getAgentStatus(id); check_deep_research_status(id) -> get_agent_status(id).
+   - POST /v1/deep-research -> POST /v2/agent; GET /v1/deep-research/{id} -> GET /v2/agent/{id}.
+   Request:
+   - query (or topic), systemPrompt, analysisPrompt and jsonOptions.prompt -> merge into one prompt string.
+   - jsonOptions.schema -> schema (a JSON schema, a Zod schema in Node or a Pydantic model in Python).
+   - The finalAnalysis report -> add a required string field "report" to schema, described as a markdown report that answers the question.
+   - Sources -> add a required "sources" array of { url, title } objects to schema.
+   - maxUrls -> maxCredits (max_credits in Python). It caps what the run spends and defaults to 2500. There is no page limit.
+   - maxDepth and timeLimit -> remove them. They have no equivalent.
+   - onActivity / on_activity callbacks -> poll getAgentTrace(id) / get_agent_trace(id), or pass a webhook.
+   - onSource / on_source callbacks -> read the "sources" field of the result.
+   Response:
+   - status keeps the same values: processing, completed, failed.
+   - data.finalAnalysis -> data.report; data.json -> data; data.sources -> data.sources (from the schema field); data.activities -> the trace; error -> error.
+   - A run that hits maxCredits stops with stopReason "credit_limit_reached" (stop_reason in Python).
+4. Keep the program's behavior the same: same inputs, same outputs to its callers, same error handling.
+5. Run the project's tests and fix anything that breaks.
 
-## Before and after
-
-The examples below run the same research question on both endpoints. The Agent version asks for a markdown `report` and a list of `sources`, which is what `finalAnalysis` and `sources` used to hold. The v2 code needs a current SDK release, so upgrade first with `pip install -U firecrawl` or `npm install firecrawl@latest`.
-
-### Before: `/v1/deep-research`
-
-<CodeGroup>
-
-```python Python
-from firecrawl import Firecrawl
-
-firecrawl = Firecrawl(api_key="fc-YOUR_API_KEY")
-
-results = firecrawl.v1.deep_research(
-    "What are the latest developments in quantum computing?",
-    max_depth=5,
-    time_limit=180,
-    max_urls=15,
-)
-
-print(results.data["finalAnalysis"])
+Reference: https://docs.firecrawl.dev/migrating-from-deep-research.md
 ```
 
-```js Node
-import { Firecrawl } from 'firecrawl';
+## Migrate by hand
 
-const firecrawl = new Firecrawl({ apiKey: 'fc-YOUR_API_KEY' });
-
-const results = await firecrawl.v1.deepResearch(
-  'What are the latest developments in quantum computing?',
-  { maxDepth: 5, timeLimit: 180, maxUrls: 15 },
-  (activity) => console.log(`[${activity.type}] ${activity.message}`)
-);
-
-console.log(results.data.finalAnalysis);
-```
-
-```bash cURL
-curl -X POST "https://api.firecrawl.dev/v1/deep-research" \
-  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "What are the latest developments in quantum computing?",
-    "maxDepth": 5,
-    "timeLimit": 180,
-    "maxUrls": 15
-  }'
-```
-
-</CodeGroup>
-
-Your code may reach these methods another way: on a v1 client such as `FirecrawlAppV1` (Node) or `V1FirecrawlApp` (Python), or directly on `FirecrawlApp` in SDK releases from before the v2 API. They all call the same endpoint, so they all need the same migration.
-
-### After: `/v2/agent`
-
-<CodeGroup>
-
-```python Python
-from typing import List
-
-from pydantic import BaseModel, Field
-from firecrawl import Firecrawl
-
-firecrawl = Firecrawl(api_key="fc-YOUR_API_KEY")
-
-
-class Source(BaseModel):
-    url: str
-    title: str
-
-
-class Research(BaseModel):
-    report: str = Field(description="Markdown report that answers the question, with key findings and a conclusion")
-    sources: List[Source] = Field(description="Pages the report is based on")
-
-
-result = firecrawl.agent(
-    prompt="What are the latest developments in quantum computing? Cover error correction, hardware and commercial use.",
-    schema=Research,
-    max_credits=500,
-)
-
-if result.status == "completed":
-    print(result.data["report"])
-    for source in result.data["sources"]:
-        print(source["url"])
-else:
-    print(result.status, result.stop_reason, result.error)
-```
-
-```js Node
-import { Firecrawl } from 'firecrawl';
-import { z } from 'zod';
-
-const firecrawl = new Firecrawl({ apiKey: 'fc-YOUR_API_KEY' });
-
-const result = await firecrawl.agent({
-  prompt: 'What are the latest developments in quantum computing? Cover error correction, hardware and commercial use.',
-  schema: z.object({
-    report: z.string().describe('Markdown report that answers the question, with key findings and a conclusion'),
-    sources: z.array(z.object({
-      url: z.string(),
-      title: z.string()
-    })).describe('Pages the report is based on')
-  }),
-  maxCredits: 500
-});
-
-if (result.status === 'completed') {
-  console.log(result.data.report);
-  for (const source of result.data.sources) console.log(source.url);
-} else {
-  console.log(result.status, result.stopReason, result.error);
-}
-```
-
-```bash cURL
-# Start the run. The response contains its id.
-curl -X POST "https://api.firecrawl.dev/v2/agent" \
-  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "prompt": "What are the latest developments in quantum computing? Cover error correction, hardware and commercial use.",
-    "maxCredits": 500,
-    "schema": {
-      "type": "object",
-      "properties": {
-        "report": {
-          "type": "string",
-          "description": "Markdown report that answers the question, with key findings and a conclusion"
-        },
-        "sources": {
-          "type": "array",
-          "description": "Pages the report is based on",
-          "items": {
-            "type": "object",
-            "properties": {
-              "url": { "type": "string" },
-              "title": { "type": "string" }
-            },
-            "required": ["url", "title"]
-          }
-        }
-      },
-      "required": ["report", "sources"]
-    }
-  }'
-
-# Poll until status is "completed" or "failed". Replace JOB_ID with the id.
-curl "https://api.firecrawl.dev/v2/agent/JOB_ID" \
-  -H "Authorization: Bearer $FIRECRAWL_API_KEY"
-```
-
-</CodeGroup>
-
-`agent()` starts the run and waits for it to finish. If you started jobs with `asyncDeepResearch` and polled `checkDeepResearchStatus`, use `startAgent` and `getAgentStatus` (`start_agent` and `get_agent_status` in Python). The `status` values are the same as before: `processing`, `completed` and `failed`.
-
-If you don't need a fixed shape, leave out `schema` and describe the output you want in `prompt`. The agent then picks the shape of `data` itself.
-
-## Request parameters
-
-| `/v1/deep-research` | `/v2/agent` | Notes |
+| v1 | v2 | Note |
 |---|---|---|
-| `query` (or the older `topic`) | `prompt` | Up to 10,000 characters. |
-| `systemPrompt` | `prompt` | There is no separate system prompt. Put instructions about how to research, such as sources to prefer or avoid, in the prompt. |
-| `analysisPrompt` | `prompt` and `schema` | Describe the answer you want in the prompt. For a fixed shape, describe each field in the schema. |
-| `formats: ["json"]` with `jsonOptions.schema` | `schema` | A JSON schema, or a Pydantic or Zod model in the SDKs. The result is in `data`. |
-| `jsonOptions.prompt`, `jsonOptions.systemPrompt` | `prompt` | Fold them into the one prompt. |
-| `formats: ["markdown"]` (the `finalAnalysis` text) | A `report` field in `schema`, or a request for a report in `prompt` | Add a string field such as `report` and describe it as a markdown report, as in the example above. |
-| `maxUrls` | `maxCredits` | There is no parameter that limits the number of pages. `maxCredits` caps what the run can spend instead, and defaults to 2,500. |
-| `maxDepth` | No equivalent | The agent decides how many searches and pages it needs. Use `effort` to set how hard it reasons and `maxCredits` to bound the run. |
-| `timeLimit` | No equivalent | There is no time limit parameter. The `timeout` option of the SDK `agent()` method only stops waiting, and the run keeps going. To stop a run, cancel it with `DELETE /v2/agent/{jobId}` (`cancelAgent` in Node, `cancel_agent` in Python). |
-| Not available | `urls` | Optional pages to start from. Add `strictConstrainToURLs: true` to keep the agent on them. |
+| `POST /v1/deep-research` | `POST /v2/agent` | |
+| `GET /v1/deep-research/{id}` | `GET /v2/agent/{id}` | Same `status` values |
+| `deepResearch` / `deep_research` | `agent` | Starts the run and waits |
+| `asyncDeepResearch` / `async_deep_research` | `startAgent` / `start_agent` | |
+| `checkDeepResearchStatus` / `check_deep_research_status` | `getAgentStatus` / `get_agent_status` | |
+| `query`, `systemPrompt`, `analysisPrompt` | `prompt` | Merge into one prompt |
+| `jsonOptions.schema` | `schema` | |
+| `maxUrls` | `maxCredits` | Caps spend, default 2,500 |
+| `maxDepth`, `timeLimit` | None | Remove them |
+| `data.finalAnalysis` | `data.report` | Add a `report` string to `schema` |
+| `data.sources` | `data.sources` | Add a `sources` array to `schema` |
+| `data.activities`, `onActivity` | `GET /v2/agent/{id}/trace` | `getAgentTrace` / `get_agent_trace` |
 
-## Response fields
+Using n8n, Zapier, Make or another no-code tool? Update the Firecrawl node or app to its latest version.
 
-| `GET /v1/deep-research/{id}` | `GET /v2/agent/{jobId}` |
-|---|---|
-| `status` | `status`, with the same values. A cancelled run reports `failed`. |
-| `data.finalAnalysis` | The `report` field of `data`, or whichever field your schema defines |
-| `data.json` | `data` |
-| `data.sources` | No dedicated field. Add a `sources` array to your schema, as in the example above. The pages the agent visited are also in the trace, in its `tool_call.started` and `tool_call.finished` events. |
-| `data.activities` | The [trace](/api-reference/endpoint/agent-trace): `GET /v2/agent/{jobId}/trace` returns `progress.reported`, `reasoning.summary`, `tool_call.started` and `tool_call.finished` events, among others. |
-| `currentDepth`, `maxDepth`, `totalUrls` | No equivalent. `creditsUsed` reports what the run cost. |
-| `error` | `error`. When a run stops at its `maxCredits` limit, `stopReason` is `credit_limit_reached` and `partial` may hold what the agent gathered. |
-| `expiresAt` | `expiresAt`. Results stay available through the API for 24 hours after the run completes. |
-
-The v1 status response also repeated `sources` and `activities` at the top level. Use the replacements above for those too.
-
-## SDK methods
-
-| v1 method | v2 method |
-|---|---|
-| Node `deepResearch(query, params, onActivity, onSource)` | `agent({ prompt, schema, maxCredits })` |
-| Node `asyncDeepResearch(query, params)` | `startAgent({ prompt, schema, maxCredits })` |
-| Node `checkDeepResearchStatus(id)` | `getAgentStatus(id)` |
-| Python `deep_research(query, ...)` | `agent(prompt=..., schema=..., max_credits=...)` |
-| Python `async_deep_research(query, ...)` | `start_agent(prompt=..., schema=..., max_credits=...)` |
-| Python `check_deep_research_status(id)` | `get_agent_status(id)` |
-| `onActivity` / `on_activity` callback | Poll `getAgentTrace(id)` (`get_agent_trace(id)` in Python), or pass a `webhook` when you start the run |
-| `onSource` / `on_source` callback | A `sources` field in your schema |
-
-The v2 methods are on the top-level client, `new Firecrawl(...)` in Node and `Firecrawl(...)` in Python. See [Following a run in progress](/features/agent#following-a-run-in-progress) for trace polling, and [agent webhook events](/webhooks/events#agent-events) for push updates.
-
-## Build your own research loop
-
-If you want to choose the model, write the prompts and decide how many rounds to run, build the loop on `/v2/search`. With `scrapeOptions`, each search returns the full markdown of its results, ready to pass to your model:
-
-<CodeGroup>
-
-```python Python
-from firecrawl import Firecrawl
-
-firecrawl = Firecrawl(api_key="fc-YOUR_API_KEY")
-
-results = firecrawl.search(
-    "latest developments in quantum error correction",
-    limit=5,
-    scrape_options={"formats": ["markdown"]},
-)
-
-pages = [doc for doc in results.web or [] if getattr(doc, "markdown", None)]
-context = "\n\n".join(f"Source: {doc.metadata.source_url}\n{doc.markdown}" for doc in pages)
-```
-
-```js Node
-import { Firecrawl } from 'firecrawl';
-
-const firecrawl = new Firecrawl({ apiKey: 'fc-YOUR_API_KEY' });
-
-const results = await firecrawl.search('latest developments in quantum error correction', {
-  limit: 5,
-  scrapeOptions: { formats: ['markdown'] }
-});
-
-const pages = (results.web ?? []).filter((doc) => doc.markdown);
-const context = pages.map((doc) => `Source: ${doc.metadata.sourceURL}\n${doc.markdown}`).join('\n\n');
-```
-
-```bash cURL
-curl -X POST "https://api.firecrawl.dev/v2/search" \
-  -H "Authorization: Bearer $FIRECRAWL_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "latest developments in quantum error correction",
-    "limit": 5,
-    "scrapeOptions": { "formats": ["markdown"] }
-  }'
-```
-
-</CodeGroup>
-
-Send `context` and the question to your model, ask it which gaps remain and what to search next, search again, and have it write the final analysis once it has enough. That loop is what `maxDepth`, `timeLimit`, `systemPrompt` and `analysisPrompt` used to control. The [Deep Research use case](/use-cases/deep-research) walks through a full search, scrape and analyze loop.
-
-## Credits
-
-Deep Research billed 1 credit per URL it analyzed, up to `maxUrls`.
-
-Agent uses [dynamic billing](/features/agent#pricing): a run costs what its searches, page visits and reasoning used, and the status response reports it in `creditsUsed`. Every team gets 5 free runs per day. `maxCredits` sets the most a run may spend and defaults to 2,500, and failed runs are not billed. Because Agent is priced by the work a run does rather than per URL, check `creditsUsed` on a few runs of your typical questions and set `maxCredits` to the budget you want.
-
-A loop you build on `/v2/search` is billed at the standard rates on the [billing page](/billing): 2 credits per 10 search results, plus 1 credit for each result you scrape.
+Questions? Email [help@firecrawl.com](mailto:help@firecrawl.com).
