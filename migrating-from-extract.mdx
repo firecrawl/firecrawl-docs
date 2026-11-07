@@ -1,0 +1,61 @@
+---
+title: "Migrating from /extract"
+sidebarTitle: "Migrating from /extract"
+description: "Move /v1/extract and /v2/extract calls to /v2/scrape with a JSON format or /v2/agent, with one prompt for your coding agent or by hand with the mapping table."
+noindex: true
+---
+
+`/extract` shuts down on Thursday, December 10, 2026, 15:00 UTC. After that, `POST /v1/extract`, `POST /v2/extract` and their `GET /extract/{id}` status routes fail with HTTP `410 Gone`.
+
+## Migrate with your coding agent
+
+Paste this prompt into Claude Code, Cursor, Codex, or any coding agent, in the root of your project:
+
+```text Prompt expandable wrap
+Migrate this codebase off the Firecrawl /extract API. POST /v1/extract, POST /v2/extract, GET /v1/extract/{id} and GET /v2/extract/{id} shut down on Thursday, December 10, 2026, 15:00 UTC, and return HTTP 410 after that.
+
+1. Find every /extract call:
+   - Raw HTTP requests to /v1/extract or /v2/extract on https://api.firecrawl.dev (or a self-hosted base URL), including the GET /extract/{id} status polls.
+   - SDK calls: extract, start_extract, async_extract, get_extract_status (Python, firecrawl-py); extract, startExtract, asyncExtract, getExtractStatus (Node, @mendable/firecrawl-js or firecrawl).
+   - MCP configs that pin firecrawl-mcp below 3.23.7, whose firecrawl_extract tool still calls /extract.
+2. Upgrade the Firecrawl SDK to its latest release:
+   - Python: pip install --upgrade firecrawl-py. Use the Firecrawl class (or AsyncFirecrawl): scrape, batch_scrape, start_batch_scrape, get_batch_scrape_status, agent, start_agent, get_agent_status.
+   - Node: npm install @mendable/firecrawl-js@latest (or firecrawl@latest, if that is the package installed). Use the Firecrawl class: scrape, batchScrape, startBatchScrape, getBatchScrapeStatus, agent, startAgent, getAgentStatus.
+   - MCP: upgrade firecrawl-mcp to its latest release, or use the hosted server. Use firecrawl_scrape with a JSON format or firecrawl_agent instead of firecrawl_extract.
+3. Rewrite each call with this mapping, keeping its behavior the same:
+   - One URL without a /* wildcard -> POST /v2/scrape with url and formats: [{"type": "json", "prompt": <prompt>, "schema": <schema>}]. It is synchronous: drop the polling and read the result from data.json (doc.json in the SDKs).
+   - Several URLs, one result per page -> POST /v2/batch/scrape with urls and the same json format (inside options in the Node batchScrape call). Poll GET /v2/batch/scrape/{id}. Each item in data has its own json and metadata.sourceURL; merge them in code where the old code expected one object.
+   - Several URLs, one combined answer -> POST /v2/agent with urls, prompt, schema and strictConstrainToURLs: true. Poll GET /v2/agent/{id} until status is "completed"; the result is in data.
+   - A /* wildcard, enableWebSearch: true, allowExternalLinks: true, or a prompt with no urls -> POST /v2/agent with prompt and schema. For a wildcard, pass the site URL without /* and leave strictConstrainToURLs unset.
+   - /extract scraped whole pages unless the call set scrapeOptions, and /v2/scrape defaults to onlyMainContent: true. Where the old call had no scrapeOptions, send onlyMainContent: false on scrape and batch scrape.
+   - scrapeOptions.* -> top-level scrape options on /v2/scrape and /v2/batch/scrape. /v2/agent takes none.
+   - systemPrompt -> put its text at the start of prompt.
+   - timeout -> timeout per page in ms on scrape and batch scrape. /v2/agent has no request timeout: cap it with maxCredits.
+   - webhook, threatProtection, origin and integration keep their names. ignoreInvalidURLs stays on batch scrape only.
+   - showSources and __experimental_showSources -> metadata.sourceURL on each scraped page.
+   - Remove agent (the FIRE-1 option), urlTrace, includeSubdomains, limit, ignoreSitemap and every other __experimental_* option.
+   - Status values: batch scrape returns scraping, completed, failed or cancelled; agent returns processing, completed or failed. expiresAt and creditsUsed keep their names.
+4. Run the project's tests and fix any failures.
+
+Reference: https://docs.firecrawl.dev/migrating-from-extract.md
+```
+
+## Migrate by hand
+
+| /extract | Replacement | Note |
+|----|----|------|
+| One URL, no `/*` wildcard | [`POST /v2/scrape`](/features/llm-extract) with a `json` format | Synchronous, result in `data.json`. |
+| Several URLs, one result per page | [`POST /v2/batch/scrape`](/features/batch-scrape) with a `json` format | One `json` per page. |
+| Several URLs, one combined answer | [`POST /v2/agent`](/features/agent) with `urls` | Set `strictConstrainToURLs: true`. |
+| `/*` wildcard, `enableWebSearch`, `allowExternalLinks`, or no `urls` | [`POST /v2/agent`](/features/agent) | Pass the site URL without `/*`. |
+| `GET /v1/extract/{id}`, `GET /v2/extract/{id}` | `GET /v2/batch/scrape/{id}`, `GET /v2/agent/{id}` | Scrape needs no polling. |
+| `prompt`, `schema` | `formats: [{ "type": "json", "prompt": ..., "schema": ... }]` | Top-level `prompt` and `schema` on agent. |
+| `systemPrompt` | `prompt` | Put it at the start. |
+| `scrapeOptions` | Top-level scrape options | Send `onlyMainContent: false` to match `/extract`. |
+| `showSources` | `metadata.sourceURL` | One per page. |
+| `agent: { model: "FIRE-1" }`, `urlTrace` | Remove | |
+| `data` | `data.json`, `data[].json`, `data` | Scrape, batch scrape, agent. |
+
+Using n8n, Zapier, Make, or another no-code tool? Update the Firecrawl node or app to its latest version and switch extract steps to its scrape action with a JSON format, or to its agent action.
+
+Questions? Email [help@firecrawl.com](mailto:help@firecrawl.com).

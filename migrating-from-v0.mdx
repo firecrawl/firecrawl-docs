@@ -1,102 +1,69 @@
 ---
-title: Migrating from V0
-description: "Firecrawl allows you to turn entire websites into LLM-ready markdown"
-og:title: "Migrating from V0 | Firecrawl"
-og:description: "Firecrawl allows you to turn entire websites into LLM-ready markdown"
+title: "Migrating from v0 to v2"
+sidebarTitle: "Migrating from v0"
+description: "Move a v0 integration to the v2 API with one prompt for your coding agent, or by hand with the mapping table."
+noindex: true
 ---
 
-## /scrape endpoint
+The v0 API shuts down on Thursday, December 10, 2026, 15:00 UTC. After that, every `/v0` request fails with HTTP `410 Gone`.
 
-The updated `/scrape` endpoint has been redesigned for enhanced reliability and ease of use. The structure of the new `/scrape` request body is as follows:
+## Migrate with your coding agent
 
-```json
-{
-  "url": "<string>",
-  "formats": ["markdown", "html", "rawHtml", "links", "screenshot", "json"],
-  "includeTags": ["<string>"],
-  "excludeTags": ["<string>"],
-  "headers": { "<key>": "<value>" },
-  "waitFor": 123,
-  "timeout": 123
-}
+Paste this prompt into Claude Code, Cursor, Codex, or any coding agent, in the root of your project:
+
+```text Prompt expandable wrap
+Migrate this codebase from the Firecrawl v0 API to v2. v0 shuts down on Thursday, December 10, 2026, 15:00 UTC, and every /v0 request returns HTTP 410 after that.
+
+1. Find every v0 call:
+   - Raw HTTP requests to https://api.firecrawl.dev/v0/ (or <self-hosted base URL>/v0/).
+   - SDK calls that pass pageOptions, extractorOptions, crawlerOptions or searchOptions: scrape_url, crawl_url, check_crawl_status, search (Python, Rust); scrapeUrl, crawlUrl, checkCrawlStatus, search (Node); ScrapeURL, CrawlURL, CheckCrawlStatus, CancelCrawlJob, Search (Go).
+2. Upgrade the Firecrawl SDK to its latest release:
+   - Python: pip install --upgrade firecrawl-py (or firecrawl, if that is the package installed). Use the Firecrawl class: scrape, crawl, start_crawl, get_crawl_status, cancel_crawl, search.
+   - Node: npm install firecrawl@latest (or @mendable/firecrawl-js@latest). Use scrape, crawl, startCrawl, getCrawlStatus, cancelCrawl, search. scrape returns the document itself, not { success, data }.
+   - Go: replace the module github.com/mendableai/firecrawl-go with github.com/firecrawl/firecrawl/apps/go-sdk, then run go mod tidy. Use firecrawl.NewClient and Scrape, Crawl, StartCrawl, GetCrawlStatus, CancelCrawl, Search.
+   - Rust: cargo add firecrawl@2 (and cargo remove firecrawl_rs if present). Use firecrawl::Client with scrape, crawl, start_crawl, get_crawl_status, cancel_crawl, search and the typed ScrapeOptions, CrawlOptions, SearchOptions.
+3. Rewrite each call to v2 with this mapping, keeping its behavior the same:
+   - POST /v0/scrape -> POST /v2/scrape. pageOptions fields move to the top level.
+   - POST /v0/crawl -> POST /v2/crawl. crawlerOptions fields move to the top level, pageOptions becomes scrapeOptions, and the response returns id instead of jobId.
+   - GET /v0/crawl/status/{jobId} -> GET /v2/crawl/{id}. DELETE /v0/crawl/cancel/{jobId} -> DELETE /v2/crawl/{id}.
+   - POST /v0/search -> POST /v2/search. searchOptions fields move to the top level.
+   - GET /v0/keyAuth -> GET /v2/team/credit-usage, which returns 200 for a valid key.
+   - includeMarkdown, includeHtml, includeRawHtml, includeLinks, screenshot -> "markdown", "html", "rawHtml", "links", "screenshot" in formats. fullPageScreenshot -> {"type": "screenshot", "fullPage": true} in formats. v0 always returned links, so add "links" wherever the code reads them.
+   - onlyMainContent defaults to true in v2 and false in v0: send false where the code relied on the v0 default.
+   - onlyIncludeTags -> includeTags, removeTags -> excludeTags (both arrays), geolocation.country -> location.country, useFastMode -> fastMode, parsePDF: false -> parsers: [].
+   - extractorOptions with an llm-extraction mode -> {"type": "json", "schema": <extractionSchema>, "prompt": <extractionPrompt and userPrompt combined>} in formats. v0 extraction also forced onlyMainContent: true and, unless timeout was set, timeout: 90000, so send those.
+   - includes -> includePaths, excludes -> excludePaths, maxCrawledLinks -> limit, allowBackwardCrawling -> crawlEntireDomain, allowExternalContentLinks -> allowExternalLinks, ignoreSitemap: true -> sitemap: "skip", sitemapOnly: true -> sitemap: "only", returnOnlyUrls -> call POST /v2/map instead.
+   - maxDepth has no direct equivalent: use maxDiscoveryDepth (link hops from the start URL), or includePaths and excludePaths to bound URL depth.
+   - v0 search scraped every result: send scrapeOptions: {"formats": ["markdown"]} unless the code set fetchPageContent: false.
+   - Remove includeExtract, replaceAllPathsWithAbsolutePaths, disableJsDom, atsv, fallback, crawlerOptions.mode and generateImgAltText. All other option names stay the same.
+   - Responses: data.content -> data.markdown, data.linksOnPage -> data.links, data.llm_extraction -> data.json, metadata.screenshot -> data.screenshot, metadata.pageStatusCode -> metadata.statusCode, metadata.pageError -> metadata.error. Crawl status "active" -> "scraping", current -> completed, partial_data -> data, and follow next until it is absent to read every page (the SDK crawl methods do this). Search results move from data to data.web.
+4. Run the project's tests and fix any failures.
+
+Reference: https://docs.firecrawl.dev/migrating-from-v0.md
 ```
 
-### Formats
+## Migrate by hand
 
-You can now choose what formats you want your output in. You can specify multiple output formats. Supported formats are:
+| v0 | v2 | Note |
+|----|----|------|
+| `POST /v0/scrape` | [`POST /v2/scrape`](/api-reference/endpoint/scrape) | `pageOptions` fields move to the top level. |
+| `POST /v0/crawl` | [`POST /v2/crawl`](/api-reference/endpoint/crawl-post) | Returns `id` instead of `jobId`. |
+| `GET /v0/crawl/status/{jobId}` | [`GET /v2/crawl/{id}`](/api-reference/endpoint/crawl-get) | Follow `next` to read every page. |
+| `DELETE /v0/crawl/cancel/{jobId}` | [`DELETE /v2/crawl/{id}`](/api-reference/endpoint/crawl-delete) | |
+| `POST /v0/search` | [`POST /v2/search`](/api-reference/endpoint/search) | Send `scrapeOptions` to scrape each result. |
+| `GET /v0/keyAuth` | [`GET /v2/team/credit-usage`](/api-reference/endpoint/credit-usage) | Returns `200` for a valid key. |
+| `includeHtml`, `includeRawHtml`, `includeLinks`, `screenshot` | `"html"`, `"rawHtml"`, `"links"`, `"screenshot"` in `formats` | v0 always returned links. |
+| `onlyMainContent` | `onlyMainContent` | Defaults to `true` in v2. |
+| `onlyIncludeTags`, `removeTags` | `includeTags`, `excludeTags` | |
+| `extractorOptions` | `{ "type": "json", "schema": ..., "prompt": ... }` in `formats` | Result moves to `data.json`. |
+| `crawlerOptions.includes`, `excludes` | `includePaths`, `excludePaths` | |
+| `allowBackwardCrawling` | `crawlEntireDomain` | |
+| `ignoreSitemap: true` | `sitemap: "skip"` | |
+| `returnOnlyUrls` | [`POST /v2/map`](/features/map) | |
+| `searchOptions.limit` | `limit` | |
+| `data.content`, `data.linksOnPage` | `data.markdown`, `data.links` | |
+| `status: "active"`, `current`, `partial_data` | `status: "scraping"`, `completed`, `data` | |
 
-- Markdown (markdown)
-- HTML (html)
-- Raw HTML (rawHtml) (with no modifications)
-- Screenshot (screenshot or screenshot@fullPage)
-- Links (links)
-- JSON (json)
-By default, the output will be include only the markdown format.
+Using n8n, Zapier, Make, or another no-code tool? Update the Firecrawl node or app to its latest version.
 
-### Details on the new request body
-
-The table below outlines the changes to the request body parameters for the `/scrape` endpoint in V1.
-
-| Parameter | Change | Description |
-| --------- | ------ | ----------- |
-| `onlyIncludeTags` | Moved and Renamed | Moved to root level. And renamed to `includeTags`. |
-| `removeTags` | Moved and Renamed | Moved to root level. And renamed to `excludeTags`. |
-| `onlyMainContent`| Moved | Moved to root level. `true` by default. |
-| `waitFor`| Moved | Moved to root level. |
-| `headers`| Moved | Moved to root level. |
-| `parsePDF`| Moved | Moved to root level. |
-| `extractorOptions`| No Change ||
-| `timeout`| No Change ||
-| `pageOptions` | Removed | No need for `pageOptions` parameter. The scrape options were moved to root level. |
-| `replaceAllPathsWithAbsolutePaths` | Removed | `replaceAllPathsWithAbsolutePaths` is not needed anymore. Every path is now default to absolute path. |
-| `includeHtml`| Removed | add `"html"` to `formats` instead. |
-| `includeRawHtml`| Removed | add `"rawHtml"` to `formats` instead. |
-| `screenshot`| Removed | add `"screenshot"` to `formats` instead. |
-| `fullPageScreenshot`| Removed | add `"screenshot@fullPage"` to `formats` instead. |
-| `extractorOptions` | Removed | Use `"json"` format instead with `jsonOptions` object. |
-
-The new `json` format is described in the [llm-extract](/features/extract) section.
-
-## /crawl endpoint
-
-We've also updated the `/crawl` endpoint on `v1`. Check out the improved body request below:
-
-```json
-{
-  "url": "<string>",
-  "excludePaths": ["<string>"],
-  "includePaths": ["<string>"],
-  "maxDepth": 2,
-  "ignoreSitemap": true,
-  "limit": 10,
-  "allowBackwardLinks": true,
-  "allowExternalLinks": true,
-  "scrapeOptions": {
-    // same options as in /scrape
-    "formats": ["markdown", "html", "rawHtml", "screenshot", "links"],
-    "headers": { "<key>": "<value>" },
-    "includeTags": ["<string>"],
-    "excludeTags": ["<string>"],
-    "onlyMainContent": true,
-    "waitFor": 123
-  }
-}
-```
-
-
-### Details on the new request body
-
-The table below outlines the changes to the request body parameters for the `/crawl` endpoint in V1.
-
-| Parameter | Change | Description |
-| --------- | ------ | ----------- |
-| `pageOptions` | Renamed | Renamed to `scrapeOptions`. |
-| `includes` | Moved and Renamed | Moved to root level. Renamed to `includePaths`. |
-| `excludes` | Moved and Renamed | Moved to root level. Renamed to `excludePaths`. |
-| `allowBackwardCrawling` | Moved and Renamed | Moved to root level. Renamed to `allowBackwardLinks`. |
-| `allowExternalLinks` | Moved | Moved to root level. |
-| `maxDepth` | Moved | Moved to root level. |
-| `ignoreSitemap` | Moved | Moved to root level. |
-| `limit` | Moved | Moved to root level. |
-| `crawlerOptions` | Removed | No need for `crawlerOptions` parameter. The crawl options were moved to root level. |
-| `timeout` | Removed | Use `timeout` in `scrapeOptions` instead. |
+Questions? Email [help@firecrawl.com](mailto:help@firecrawl.com).
