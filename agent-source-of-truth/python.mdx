@@ -3,7 +3,7 @@ title: "Python Source of Truth"
 description: "Canonical Firecrawl Python source of truth for agents using key endpoints like search, scrape, and interact."
 ---
 
-Canonical Firecrawl Python source of truth for agents. Generated from SDK source (`firecrawl-py` / `firecrawl` **4.22.1**) and the v2 OpenAPI spec. Method names, parameters, and return types match the v2 client in `firecrawl/v2/client.py` unless noted.
+Canonical Firecrawl Python source of truth for agents. Generated from SDK source (`firecrawl-py` / `firecrawl` **4.54.0**) and the v2 OpenAPI spec. Method names, parameters, and return types match the v2 client in `firecrawl/v2/client.py` unless noted.
 
 ## Install
 
@@ -20,6 +20,17 @@ from firecrawl import Firecrawl
 client = Firecrawl(api_key=os.environ.get("FIRECRAWL_API_KEY"))
 # client = Firecrawl(api_key="fc-...", api_url="https://api.firecrawl.dev")
 ```
+
+Constructor parameters:
+
+- `api_key`: str — or `FIRECRAWL_API_KEY` env var. Omit for keyless free tier (rate-limited per IP, scrape/search/interact only).
+- `api_url`: str — default `"https://api.firecrawl.dev"`.
+- `timeout`: float — HTTP request timeout in seconds.
+- `max_retries`: int — default `3`.
+- `backoff_factor`: float — default `0.5`.
+- `origin`: str — attribution tag.
+
+Aliases: `FirecrawlApp` is an alias for `Firecrawl`. Async surface: `AsyncFirecrawl` (alias `AsyncFirecrawlApp`).
 
 ## When To Use What
 
@@ -46,6 +57,7 @@ Returns a `SearchData` model with optional lists:
 - `web` — web hits (`SearchResultWeb` or full `Document` when `scrape_options` hydrates content)
 - `news` — news hits (`SearchResultNews` or `Document`)
 - `images` — image hits (`SearchResultImages` or `Document`)
+- `tools` — discovered Alexandria tools (`DiscoveredTool`)
 
 Omitted buckets are `None` when the API did not return that key.
 
@@ -71,7 +83,9 @@ results = client.search(
     limit=10,
     tbs="qdr:m",
     location="San Francisco,California,United States",
+    country="US",
     ignore_invalid_urls=True,
+    highlights=True,
     timeout=300000,
     scrape_options=ScrapeOptions(
         formats=[
@@ -106,17 +120,38 @@ results = client.search(
     - `"web"`: web index results
     - `"news"`: news results
     - `"images"`: image results
-    - `Source(type="web" | "news" | "images")`: typed source object form
+    - `"alexandria"`: Alexandria tool results
+    - `Source(type="web" | "news" | "images" | "alexandria")`: typed source object form
+
+- `domain_tools`
+  - Type: bool
+  - Use when: you want Alexandria domain-matched tool discovery alongside semantic matches.
+
+- `tool_detail`
+  - Type: `"compact"` | `"summary"` | `"full"`
+  - Use when: you want to control the detail level for discovered tools.
+  - Notes: defaults to `"compact"` per SDK docstring.
 
 - `categories`
   - Type: list of category names or `Category` objects
   - Use when: you want to filter results by category.
   - Confirmed values:
+    - `"github"`: GitHub results
     - `"developer"`: Developer Index results
     - `"gov"`: Firecrawl Government Index results
     - `"research"`: research and academic results
     - `"pdf"`: PDF-focused results
-    - `Category(type="developer" | "gov" | "research" | "pdf")`: typed category object form
+    - `Category(type="github" | "developer" | "gov" | "research" | "pdf")`: typed category object form
+
+- `include_domains`
+  - Type: list of str
+  - Use when: you want to restrict results to specific domains.
+  - Notes: mutually exclusive with `exclude_domains`.
+
+- `exclude_domains`
+  - Type: list of str
+  - Use when: you want to exclude results from specific domains.
+  - Notes: mutually exclusive with `include_domains`.
 
 - `limit`
   - Type: int
@@ -131,6 +166,10 @@ results = client.search(
   - Type: str
   - Use when: you want localized results.
 
+- `country`
+  - Type: str
+  - Use when: you want ISO 3166-1 alpha-2 geo-targeting (for example `"US"`).
+
 - `ignore_invalid_urls`
   - Type: bool
   - Use when: you want to drop URLs that cannot be scraped by other endpoints.
@@ -140,9 +179,29 @@ results = client.search(
   - Use when: you need a request timeout in milliseconds.
   - Notes: defaults to `300000` in the SDK model.
 
+- `highlights`
+  - Type: bool
+  - Use when: you want query-relevant highlights generated for search results.
+  - Notes: defaults to `True`.
+
 - `scrape_options`
   - Type: `ScrapeOptions`
   - Use when: you want to scrape each search result (see Scrape parameters for fields).
+
+- `integration`
+  - Type: str
+  - Use when: you need an integration identifier for server-side tracking.
+
+- `enterprise`
+  - Type: list of str
+  - Use when: you need enterprise search controls.
+  - Confirmed values:
+    - `"zdr"`: end-to-end zero data retention
+    - `"anon"`: anonymized zero data retention
+
+- `threat_protection`
+  - Type: `ThreatProtectionOptions`
+  - Use when: you need per-request enterprise threat protection overrides.
 
 ## Scrape
 
@@ -213,6 +272,8 @@ doc = client.scrape(
     - `"changeTracking"` or `"change_tracking"`: change tracking output
     - `"attributes"`: attribute extraction
     - `"branding"`: branding profile output
+    - `"product"`: product profile output
+    - `"menu"`: menu profile output
     - `"audio"`: audio extraction
     - `"video"`: video extraction
   - Object-only format types:
@@ -263,6 +324,7 @@ doc = client.scrape(
   - Use when: you need file parsing controls (for example PDF parsing).
   - Confirmed values:
     - `"pdf"`: enable PDF parsing
+    - `"image"`: enable image parsing
     - `{ "type": "pdf", "mode": "fast" | "auto" | "ocr", "max_pages": int }`: PDF parser options
 
 - `actions`
@@ -306,20 +368,47 @@ doc = client.scrape(
 
 - `max_age`
   - Type: int
-  - Use when: you want cached data up to a maximum age (milliseconds).
-
-- `min_age`
-  - Type: int
-  - Use when: you want cached data only if it is at least this old (milliseconds).
-  - Notes: only on `ScrapeOptions` passed as `scrape_options` to `client.search`. The `client.scrape` method does not accept `min_age`.
+  - Use when: you want cached data up to a maximum age (milliseconds). Set to `0` to bypass cache.
 
 - `store_in_cache`
   - Type: bool
   - Use when: you want Firecrawl to cache the result.
 
+- `lockdown`
+  - Type: bool
+  - Use when: you want to serve only previously cached results (returns 404 on cache miss).
+
+- `check_prompt_injection`
+  - Type: bool
+  - Use when: you want to scan the page for prompt injection before LLM-backed formats run. Adds 4 credits.
+
+- `threat_protection`
+  - Type: `ThreatProtectionOptions`
+  - Use when: you need per-request enterprise threat protection overrides.
+
 - `profile`
   - Type: dict with `name` and optional `save_changes` or `saveChanges`
   - Use when: you want a persistent browser profile shared across scrapes and interactions.
+
+- `audit_metadata`
+  - Type: `AuditMetadata`
+  - Use when: you need SIEM logging attribution (for example `{"username": "agent-bot"}`).
+
+- `integration`
+  - Type: str
+  - Use when: you need an integration identifier for server-side tracking.
+
+- `domain_tools`
+  - Type: bool
+  - Use when: you want Alexandria domain-matched tool discovery.
+
+- `tool_detail`
+  - Type: `"compact"` | `"summary"` | `"full"`
+  - Use when: you want to control the detail level for discovered tools.
+
+- `auto_resume`
+  - Type: bool
+  - Use when: you want the SDK to automatically resume scraping for large documents.
 
 ## Interact
 
@@ -381,7 +470,11 @@ result = client.interact(
 
 - `timeout`
   - Type: int
-  - Use when: you need an execution timeout in seconds.
+  - Use when: you need an execution timeout in seconds (1-300).
+
+- `origin`
+  - Type: str
+  - Use when: you need an optional origin label on the request.
 
 ### Return value
 
@@ -508,8 +601,11 @@ print(response.json()["answer"])
 
 ## Notes
 
-- Deprecated aliases: `scrape_execute` → `interact`; `stop_interactive_browser` and `delete_scrape_browser` → `stop_interaction`.
+- Deprecated aliases: `scrape_execute` → `interact`; `stop_interactive_browser` and `delete_scrape_browser` → `stop_interaction`; `scrape_url` → `scrape` (v1 compat).
 - The top-level `Firecrawl` client exposes v2 methods directly; v1 remains under `client.v1`.
+- Async surface: `AsyncFirecrawl` with the same method names, all async.
+- Pydantic models used throughout for request/response types.
+- `ScrapeOptions` uses `populate_by_name=True`, so both camelCase aliases and snake_case field names work.
 - The bundled v2 OpenAPI snippet for `POST /v2/scrape/{jobId}/interact` may only document `code`; the Python SDK and server accept either `code` or `prompt` for this endpoint.
 
 ## Source Of Truth
