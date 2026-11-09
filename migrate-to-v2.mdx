@@ -1,0 +1,78 @@
+---
+title: "Migrate from v1 to v2"
+description: "The v1 API shuts down on December 10, 2026. Copy one prompt into your coding agent to move to v2."
+noindex: true
+---
+
+The v1 scrape, crawl, batch scrape, search, map, and account endpoints stop working on **Thursday, December 10, 2026, 15:00 UTC**, and from then on they return HTTP 410.
+
+## Migrate with your coding agent
+
+Copy this prompt into Claude Code, Cursor, or Codex, run from your project's root:
+
+```text Prompt expandable wrap
+Migrate this codebase from the Firecrawl v1 API to v2. v1 stops working on December 10, 2026.
+
+1. Find every Firecrawl v1 call: raw HTTP to https://api.firecrawl.dev/v1/..., old SDK versions (Node @mendable/firecrawl-js or firecrawl 1.x, Python firecrawl-py or firecrawl 1.x and 2.x, Go github.com/mendableai/firecrawl-go, Rust firecrawl crate 1.x, firecrawl-mcp 1.x), and explicit v1 clients on any version (firecrawl.v1, FirecrawlAppV1, V1FirecrawlApp, AsyncV1FirecrawlApp).
+2. Upgrade the Firecrawl SDK to the latest version: npm install @mendable/firecrawl-js@latest, pip install -U firecrawl-py, go get github.com/firecrawl/firecrawl/apps/go-sdk@latest (new import path), or firecrawl = "2" in Cargo.toml.
+3. Rewrite each call to its v2 equivalent with the mapping below. Keep behavior the same.
+4. Run the project's tests and fix what breaks.
+5. Calls to /v1/extract, /v1/deep-research, or /v1/llmstxt are not part of this migration. List them and leave them unchanged.
+
+REST mapping:
+- Base URL https://api.firecrawl.dev/v1 -> https://api.firecrawl.dev/v2. Every path stays the same except GET /v1/crawl/ongoing -> GET /v2/crawl/active.
+- formats "extract" with extract: { prompt, schema }, or "json" with jsonOptions: { prompt, schema } -> { "type": "json", "prompt": ..., "schema": ... } in formats. Read results from data.json, not data.extract. systemPrompt is not accepted: merge it into prompt.
+- "screenshot@fullPage" -> { "type": "screenshot", "fullPage": true }.
+- "changeTracking" with changeTrackingOptions: { modes, schema, prompt, tag } -> { "type": "changeTracking", "modes": ..., "schema": ..., "prompt": ..., "tag": ... } in formats. Keep "markdown" in formats.
+- parsePDF: false -> parsers: []. parsePDF: true is the default: drop it.
+- geolocation -> location. __experimental_cache is removed: use maxAge.
+- Crawl allowBackwardLinks -> crawlEntireDomain. Crawl and map ignoreSitemap: true -> sitemap: "skip". Map sitemapOnly: true -> sitemap: "only". Map no longer accepts maxDepth or allowBackwardLinks: remove them.
+- Crawl maxDepth N has no v2 option. Keep regexOnFullURL false and add includePaths ["^(/+[^/]+){0,N}/*$", "^(/+[^/]+){0,N}/+index\\.(html|php)/*$"] with N written as a number. If the crawl already has includePaths, add excludePaths ["^(/+[^/]+){N+1}"] instead. maxDiscoveryDepth is not a substitute: it counts link hops, not path segments.
+- Map links are objects: read link.url instead of a string.
+- Search results move from data to data.web (data.news and data.images when requested with sources). The default limit is now 10, was 5: pass limit: 5 where the code relied on the default.
+- Batch scrape ignoreInvalidURLs now defaults to true: pass false where the code relied on the request failing.
+- With location.country set, proxy now defaults to "auto", was "basic": pass proxy: "basic" to keep it.
+- /team/credit-usage and /team/token-usage return camelCase: remaining_credits -> remainingCredits, plan_credits -> planCredits, remaining_tokens -> remainingTokens, plan_tokens -> planTokens, billing_period_start -> billingPeriodStart, billing_period_end -> billingPeriodEnd.
+
+Node SDK: import Firecrawl from "@mendable/firecrawl-js"; const firecrawl = new Firecrawl({ apiKey }). scrapeUrl -> scrape, mapUrl -> map, crawlUrl(url, params, pollInterval) -> crawl(url, { ...options, pollInterval }), asyncCrawlUrl -> startCrawl, checkCrawlStatus -> getCrawlStatus, checkCrawlErrors -> getCrawlErrors, batchScrapeUrls(urls, params) -> batchScrape(urls, { options: params }), asyncBatchScrapeUrls(urls, params) -> startBatchScrape(urls, { options: params }), checkBatchScrapeStatus -> getBatchScrapeStatus, checkBatchScrapeErrors -> getBatchScrapeErrors, crawlUrlAndWatch and batchScrapeUrlsAndWatch -> startCrawl or startBatchScrape, then watcher(id). Search results are under .web. v2 methods return the data directly, with no success field, and throw on failure.
+
+Python SDK: from firecrawl import Firecrawl; firecrawl = Firecrawl(api_key=...), and AsyncFirecrawl for async code. scrape_url -> scrape, map_url -> map, crawl_url -> crawl, async_crawl_url -> start_crawl, check_crawl_status -> get_crawl_status, check_crawl_errors -> get_crawl_errors, batch_scrape_urls -> batch_scrape, async_batch_scrape_urls -> start_batch_scrape, check_batch_scrape_status -> get_batch_scrape_status, check_batch_scrape_errors -> get_batch_scrape_errors, crawl_url_and_watch and batch_scrape_urls_and_watch -> start_crawl or start_batch_scrape, then watcher(id). Pass options as snake_case keyword arguments, not a params dict (crawl_entire_domain=True, sitemap="skip"). Search results are under .web.
+
+Go SDK: import github.com/firecrawl/firecrawl/apps/go-sdk and its option package. NewFirecrawlApp(key, url) -> NewClient(option.WithAPIKey(key)). ScrapeURL -> Scrape(ctx, url, *ScrapeOptions), CrawlURL -> Crawl(ctx, url, *CrawlOptions). Every method takes a context.Context first. CrawlParams.AllowBackwardLinks -> CrawlOptions.CrawlEntireDomain, IgnoreSitemap -> Sitemap.
+
+Rust SDK: FirecrawlApp::new(key) -> Client::new(key). scrape_url -> scrape, with formats as the Format enum. crawl_url -> crawl.
+
+MCP server: run npx -y firecrawl-mcp@latest in the MCP client config.
+
+Latest version of this prompt: https://docs.firecrawl.dev/migrate-to-v2.md
+```
+
+## Migrate by hand
+
+Change `https://api.firecrawl.dev/v1` to `https://api.firecrawl.dev/v2`, upgrade your SDK to the latest version, then apply these changes:
+
+| v1 | v2 |
+|---|---|
+| `GET /v1/crawl/ongoing` | `GET /v2/crawl/active` |
+| `"extract"` or `"json"` format with `extract` or `jsonOptions` | `{ "type": "json", "prompt": "...", "schema": {...} }` in `formats`, read from `data.json` |
+| `"screenshot@fullPage"` | `{ "type": "screenshot", "fullPage": true }` |
+| `"changeTracking"` with `changeTrackingOptions` | `{ "type": "changeTracking", ... }` in `formats` |
+| `parsePDF: false` | `parsers: []` |
+| `geolocation` | `location` |
+| Crawl `allowBackwardLinks` | `crawlEntireDomain` |
+| Crawl and map `ignoreSitemap: true` | `sitemap: "skip"` |
+| Map `sitemapOnly: true` | `sitemap: "only"` |
+| Crawl `maxDepth` | No v2 option. Use the `includePaths` patterns in the prompt above. |
+| Map `links` as strings | Objects with `url`, `title`, and `description` |
+| Search results in `data` | `data.web`. The default `limit` is now 10, was 5. |
+| Batch scrape `ignoreInvalidURLs` default `false` | Default `true` |
+| `remaining_credits`, `plan_credits`, `billing_period_start` | `remainingCredits`, `planCredits`, `billingPeriodStart`. Token fields change the same way. |
+| Node `FirecrawlApp`, `scrapeUrl`, `crawlUrl`, `mapUrl` | `Firecrawl`, `scrape`, `crawl`, `map` |
+| Python `FirecrawlApp`, `scrape_url`, `crawl_url`, `map_url` | `Firecrawl`, `scrape`, `crawl`, `map` |
+| Go `github.com/mendableai/firecrawl-go` | `github.com/firecrawl/firecrawl/apps/go-sdk` |
+| Rust `firecrawl` 1.x | `firecrawl` 2.x |
+| `firecrawl-mcp` 1.x | `firecrawl-mcp@latest` |
+
+Using n8n, Zapier, Make, or another no-code tool? Update the Firecrawl node or app to its latest version. In n8n, also set the Firecrawl credential's **Base URL** to `https://api.firecrawl.dev/v2`, change any `/v1/` URL in an HTTP Request node to `/v2/`, and replace the community node `n8n-nodes-firecrawl` with the official `@mendable/n8n-nodes-firecrawl`.
+
+Questions? Email [help@firecrawl.com](mailto:help@firecrawl.com).
