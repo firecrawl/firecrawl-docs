@@ -14,7 +14,7 @@ The index covers roughly 43 million paper abstracts. The majority of the corpus 
 - Inspect canonical paper metadata and source ids
 - Read the passages in one paper that answer a specific question
 - Expand from strong seed papers to related papers, citers, or references
-- Look up a protein's curated location and function, with the paper behind each statement
+- Look up a protein's curated location and function, with the evidence kind for each statement and the papers UniProt cites
 
 <Note>
 To give your agent access to the Research Index, we strongly recommend using our [CLI](/sdks/cli) or [MCP](/mcp-server), combined with our [**dedicated research skill**](https://github.com/firecrawl/skills/blob/main/skills/firecrawl-research-index/SKILL.md), which you can install with:
@@ -299,7 +299,7 @@ Modes:
 
 ## Look up a protein
 
-Look up one named protein and get what UniProtKB/Swiss-Prot curators record about it: its subcellular location, its function, and its GO cellular-component terms. Each statement carries its evidence kind and, where UniProt cites one, the PubMed paper behind it as a `pmid:` id. Pass that id to [inspect](#inspect-a-paper) or [read](#read-paper-passages) to open the paper.
+Look up one named protein and get what UniProtKB/Swiss-Prot curators record about it: its subcellular location, its function, and its GO cellular-component terms. Each statement carries its evidence kind and, where UniProt cites one, the PubMed paper behind it as a `pmid:` id, in the form [inspect](#inspect-a-paper) and [read](#read-paper-passages) accept. Swiss-Prot is the reviewed section of UniProtKB, and an entry outside it returns `not_found`.
 
 ```bash cURL
 curl -s "https://api.firecrawl.dev/v2/search/research/proteins?protein=RPUSD3" \
@@ -369,25 +369,25 @@ The response below is shortened. The full one has two more GO terms and the whol
 }
 ```
 
-`subcellularLocation` and `function` hold UniProt's statements in UniProt's order. A location statement with `note: true` is the free-text note of a location comment. `goCellularComponent` lists only the GO terms that carry an experimental GO evidence code. `paperIds` collects every cited paper once.
+`subcellularLocation` and `function` hold UniProt's statements in UniProt's order. A location statement with `note: true` is the free-text note of a location comment. `goCellularComponent` lists only the GO terms with one of these experimental GO evidence codes: IDA, HDA, IPI, IMP, IEP, EXP, HTP, IGI. `paperIds` collects every cited paper once.
 
 From MCP, call `firecrawl_research_lookup_protein` with `protein` and, optionally, `organism`.
 
 ### How a lookup resolves
 
-The lookup matches exact identifiers. It does not read free text, so a question such as "where is RPUSD3 localized" returns `match: "not_found"`. Use [paper search](#search-papers) for questions.
+The lookup matches whole identifiers and does not read free text, so a question such as "where is RPUSD3 localized" returns `match: "not_found"`. Use [paper search](#search-papers) for questions. Accessions, entry names, gene symbols and protein names match in any case.
 
-- An accession or an entry name names one entry. An isoform suffix such as `-2` is dropped, and `organism` is ignored.
-- A gene symbol or a protein name is looked up in `organism`. A primary gene symbol wins over a synonym.
+- An accession or an entry name names one entry. An isoform suffix such as `-2` is dropped, and `organism` does not narrow the match.
+- A gene symbol or a protein name is looked up in `organism`. A primary gene symbol wins over a synonym. A protein name is a recommended or alternative full name.
 - When the symbol or name fits one entry, `match` is `found`. When it fits several, `match` is `ambiguous`. `candidates` lists up to 10 of them, with identifiers and no annotation, and `candidateCount` gives the full number. Call again with one candidate's `accession`.
 - When nothing in `organism` matches, the lookup checks other organisms and returns what it finds as `ambiguous`, even when that is a single entry. The lookup never guesses between proteins and never switches species silently.
 - Anything else is `not_found`, with status `200`.
 
-A missing, empty, or overlong `protein`, or an `organism` the lookup does not know, returns `400` with `code: "BAD_REQUEST"`.
+A `protein` that is missing, empty, or longer than 200 characters returns `400` with `code: "BAD_REQUEST"`. So does an `organism` that matches no organism in the data, or a name shared by more than one taxon. The `organism` check runs first, so it applies even when `protein` is an accession.
 
 ### Evidence kinds
 
-Each statement has one or more `evidence` items. `kind` says how UniProt knows the statement, and `eco` gives the ECO code that UniProt attaches. See [UniProt's evidence guide](https://www.uniprot.org/help/evidences) for the full definitions.
+Each statement has one or more `evidence` items. `kind` names the type of evidence, and `eco` gives the Evidence and Conclusion Ontology (ECO) code that UniProt attaches. See [UniProt's evidence guide](https://www.uniprot.org/help/evidences) for the full definitions.
 
 | `kind` | ECO code | Label in MCP output | Meaning |
 | --- | --- | --- | --- |
@@ -396,12 +396,12 @@ Each statement has one or more `evidence` items. `kind` says how UniProt knows t
 | `author_statement` | `ECO:0000303` | Author statement | Stated in a scientific article, without experimental support. |
 | `curator_inference` | `ECO:0000305` | Curator inference | Inferred by a curator from scientific knowledge or from the content of an article. |
 | `by_similarity` | `ECO:0000250` | Inferred from a related protein | Propagated from a related protein that was characterized by experiment. `fromProtein` names that protein when UniProt gives it. |
-| `sequence_analysis` | `ECO:0000255` | Predicted from sequence | Generated by UniProt's automatic annotation from a sequence model rule. |
-| `imported` | `ECO:0000312` | Imported from another database | Imported from another database. |
+| `sequence_analysis` | `ECO:0000255` | Predicted from sequence | Predicted from the sequence, by a UniProt annotation rule or by a sequence analysis program whose result a curator checked. |
+| `imported` | `ECO:0000312` | Imported from another database | Taken from a record in another database. |
 | `untagged` | none | No evidence tag | UniProt gives no evidence for the statement. |
 
 An evidence item has a `paperId` when UniProt cites a PubMed paper for it. A `by_similarity` or `sequence_analysis` statement is inferred, not measured on this protein.
 
 ### Attribution
 
-Protein data from UniProtKB/Swiss-Prot. Copyright [UniProt Consortium](https://www.uniprot.org). Licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). No warranty, see the [UniProt license](https://www.uniprot.org/help/license). Selected fields, reformatted. Every response repeats this in `notice` and names the UniProt release in `release`.
+Protein data from UniProtKB/Swiss-Prot. Copyright [UniProt Consortium](https://www.uniprot.org). Licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). No warranty, see the [UniProt license](https://www.uniprot.org/help/license). Selected fields, reformatted. Every `200` response repeats this in `notice` and names the UniProt release in `release`.
