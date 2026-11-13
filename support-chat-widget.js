@@ -1,11 +1,10 @@
 // The Firecrawl Support Agent on the docs site.
 //
 // The chat is a page on www.firecrawl.dev shown in an iframe, not a script
-// running here: its API only answers its own origin and knows people by
-// cookies set there. Docs and www are the same site, so inside the frame a
-// signed-in user gets their signed-in chat and everyone else the visitor chat.
-// The frame is created on first open and then kept, so closing the panel or
-// moving between docs pages keeps the conversation.
+// running here: its API only answers its own origin. Everyone gets the
+// docs-only visitor chat, signed in to Firecrawl or not; it never has anything
+// from an account. The frame is created on first open and then kept, so closing
+// the panel or moving between docs pages keeps the conversation.
 (function () {
   if (window.__firecrawlSupportChat) return;
   window.__firecrawlSupportChat = true;
