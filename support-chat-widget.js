@@ -79,6 +79,8 @@
 
   var frame = null;
   var open = false;
+  // What opened the chat, and so where focus goes back to when it closes.
+  var opener = launcher;
   // "idle" until the first open, then "loading", "ready" or "failed".
   var state = "idle";
   var readyTimer = null;
@@ -125,10 +127,12 @@
     panel.inert = !next;
   }
 
-  function openChat() {
-    if (open) return;
-    setOpen(true);
-    if (!frame || state === "failed") loadFrame();
+  function openChat(from) {
+    if (!open) {
+      opener = from;
+      setOpen(true);
+      if (!frame || state === "failed") loadFrame();
+    }
     if (state === "ready") focusChat();
     else closeButton.focus({ preventScroll: true });
   }
@@ -137,10 +141,15 @@
     if (!open) return;
     var hadFocus = panel.contains(document.activeElement);
     setOpen(false);
-    if (hadFocus) launcher.focus({ preventScroll: true });
+    if (!hadFocus) return;
+    // The opener can be gone by now: a navbar link in a menu that has closed.
+    var onScreen = opener.isConnected && opener.getClientRects().length > 0;
+    (onScreen ? opener : launcher).focus({ preventScroll: true });
   }
 
-  launcher.addEventListener("click", openChat);
+  launcher.addEventListener("click", function () {
+    openChat(launcher);
+  });
   closeButton.addEventListener("click", closeChat);
   retryButton.addEventListener("click", function () {
     // The button is hidden while the chat loads, so focus moves off it first.
@@ -159,6 +168,34 @@
     },
     { once: true },
   );
+
+  // The navbar's "Support" link opens the chat as well. In docs.json it stays an
+  // email link, so it still works if this script does not run, and the same
+  // address written in a page stays an email link.
+  var SUPPORT_LINK = 'a[href="mailto:' + SUPPORT_EMAIL + '"]';
+  // On small screens the navbar links are in the "More actions" menu, a dialog.
+  var NAVBAR = "#navbar, [role='dialog']";
+
+  document.addEventListener("click", function (event) {
+    var plainClick =
+      event.button === 0 &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.shiftKey &&
+      !event.altKey;
+    if (!plainClick || event.defaultPrevented) return;
+    var link = event.target.closest && event.target.closest(SUPPORT_LINK);
+    if (!link || root.contains(link) || !link.closest(NAVBAR)) return;
+    event.preventDefault();
+    var menu = link.closest("[role='dialog']");
+    if (menu) {
+      // The menu keeps focus to itself and covers the chat, so it closes first.
+      menu.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+    }
+    openChat(link);
+  });
 
   // While the chat has focus its own page handles Escape and reports the close.
   panel.addEventListener("keydown", function (event) {
