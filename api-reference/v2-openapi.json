@@ -4064,11 +4064,35 @@
           {
             "name": "byApiKey",
             "in": "query",
-            "description": "Get historical credit usage by API key",
+            "description": "Break usage down by API key. Cannot be combined with `byEndpoint`.",
             "required": false,
             "schema": {
               "type": "boolean",
               "default": false
+            }
+          },
+          {
+            "name": "byEndpoint",
+            "in": "query",
+            "description": "Break usage down by the endpoint that billed it (for example `scrape`, `search` or `crawl`). Includes search usage, which the totals and the `byApiKey` breakdown do not count. Cannot be combined with `byApiKey`.",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
+            "name": "bin",
+            "in": "query",
+            "description": "Period size. `month` returns one period per calendar month and `day` returns one period per UTC day.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "month",
+                "day"
+              ],
+              "default": "month"
             }
           }
         ],
@@ -4084,6 +4108,14 @@
                       "type": "boolean",
                       "example": true
                     },
+                    "bin": {
+                      "type": "string",
+                      "enum": [
+                        "month",
+                        "day"
+                      ],
+                      "description": "Period size used for the response. Only returned when the `bin` query parameter is passed."
+                    },
                     "periods": {
                       "type": "array",
                       "items": {
@@ -4098,21 +4130,47 @@
                           "endDate": {
                             "type": "string",
                             "format": "date-time",
-                            "description": "End date of the billing period",
-                            "example": "2025-01-31T23:59:59Z"
+                            "description": "End date of the period. null for the most recent period",
+                            "example": "2025-02-01T00:00:00Z",
+                            "nullable": true
                           },
                           "apiKey": {
                             "type": "string",
                             "description": "Name of the API key used for the billing period. null if byApiKey is false (default)",
                             "nullable": true
                           },
-                          "totalCredits": {
+                          "endpoint": {
+                            "type": "string",
+                            "description": "Endpoint that billed the credits, for example `scrape` or `search`. Only returned when `byEndpoint` is true",
+                            "example": "scrape"
+                          },
+                          "creditsUsed": {
                             "type": "integer",
-                            "description": "Total number of credits used in the billing period",
+                            "description": "Number of credits used in the period",
                             "example": 1000
                           }
                         }
                       }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters: `bin` is not `month` or `day`, or `byApiKey` and `byEndpoint` are both set.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "error": {
+                      "type": "string",
+                      "example": "byApiKey and byEndpoint cannot be combined."
                     }
                   }
                 }
@@ -4625,10 +4683,26 @@
                             "type"
                           ],
                           "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "title": "Skills",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "skills"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ],
+                          "additionalProperties": false
                         }
                       ]
                     },
-                    "description": "Sources to search. Will determine the arrays available in the response. Defaults to ['web']. The plain string form (e.g. `[\"web\", \"alexandria\"]`) is also accepted. The `alexandria` source returns tool contracts discovered from the Alexandria catalogue in `data.tools` instead of search results; it is free and is never counted in `creditsUsed`. Requires the team's Alexandria access to be enabled (403 otherwise).",
+                    "description": "Sources to search. Will determine the arrays available in the response. Defaults to ['web']. The plain string form (e.g. `[\"web\", \"alexandria\", \"skills\"]`) is also accepted. The `alexandria` source returns tool contracts discovered from the Alexandria catalogue in `data.tools` instead of search results; it is free and is never counted in `creditsUsed`. The `skills` source returns up to 3 short skill cards in `data.skills` (`id`, `name`, `description`, `source` of `official` or `provider`, plus `provider` when the skill belongs to a provider and `similarity` when the match was semantic). It is free, is never counted in `creditsUsed`, and uses the same access rules as `alexandria`. A timeout or upstream error returns an empty `data.skills` array and does not fail the search. The card is not the full skill; load that separately with the card `id`. Requires the team's Alexandria access to be enabled (403 otherwise).",
                     "default": [
                       {
                         "type": "web"
@@ -5060,6 +5134,46 @@
                           "items": {
                             "$ref": "#/components/schemas/DiscoveredTool"
                           }
+                        },
+                        "skills": {
+                          "type": "array",
+                          "description": "Short skill cards from the Alexandria catalogue. Present when `skills` is among the sources, including when nothing matched or the lookup failed. At most 3 cards. Free, and never counted in `creditsUsed`.",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "id",
+                              "name",
+                              "description",
+                              "source"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "description": "Skill id. The full skill is loaded separately with this id."
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "source": {
+                                "type": "string",
+                                "enum": [
+                                  "official",
+                                  "provider"
+                                ]
+                              },
+                              "provider": {
+                                "type": "string",
+                                "description": "Publisher slug. Present when `source` is `provider`."
+                              },
+                              "similarity": {
+                                "type": "number",
+                                "description": "Semantic match score. Omitted when the card came from a word match."
+                              }
+                            }
+                          }
                         }
                       },
                       "description": "The search results. The arrays available will depend on the sources you specified in the request. By default, the `web` array will be returned."
@@ -5120,6 +5234,29 @@
                     "error": {
                       "type": "string",
                       "example": "An unexpected error occurred on the server."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service unavailable. Returned with `code: \"TOOL_DISCOVERY_UNAVAILABLE\"` when tool discovery fails on a tools-only search (`sources: [\"alexandria\"]`). The request is not billed; retry it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "code": {
+                      "type": "string",
+                      "example": "TOOL_DISCOVERY_UNAVAILABLE"
+                    },
+                    "error": {
+                      "type": "string"
                     }
                   }
                 }
@@ -5728,7 +5865,7 @@
             }
           },
           "409": {
-            "description": "Feedback cannot be recorded for this search",
+            "description": "Feedback cannot be recorded for this search, for example because it was sent more than 5 minutes after the search (`FEEDBACK_WINDOW_EXPIRED`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -9494,7 +9631,7 @@
                         "ocr"
                       ],
                       "default": "auto",
-                      "description": "PDF parsing mode. \"fast\": text-only extraction. \"auto\": text-first with OCR fallback. \"ocr\": OCR on every page."
+                      "description": "PDF parsing mode. \"fast\": text-only extraction. \"auto\": full layout analysis (text, tables and figures) with OCR for image-only pages. \"ocr\": OCR on every page."
                     },
                     "maxPages": {
                       "type": "integer",
@@ -9533,7 +9670,7 @@
           },
           "skipTlsVerification": {
             "type": "boolean",
-            "description": "Skip TLS certificate verification when making requests.",
+            "description": "Skip TLS certificate verification when making requests. Ignored for zero data retention requests, which always verify TLS.",
             "default": false
           },
           "removeBase64Images": {
@@ -9579,7 +9716,7 @@
           "integration": {
             "type": "string",
             "nullable": true,
-            "description": "Optional integration identifier. When omitted, a valid `X-Integration` request header is used instead; the body value takes precedence."
+            "description": "Optional integration identifier. When omitted, `null` or `cli`, a valid `X-Integration` request header is used instead. Any other body value takes precedence over the header."
           },
           "auditMetadata": {
             "$ref": "#/components/schemas/AuditMetadata"
@@ -9647,7 +9784,7 @@
           },
           "skipTlsVerification": {
             "type": "boolean",
-            "description": "Skip TLS certificate verification when making requests.",
+            "description": "Skip TLS certificate verification when making requests. Ignored for zero data retention requests, which always verify TLS.",
             "default": false
           },
           "timeout": {
@@ -10875,6 +11012,19 @@
                           "type": "string",
                           "description": "The variant SKU."
                         },
+                        "gtin": {
+                          "type": "string",
+                          "description": "The variant's GTIN (EAN, UPC or ISBN), digits only, with a valid check digit. Present only when the page or store states one."
+                        },
+                        "mpn": {
+                          "type": "string",
+                          "description": "The variant's manufacturer part number. Present only when the page states one."
+                        },
+                        "condition": {
+                          "type": "string",
+                          "enum": ["new", "used", "refurbished", "damaged"],
+                          "description": "The variant's item condition. Present only when the page states one; never assumed to be new."
+                        },
                         "title": {
                           "type": "string",
                           "description": "The variant title."
@@ -11272,6 +11422,10 @@
               "upstreamStatus": {
                 "type": "integer",
                 "description": "HTTP status code returned by the upstream provider, when applicable."
+              },
+              "feedbackToken": {
+                "type": "string",
+                "description": "Token for this call. Pass it in Alexandria feedback `tokens` or `callRatings` to name the call you rate. Valid for 24 hours, only for the team that made the call. Absent under zero data retention."
               }
             },
             "required": [
@@ -11318,6 +11472,10 @@
                   "code",
                   "message"
                 ]
+              },
+              "feedbackToken": {
+                "type": "string",
+                "description": "Token for this call. Pass it in Alexandria feedback `tokens` or `callRatings` to name the call you rate. Valid for 24 hours, only for the team that made the call. Absent under zero data retention."
               }
             },
             "required": [
