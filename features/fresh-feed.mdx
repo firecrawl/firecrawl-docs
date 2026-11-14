@@ -1,0 +1,242 @@
+---
+title: "Fresh Feed API (Beta)"
+description: "Pull web pages soon after their sources publish or update them, with each page's raw HTML and metadata."
+og:title: "Fresh Feed API (Beta) | Firecrawl"
+og:description: "A cursor-based feed of newly published and updated web pages, with their HTML."
+hidden: true
+noindex: true
+---
+
+<Warning>
+The Fresh Feed API is in private beta and is enabled per team. A request from a team without access gets a `403`. Parameters, fields, and limits may change during the beta.
+</Warning>
+
+The Fresh Feed API delivers web pages soon after their sources publish or update them. Each record carries the page's URL, its raw HTML, and what the page states about itself: title, description, author, language, and publish and update times. Records form one ordered log. You keep a cursor, ask for the records after it, and get each record once, in order.
+
+The first feed is **Local**. It covers pages from sources in Australia, Canada, Ireland, New Zealand, and the United Kingdom. Each source is listed under one of six subcategories: restaurants, food venues, hotels and lodging, attractions, tours and events, and local services.
+
+## Endpoint
+
+```http
+GET https://api.firecrawl.dev/v2/fresh-vertical-feed/local/latest
+Authorization: Bearer fc-YOUR_API_KEY
+```
+
+Only `GET` is supported. The SDKs don't wrap this endpoint yet, so the examples on this page call it over HTTP.
+
+## Try it
+
+The five newest records, without their HTML:
+
+```bash
+curl -s --compressed "https://api.firecrawl.dev/v2/fresh-vertical-feed/local/latest?limit=5&content=false" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY"
+```
+
+Records from UK restaurant sources written in the last six hours, oldest first:
+
+```bash
+curl -s --compressed "https://api.firecrawl.dev/v2/fresh-vertical-feed/local/latest?after=0&since=6h&country=GB&subcategory=restaurants" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY"
+```
+
+## Stay in sync
+
+Read the feed with the `after` cursor:
+
+1. Send `after=0` with a `since` value, such as `since=1h`, to start from that point instead of the beginning of the feed.
+2. Save the records in the order they arrive, which is oldest first.
+3. Send the response's `next_after` as `after` on your next request.
+4. While `more` is `true`, request again right away. When it's `false`, wait a minute or more before the next request.
+
+Records are written in cursor order, so no record can appear behind a cursor you've already passed. Save the cursor only after you've saved the records it covers, and a retry with the same cursor is always safe. Cursor values aren't consecutive, so treat them as opaque numbers.
+
+While your cursor is still `0`, keep sending `since`. An answer with no records leaves `next_after` at `0`, and `after=0` on its own starts from the beginning of the feed. To backfill the whole feed, do exactly that: start at `after=0` without `since`.
+
+<CodeGroup>
+
+```python Python
+import os
+import time
+
+import requests
+
+FEED_URL = "https://api.firecrawl.dev/v2/fresh-vertical-feed/local/latest"
+HEADERS = {"Authorization": f"Bearer {os.environ['FIRECRAWL_API_KEY']}"}
+
+
+def save(record):
+    print(record["id"], record["url"])  # replace with your own storage
+
+
+cursor = 0  # persist this between runs
+
+while True:
+    params = {"after": cursor}
+    if cursor == 0:
+        params["since"] = "1h"  # start an hour back, not at the beginning of the feed
+    response = requests.get(FEED_URL, headers=HEADERS, params=params, timeout=60)
+    if response.status_code in (429, 502, 503, 504):
+        time.sleep(int(response.headers.get("Retry-After", "5")))
+        continue
+    response.raise_for_status()
+    page = response.json()
+    for record in page["events"]:
+        save(record)
+    cursor = page["next_after"]  # advance only after the records are saved
+    if not page["more"]:
+        time.sleep(60)
+```
+
+```js Node
+const FEED_URL = "https://api.firecrawl.dev/v2/fresh-vertical-feed/local/latest";
+const headers = { Authorization: `Bearer ${process.env.FIRECRAWL_API_KEY}` };
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function save(record) {
+  console.log(record.id, record.url); // replace with your own storage
+}
+
+let cursor = 0; // persist this between runs
+
+while (true) {
+  const params = new URLSearchParams({ after: String(cursor) });
+  if (cursor === 0) params.set("since", "1h"); // start an hour back, not at the beginning of the feed
+  const response = await fetch(`${FEED_URL}?${params}`, { headers });
+  if ([429, 502, 503, 504].includes(response.status)) {
+    await sleep(Number(response.headers.get("retry-after") ?? 5) * 1000);
+    continue;
+  }
+  if (!response.ok) throw new Error(`${response.status}: ${await response.text()}`);
+  const page = await response.json();
+  for (const record of page.events) save(record);
+  cursor = page.next_after; // advance only after the records are saved
+  if (!page.more) await sleep(60_000);
+}
+```
+
+</CodeGroup>
+
+## Query parameters
+
+Every parameter is optional. A request with an unknown parameter, or with a parameter sent twice, gets a `400` that names it.
+
+| Parameter | Values | Description |
+| --- | --- | --- |
+| `after` | A cursor | Records written after this cursor, oldest first. Start with `0`, then send the `next_after` of the previous response. |
+| `before` | A cursor | Records written before this cursor, newest first. Send the `next_before` of the previous response to page back. Can't be sent with `after`. |
+| `since` | An age or a time | Only records written since then: an age such as `15m`, `6h`, or `2d`, or an ISO 8601 time such as `2026-11-14T00:00:00Z`. A time without an offset is read as UTC. |
+| `limit` | `1` to `500` | The most records in one response. Defaults to `50`. With `content=true`, the most is `50`. |
+| `content` | `true` or `false` | Defaults to `true`. With `false`, every record's `html` is `null`, so responses are far smaller. |
+| `country` | `AU`, `CA`, `GB`, `IE`, `NZ` | Only records from sources in this country. The United Kingdom is `GB`. |
+| `subcategory` | `restaurants`, `food_venues`, `hotels_lodging`, `attractions`, `tours_events`, `local_services` | Only records from sources in this subcategory. |
+| `host` | A host, such as `www.example.com` | Only records whose `url` has exactly this host. |
+| `domain` | A domain, such as `example.co.uk` | Only records whose `url` is on this domain or one of its subdomains. Send the domain itself, not a subdomain such as `www.example.co.uk`. |
+
+Without `after` or `before`, a response starts at the newest record.
+
+## Response
+
+An example response to a request with `after`, with the HTML shortened:
+
+```json
+{
+  "feed": "local",
+  "events": [
+    {
+      "id": "evt_3f9c2a7d1e8b4c6f0a2d5e71",
+      "url": "https://www.example.com/whats-on/winter-night-market",
+      "html": "<!DOCTYPE html><html lang=\"en-GB\">…</html>",
+      "status_code": 200,
+      "content_type": "text/html; charset=utf-8",
+      "crawl_time": 1794615150,
+      "updated_time": 1794614280,
+      "published_time": 1794613200,
+      "title": "Winter Night Market returns to the riverside",
+      "description": "Street food, makers and live music every Friday in December.",
+      "category": "local",
+      "author": "Jane Smith",
+      "country_code": "GB",
+      "language_code": "en"
+    }
+  ],
+  "next_after": 2187341,
+  "more": false
+}
+```
+
+| Field | Description |
+| --- | --- |
+| `feed` | The feed's name: `local`. |
+| `events` | The records. Oldest first with `after`, otherwise newest first. |
+| `next_after` | Only with `after`. Send it as `after` on your next request. |
+| `more` | Only with `after`. `true` when more records may be waiting, so request again right away. |
+| `next_before` | Only without `after`. Send it as `before` to get older records. `null` when there are no older records. |
+
+A response stops before 8 MiB, so it can hold fewer records than `limit` while more are waiting. `more` and `next_before` account for that.
+
+### Record fields
+
+Every record has these 14 fields, in this order. Times are Unix seconds, UTC.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `id` | string | `evt_` followed by 24 hex characters. Unique per record. |
+| `url` | string | The page's canonical URL when it's on the source's site, otherwise the URL the page was fetched from after redirects. Tracking parameters are removed. |
+| `html` | string or null | The page's raw HTML as fetched, up to 4 MiB. `null` with `content=false`. |
+| `status_code` | integer or null | The HTTP status of the fetch. |
+| `content_type` | string or null | The `Content-Type` of the fetch. |
+| `crawl_time` | integer | When the page was fetched. |
+| `updated_time` | integer or null | When the page last changed: the modified time the page states (`article:modified_time`, `og:updated_time`, or `dateModified`), else its sitemap's `lastmod`. When the two are more than an hour apart, the earlier one. |
+| `published_time` | integer or null | When the page was published, as its own markup states. A date in the URL or in a listing is never used. |
+| `title` | string | The page's `og:title`, else its `<title>`, else the title its source listed. Can be an empty string. |
+| `description` | string or null | The page's meta description, else its `og:description`. |
+| `category` | string | The feed's topic: `local`. |
+| `author` | string or null | The page's author. `null` when the page names none, or when the author is an organization, such as the site or business naming itself. |
+| `country_code` | string | The source's country: `AU`, `CA`, `GB`, `IE`, or `NZ`. |
+| `language_code` | string or null | The primary subtag of the page's stated language, in lower case, such as `en` or `fr`. |
+
+`updated_time` and `published_time` come only from what the page or its sitemap states. They're `null` unless it gives a full time of day with a time zone, and also when that time is before 1990 or later than `crawl_time`. A bare date is never turned into a time.
+
+`country_code`, and the `country` and `subcategory` filters, describe the source the page came from, not the page itself. Records don't carry the subcategory, so filter by it when you need it.
+
+## New pages and updates
+
+- A page enters the feed when its source first lists it. Pages a source already listed when the feed started reading it aren't sent.
+- It enters again when its source lists a later modified time for it and the page's main content has changed. The new record has a new `id` and the same `url`, so keep the latest record for each `url`.
+- A change outside the main content, such as ads, navigation, or a cookie banner, doesn't add a record. Neither does a sitemap that re-dates pages without changing them.
+
+## What the feed leaves out
+
+A page is delivered with its content or not at all. The feed skips a page when:
+
+- the page fails to load, or the site blocks the request;
+- the page is paywalled;
+- its HTML is larger than 4 MiB;
+- its site's robots.txt disallows it for the crawler token set for your feed;
+- a `robots` meta tag, or one named for that crawler token, says `none`, `noindex`, `noarchive`, `noai`, or `noimageai`, or the page reserves text and data mining with a `tdm-reservation` meta tag;
+- it's screened out as adult content or as a promotion for online gambling.
+
+## Compression
+
+Records carry raw HTML, so responses are large. Send an `Accept-Encoding` header and the response comes back compressed with `zstd`, `br`, or `gzip`: the one your header weights highest, or in that order when it weights them the same. Most HTTP clients send the header and decompress for you. With curl, add `--compressed`. A very small response, such as one with no records, can come back uncompressed. A request whose header refuses an uncompressed body and accepts none of the three gets a `406`.
+
+## Errors
+
+Every error except `405` has a JSON body with an `error` message.
+
+| Status | Meaning |
+| --- | --- |
+| `400` | A query parameter is invalid, unknown, or repeated, or `after` is above the feed's newest cursor. The `error` names the problem. |
+| `401` | The API key is missing or invalid. |
+| `403` | The Fresh Feed API isn't enabled for your team. |
+| `405` | The request used `HEAD`. Use `GET`. |
+| `406` | `Accept-Encoding` accepts none of the codings the feed sends. |
+| `429` | Your team is over its rate limit. Wait for the number of seconds in the `Retry-After` header. |
+| `502` | The request couldn't be completed. Retry with the same cursor. |
+| `503` | The feed is temporarily unavailable. Retry the same request after the seconds in `Retry-After`. |
+| `504` | The response didn't start within 30 seconds. Retry with the same cursor. |
+
+## Rate limits
+
+During the beta, each team can make 100 requests a minute to this endpoint by default, shared by all of its API keys. A sync loop that waits a minute between quiet polls uses a small part of that.
