@@ -125,7 +125,7 @@ forbid "$human_page" 'cta="Go to For Agents"'
 require "$human_page" "https://www.firecrawl.dev/app/settings?tab=mcp"
 require "$human_page" "https://chatgpt.com/plugins?q=firecrawl"
 require "$human_page" "https://claude.ai/directory/connectors/firecrawl"
-require "$human_page" "## ChatGPT, Claude and Grok Bot {#chatgpt-and-claude}"
+require "$human_page" "## Official plugins {#chatgpt-and-claude}"
 require "$human_page" "/images/agent-clients/chatgpt.svg"
 require "$human_page" "/images/agent-clients/claude-ai.svg"
 forbid "$human_page" 'icon="sparkles"'
