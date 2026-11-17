@@ -92,20 +92,20 @@ Use the schema shown by your MCP client for the current arguments. The feature g
 
 ## Ultrasearch answers
 
-On the hosted server, `firecrawl_search` can answer a query with a record from an [Alexandria](/features/alexandria) data provider as well as web results. When a search clearly names exactly one person, one company or one US-listed stock, Firecrawl looks it up and adds one provider record in a separate `answer` field. The web results in `data` stay the same.
+On the hosted server, `firecrawl_search` can answer a query with a record from an [Alexandria](/features/alexandria) data provider as well as web results. When a search clearly names exactly one person or one company, or one to three US-listed stocks, Firecrawl looks it up and adds one provider record in a separate `answer` field. The web results in `data` stay the same.
 
 | Route | When it applies | Record | Lookup cost per search |
 | --- | --- | --- | --- |
 | Person | A LinkedIn profile URL in the query always looks up that person. Otherwise, the search names one person and a LinkedIn profile among the top results matches the person, or the role and company the query names | Profile, without contact details | Up to 20 credits |
 | Company | A LinkedIn company page URL in the query always looks up that company. Otherwise, the search names one company by its LinkedIn page or its own domain, in the query or the top results | Firmographics | Up to 20 credits |
-| Stock news | The search names one US-listed stock, by its ticker or by its company's name with a word like `stock` or `shares`, and asks for its news, for example `$NVDA news`, `TSLA news` or `why is Ford stock down` | The latest Benzinga stories for the ticker | Free |
+| Stock news | The search names one to three US-listed stocks, by ticker or by company name with a word like `stock` or `shares`, for example `NVDA`, `$NVDA news`, `tesla stock price` or `why is Ford stock down` | The latest Benzinga stories and a 15-minute-delayed price for each ticker | Free |
 
 Ultrasearch adds nothing in these cases:
 
-- the query names more than one person, company or stock, or compares stocks;
+- the query names more than one person or company, or more than three stocks;
+- the query asks to choose between stocks, for example `AAPL or MSFT`, or compares one stock with something else;
 - the query excludes something, for example with `not`, `except` or a `-term` operator;
 - the query asks not to look anything up;
-- a stock query asks only for the price, for example `NVDA stock price`;
 - a stock query names a market or country outside the US, or a fund, an index or a cryptocurrency.
 
 In those cases, and when the provider finds no match, the search returns its web results as usual, sometimes with one short note in `agent_hints`.
@@ -114,7 +114,7 @@ In those cases, and when the provider finds no match, the search returns its web
 
 - Ultrasearch runs only on hosted connections that sign in or use an API key. It doesn't run on keyless sessions, for teams with zero data retention, or on a local server.
 - It runs when `sources` is unset or empty, or when it includes `web` or `alexandria`. A `sources` list of only `news` or `images` turns it off.
-- Stock news works on any plan with credits. Your organization must accept Benzinga's terms; until an admin does, the stock lookup is skipped and `agent_hints` says where to accept them.
+- Stock news works on any plan with credits.
 - Agents don't need an extra parameter. The server instructions tell connected agents what `answer` can hold and how it is billed.
 
 ### Billing
@@ -155,7 +155,7 @@ Stock news lookups are free: a search that gets a stock-news answer costs only t
 }
 ```
 
-For stock news, `data` is a list of stories, most recent first:
+For stock news, `prices` holds a delayed price for each ticker and `data` is a list of stories, most recent first:
 
 ```json
 {
@@ -163,16 +163,26 @@ For stock news, `data` is a list of stories, most recent first:
     "route": "stock",
     "provider": "benzinga",
     "capability": "news/search",
-    "sources": ["benzinga"],
+    "sources": ["benzinga", "fiscal-ai"],
     "attribution": "Powered by Benzinga Data",
+    "prices": [
+      {
+        "ticker": "EXMP",
+        "price": 123.45,
+        "currency": "USD",
+        "change": -1.55,
+        "change_pct": -1.24,
+        "as_of": "2026-11-10T14:05:00-05:00",
+        "delay": "15-minute delayed"
+      }
+    ],
     "data": [
       {
-        "id": "100000001",
         "title": "Example Corp Shares Rise After Product Launch",
-        "teaser": "Example Corp unveiled its new product line on Tuesday.",
-        "created": "Tue, 10 Nov 2026 14:20:15 -0500",
+        "created": "2026-11-10T19:20:15Z",
         "url": "https://www.benzinga.com/news/example",
-        "stocks": [{ "name": "EXMP" }]
+        "tickers": ["EXMP"],
+        "teaser": "Example Corp unveiled its new product line on Tuesday."
       }
     ],
     "credits": {
@@ -193,10 +203,14 @@ For stock news, `data` is a list of stories, most recent first:
 | --- | --- |
 | `route` | `person`, `company` or `stock`. |
 | `provider`, `capability` | The Alexandria tool that returned the record. |
-| `sources` | The providers that contributed to the record. |
+| `sources` | The providers that contributed to the record. A stock answer with a price also lists `fiscal-ai`. |
 | `attribution` | The provider's attribution text, when it requires one. |
-| `data` | The provider's record, or for stock news a list of stories with `title`, `teaser`, `created` and `url`. Its fields depend on the provider. |
+| `prices` | Stock news only. One entry per ticker with `price`, `change` and `change_pct` against the previous close, `currency`, `as_of` and `delay`. See below. |
+| `data` | The provider's record, or for stock news a list of stories with `title`, `created` (ISO 8601, UTC), `url`, `tickers` (the asked tickers first) and, when it fits, a short `teaser`. The answer is held to a fixed size, so it may keep fewer stories or no teasers. Its fields depend on the provider. |
+| `note` | Stock news only, when even the newest story is more than 7 days old. |
 | `credits` | What the search (`search`) and the lookup (`provider`) cost, the most the lookup could cost (`max_credits`, your team's quoted price, or 0 for stock news), and any charge not settled yet (`uncertain`, `pending`, `unresolved_requests`). |
+
+The stock price comes from Fiscal.ai and is never real time. During the trading day it is the last trade, delayed by 15 minutes (`"delay": "15-minute delayed"`). Before the day's first trade, and on days the market is closed, it is the last close (`"delay": "end-of-day close"`). `as_of` gives the time of that trade or close in New York time. If no price can be fetched, the answer carries the news alone; if no story is found but a price is, it carries the price with an empty `data` list.
 
 ### Turn it off
 
