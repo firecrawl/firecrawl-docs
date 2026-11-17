@@ -96,9 +96,9 @@ On the hosted server, `firecrawl_search` can answer a query with a record from a
 
 | Route | When it applies | Record | Lookup cost per search |
 | --- | --- | --- | --- |
-| Person | A LinkedIn profile URL in the query always looks up that person. Otherwise, the search names one person and a LinkedIn profile among the top results matches the person, or the role and company the query names | Profile, without contact details | Up to 20 credits |
-| Company | A LinkedIn company page URL in the query always looks up that company. Otherwise, the search names one company by its LinkedIn page or its own domain, in the query or the top results | Firmographics | Up to 20 credits |
-| Stock news | The search names one to three US-listed stocks, by ticker or by company name with a word like `stock` or `shares`, for example `NVDA`, `$NVDA news`, `tesla stock price` or `why is Ford stock down` | The latest Benzinga stories and a 15-minute-delayed price for each ticker | Free |
+| Person | A LinkedIn profile URL in the query always looks up that person. Otherwise, the search names one person and a LinkedIn profile among the top results matches the person, or the role and company the query names. A search that is only a person's name looks up a LinkedIn profile among the first results whose name is exactly that name | Profile, without contact details | Up to 20 credits |
+| Company | A LinkedIn company page URL in the query always looks up that company. Otherwise, the search names one company by its LinkedIn page or its own domain, in the query or the top results. A search that names only a brand, or a brand with a company fact such as funding or headcount, looks up the company when one of the first results is the brand's own site | Firmographics | Up to 20 credits |
+| Stock news | The search names one to three US-listed stocks, by ticker or by company name with a word like `stock` or `shares`, or asks a finance question about one, for example `NVDA`, `$NVDA news`, `tesla stock price`, `why is Ford stock down`, `TSLA EPS` or `Verizon dividend` | Benzinga headlines chosen for what the query asks and a 15-minute-delayed price for each ticker | 2 credits when headlines are found |
 
 Ultrasearch adds nothing in these cases:
 
@@ -106,7 +106,8 @@ Ultrasearch adds nothing in these cases:
 - the query asks to choose between stocks, for example `AAPL or MSFT`, or compares one stock with something else;
 - the query excludes something, for example with `not`, `except` or a `-term` operator;
 - the query asks not to look anything up;
-- a stock query names a market or country outside the US, or a fund, an index or a cryptocurrency.
+- a stock query names a market or country outside the US, or a fund, an index or a cryptocurrency;
+- a product name with a price word asks what the product costs, not for its parent company's stock.
 
 In those cases, and when the provider finds no match, the search returns its web results as usual, sometimes with one short note in `agent_hints`.
 
@@ -121,7 +122,14 @@ In those cases, and when the provider finds no match, the search returns its web
 
 The provider record costs what the same lookup costs your team through Alexandria, on top of the search's usual credits. When more than one provider can answer, the cheapest one is used. If that price is above the route's ceiling per search (20 credits for a person or company), the lookup is skipped and nothing is charged for it. Person and company lookups are normally billed only when a record is found.
 
-Stock news lookups are free: a search that gets a stock-news answer costs only the search's usual credits. `answer.credits` shows what the search and the lookup cost.
+A stock answer with headlines costs 2 credits on top of the search. A stock lookup that finds no headlines costs nothing extra, and the delayed price is always free. `answer.credits` shows what the search and the lookup cost.
+
+| Answer | Credits on top of the search |
+| --- | --- |
+| Person profile | Your team's Alexandria price, typically 5, up to 20 |
+| Company record | Your team's Alexandria price, typically 2, up to 20 |
+| Stock with headlines | 2 |
+| Stock with only a price, or no match on any route | 0 |
 
 ### The answer field
 
@@ -155,7 +163,7 @@ Stock news lookups are free: a search that gets a stock-news answer costs only t
 }
 ```
 
-For stock news, `prices` holds a delayed price for each ticker and `data` is a list of stories, most recent first:
+For stock news, `prices` holds a delayed price for each ticker and `data` lists the headlines:
 
 ```json
 {
@@ -180,17 +188,26 @@ For stock news, `prices` holds a delayed price for each ticker and `data` is a l
       {
         "title": "Example Corp Shares Rise After Product Launch",
         "created": "2026-11-10T19:20:15Z",
-        "url": "https://www.benzinga.com/news/example",
-        "tickers": ["EXMP"],
-        "teaser": "Example Corp unveiled its new product line on Tuesday."
+        "url": "https://www.benzinga.com/news/example-launch"
+      },
+      {
+        "title": "Example Corp Names New Chief Financial Officer",
+        "created": "2026-11-09T13:05:00Z",
+        "url": "https://www.benzinga.com/news/example-cfo"
+      },
+      {
+        "title": "Three Retail Stocks Moving In Tuesday's Session",
+        "created": "2026-11-10T16:40:00Z",
+        "url": "https://www.benzinga.com/news/example-movers",
+        "focus": "tagged"
       }
     ],
     "credits": {
       "search": 2,
-      "provider": 0,
+      "provider": 2,
       "uncertain": 0,
       "pending": 0,
-      "max_credits": 0,
+      "max_credits": 2,
       "stop_reason": "found",
       "cap_enforced": true,
       "unresolved_requests": 0
@@ -206,11 +223,23 @@ For stock news, `prices` holds a delayed price for each ticker and `data` is a l
 | `sources` | The providers that contributed to the record. A stock answer with a price also lists `fiscal-ai`. |
 | `attribution` | The provider's attribution text, when it requires one. |
 | `prices` | Stock news only. One entry per ticker with `price`, `change` and `change_pct` against the previous close, `currency`, `as_of` and `delay`. See below. |
-| `data` | The provider's record, or for stock news a list of stories with `title`, `created` (ISO 8601, UTC), `url`, `tickers` (the asked tickers first) and, when it fits, a short `teaser`. The answer is held to a fixed size, so it may keep fewer stories or no teasers. Its fields depend on the provider. |
+| `data` | The provider's record, or for stock news a list of headlines with `title`, `created` (ISO 8601, UTC) and `url`. Its fields depend on the provider. See [Stock headlines](#stock-headlines). |
 | `note` | Stock news only, when even the newest story is more than 7 days old. |
-| `credits` | What the search (`search`) and the lookup (`provider`) cost, the most the lookup could cost (`max_credits`, your team's quoted price, or 0 for stock news), and any charge not settled yet (`uncertain`, `pending`, `unresolved_requests`). |
+| `credits` | What the search (`search`) and the lookup (`provider`) cost, the most the lookup could cost (`max_credits`, your team's quoted price, or 2 for stock news), and any charge not settled yet (`uncertain`, `pending`, `unresolved_requests`). |
 
 The stock price comes from Fiscal.ai and is never real time. During the trading day it is the last trade, delayed by 15 minutes (`"delay": "15-minute delayed"`). Before the day's first trade, and on days the market is closed, it is the last close (`"delay": "end-of-day close"`). `as_of` gives the time of that trade or close in New York time. If no price can be fetched, the answer carries the news alone; if no story is found but a price is, it carries the price with an empty `data` list.
+
+### Stock headlines
+
+The number of headlines depends on what the query asks, per ticker:
+
+| Query asks for | Headlines per ticker |
+| --- | --- |
+| The price, for example `NVDA stock price` | 1 |
+| Nothing else, for example `NVDA` | 2 |
+| News, why the stock moved, earnings or outlook | 3 |
+
+Headlines about the asked company come first, newest first, with the ones that fit the question, such as an earnings report or an analyst action, ahead. When there aren't enough, the newest other stories Benzinga tags with the ticker fill the rest and carry `"focus": "tagged"`. A price ask that has its price shows only headlines about the company, so it can answer with the price alone. The answer is held to a fixed size, so it may carry fewer headlines.
 
 ### Turn it off
 
