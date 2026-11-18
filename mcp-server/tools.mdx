@@ -23,10 +23,12 @@ Start with [Get Started](/mcp-server) and pick [For Agents](/mcp-server/keyless)
 | Job | Tool | Use it when |
 | --- | --- | --- |
 | Read one page | `firecrawl_scrape` | You know the URL and need page content or structured fields. |
-| Extract structured data | `firecrawl_scrape` with JSON format | You have the URL and want data matching a prompt or JSON schema. |
+| Get fields from a known page | `firecrawl_scrape` with `formats: ["markdown"]` | You have the URL and want specific fields. Extract them from the returned content, or use `firecrawl_agent` when the pages are not known. |
 | Discover site URLs | `firecrawl_map` | You need to find pages before deciding what to extract. |
 | Search the web | `firecrawl_search` | You have a query rather than a known URL. |
-| Get data from a third-party provider | `firecrawl_find_tools`, then `firecrawl_scrape` with `alexandria` | You need typed records from a provider in the [Alexandria](/features/alexandria) catalogue. Authenticated `firecrawl_search` also returns matching tools in `data.tools`. |
+| Get data from a third-party provider | `alexandria_library_search`, then `alexandria_library_read` | You need typed records from a provider in the [Alexandria](/features/alexandria) catalogue. Authenticated `firecrawl_search` also returns matching tools in `data.tools`. |
+| Find people or companies | `people_company_search` | You need a list of people by title, seniority, function, employer, or location, or companies by industry, headcount, location, technology, or founding year. |
+| Enrich known people or companies | `people_company_enrich` | You have names, domains, LinkedIn URLs, emails, or phone numbers and need profiles, firmographics, work or personal email, or mobile. |
 | Parse a file | `firecrawl_parse` | You need content from a PDF, document, spreadsheet, or HTML file. |
 | Extract many pages | `firecrawl_crawl` and `firecrawl_check_crawl_status` | You need to traverse a site or section. The crawl tool polls the job to a terminal state before returning. |
 | Run autonomous research | `firecrawl_agent` and `firecrawl_agent_status` | The task spans multiple sources and the exact pages are not known. |
@@ -36,12 +38,13 @@ Start with [Get Started](/mcp-server) and pick [For Agents](/mcp-server/keyless)
 | Answer a programming question | `firecrawl_developer_search` | You need primary-source answers from issues, merged pull requests, READMEs, and curated docs. |
 | Answer a legal or regulatory question | `firecrawl_gov_search` | You need statutes, regulations, codes, court opinions, or other government publications from the [Firecrawl Government Index](/features/gov). |
 | Monitor changes | `firecrawl_monitor_*` | You need recurring checks, diffs, and webhook or email notifications. |
+| Check credit usage | `firecrawl_credit_usage` | You need the team's remaining credits, or what credits were spent on by month or day, optionally split by endpoint or API key. |
 | Send product feedback | `firecrawl_search_feedback` and `firecrawl_feedback` | You want to rate search results or report endpoint-level quality. |
 
 `firecrawl_gov_search` also accepts the optional filters `jurisdiction`, `court`, `courtType`, `cites`, and `domain` (`firecrawl-mcp` 3.34.0 or later). See [Government Index filters](/features/gov#filters).
 
 <Note>
-The former Extract MCP tool is deprecated and is not part of the current tool surface. Use Scrape with JSON format for a known page, or Agent when Firecrawl must discover the sources. See [Choosing the Data Extractor](/developer-guides/usage-guides/choosing-the-data-extractor) for the full comparison.
+The former Extract MCP tool is deprecated and is not part of the current tool surface. Use Scrape for a known page and extract the fields from its content, or Agent when Firecrawl must discover the sources. See [Choosing the Data Extractor](/developer-guides/usage-guides/choosing-the-data-extractor) for the full comparison.
 </Note>
 
 <Tip>
@@ -79,10 +82,21 @@ Use the schema shown by your MCP client for the current arguments. The feature g
     [Alexandria](/features/alexandria) tools need an authenticated session. Keyless sessions get no Alexandria tools.
 
     1. **Discover.** Authenticated `firecrawl_search` uses `sources: ["web", "alexandria"]` by default and returns matching tools in `data.tools`. Use `sources: ["alexandria"]` for tools only, or `sources: ["web"]` to omit semantic tool discovery.
-    2. **Inspect.** Call `firecrawl_find_tools` with no arguments to browse categories, then providers, then tools. Use `query` or `urls` to find tools for a task or a website. Use `capabilities` to read the full contract of a tool. Follow the returned `nextTool` for the next step.
-    3. **Run.** Call `firecrawl_scrape` with `alexandria: {provider, capability, options}` instead of `url`. Send an array of up to 10 calls to run them together. Each result in `data.alexandria` has `data` or an `error`.
+    2. **Explore.** `alexandria_library_search` runs one read-only shell command (`ls`, `cat`, `grep`, `jq`, pipes) over the catalogue. Start with `cat /library/README.md`. Each tool has a contract at `/library/<category>/<provider>/<capability>.md` with its inputs, outputs, and the call that runs it, and recorded responses are under `/examples`.
+    3. **Run.** Call `alexandria_library_read` with `calls`, an array of one to ten `{provider, capability, options}` entries, which may name different providers. Results come back in `data.alexandria` in the same order, and each has `data` or an `error`.
 
-    Discovery is free. Each run costs the price listed on its tool. If a provider needs accepted terms, the tool returns `THIRD_PARTY_DATA_TERMS_REQUIRED` with `requiresAction.url`. Give that URL to an org admin, who accepts the terms in the Firecrawl dashboard. The agent must not accept terms. After the admin confirms, send the same call again.
+    Earlier clients and prompts that use `firecrawl_find_tools` and `firecrawl_scrape` with `alexandria` keep working; new integrations should use the two library tools.
+
+    Discovery and library lookups are free. Each run costs the price listed on its tool. If a provider needs accepted terms, the tool returns `THIRD_PARTY_DATA_TERMS_REQUIRED` with `requiresAction.url`. Give that URL to an org admin, who accepts the terms in the Firecrawl dashboard. The agent must not accept terms. After the admin confirms, send the same call again.
+  </Accordion>
+
+  <Accordion title="Find and enrich people and companies">
+    `people_company_search` and `people_company_enrich` run Firecrawl's provider waterfalls over [Alexandria](/features/alexandria) people and company data. They need an authenticated session and are not listed to keyless sessions.
+
+    - **Search.** Set `entity` to `person` or `company`, then narrow with `filters` such as `titles`, `seniority`, `company_domains`, `locations`, `industries`, or `headcount`. Providers run one at a time, and only those that apply every filter you give. Rows never carry emails or phone numbers. `limit` is 1 to 100, and `max_credits` defaults to 1000.
+    - **Enrich.** Send up to 10 records per call, `people` and `companies` together. People get a profile and companies get firmographics. Add `contact_fields` (`work_email`, `personal_email`, `mobile`) to find contact details for people; mobile lookups run only when you ask for them. For each field, Firecrawl tries providers in order of listed price and past success rate and stops at the first one that finds it.
+
+    In `people_company_enrich`, a provider that finds a field is charged its listed price, and a miss is free. Without `max_credits`, an enrich call is uncapped; set it to cap what one call can spend. To call one specific provider, use `alexandria_library_read`.
   </Accordion>
 
   <Accordion title="Enable optional feedback tools">
