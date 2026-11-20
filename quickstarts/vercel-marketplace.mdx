@@ -1,20 +1,20 @@
 ---
 title: "Vercel Marketplace"
-description: "Install Firecrawl from the Vercel Marketplace, attach it to a project, and use the injected FIRECRAWL_API_KEY in your Vercel app."
+description: "Install Firecrawl from the Vercel Marketplace, attach it to a project, and authenticate your Vercel app with short-lived OIDC resource tokens."
 og:title: "Vercel Marketplace Integration | Firecrawl"
-og:description: "Install Firecrawl from the Vercel Marketplace, attach it to a project, and use the injected FIRECRAWL_API_KEY in your Vercel app."
+og:description: "Install Firecrawl from the Vercel Marketplace, attach it to a project, and authenticate your Vercel app with short-lived OIDC resource tokens."
 ---
 
-Firecrawl, the context API for AI agents, is available as a native [Vercel Marketplace integration](https://vercel.com/marketplace/firecrawl). Installing it provisions Firecrawl for your Vercel project and adds `FIRECRAWL_API_KEY` to the project's environment variables automatically.
+Firecrawl, the context API for AI agents, is available as a native [Vercel Marketplace integration](https://vercel.com/marketplace/firecrawl). Installing it provisions a Firecrawl resource and connects it to your Vercel project. Your app authenticates with short-lived OIDC resource tokens that Vercel mints on demand, so no long-lived API key has to live in your environment variables.
 
 Use this guide to search, scrape, and interact with the web from Vercel, with billing and setup handled through Vercel.
 
 ## What the integration does
 
-When you install Firecrawl from the Vercel Marketplace, Vercel connects Firecrawl to a selected project and makes the API key available as an environment variable.
+When you install Firecrawl from the Vercel Marketplace, Vercel connects a Firecrawl resource to a selected project.
 
-- Provisions a Firecrawl account and API key through the Marketplace flow
-- Adds `FIRECRAWL_API_KEY` to your Vercel project environment
+- Provisions a Firecrawl account through the Marketplace flow
+- Lets your deployments mint short-lived resource tokens for Firecrawl with Vercel OIDC
 - Keeps Firecrawl billing on your Vercel invoice
 - Lets you open Firecrawl from Vercel after the integration is connected
 
@@ -27,20 +27,58 @@ If you already have a Firecrawl API key and want to configure Vercel manually, u
 1. Open the [Firecrawl listing on the Vercel Marketplace](https://vercel.com/marketplace/firecrawl).
 2. Click **Install**.
 3. Choose the Firecrawl plan you want to use.
-4. Select the Vercel project that should receive the environment variable.
+4. Select the Vercel project that should use Firecrawl.
 5. Finish the installation flow.
 
-After installation, redeploy your project so Vercel Functions and framework server code can read the new environment variable.
+## Authenticate with resource tokens
 
-## Install the SDK
+Your deployment exchanges its Vercel OIDC token for a Firecrawl resource token, then sends that token to Firecrawl the same way it would send an API key. Resource tokens expire after five minutes, so mint one per request instead of storing it.
 
-In your Vercel project, install the Firecrawl Node SDK:
+1. Make sure OIDC is enabled in your Vercel project settings. Vercel then provides `VERCEL_OIDC_TOKEN` to your deployments.
+2. Copy the store ID of your Firecrawl resource from the Vercel dashboard and add it to your project as the `FIRECRAWL_STORE_ID` environment variable. It is an identifier, not a secret.
+3. Redeploy your project so server code can read the new environment variable.
+
+Install the Firecrawl Node SDK and Vercel's OIDC helper:
 
 ```bash
-npm install firecrawl
+npm install firecrawl @vercel/oidc
 ```
 
-You do not need to paste an API key into your code. Read `process.env.FIRECRAWL_API_KEY` server-side.
+Create `lib/firecrawl.ts` to mint a token and return a client:
+
+```typescript
+import { getVercelOidcToken } from "@vercel/oidc";
+import { Firecrawl } from "firecrawl";
+
+export async function getFirecrawlToken() {
+  const storeId = process.env.FIRECRAWL_STORE_ID;
+  if (!storeId) {
+    return process.env.FIRECRAWL_API_KEY;
+  }
+
+  const response = await fetch(
+    `https://api.vercel.com/v1/integrations/marketplace/resources/${storeId}/token`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${await getVercelOidcToken()}` },
+    }
+  );
+  if (!response.ok) {
+    throw new Error(`Could not mint a Firecrawl resource token: ${response.status}`);
+  }
+
+  const { token } = await response.json();
+  return token as string;
+}
+
+export async function getFirecrawl() {
+  return new Firecrawl({ apiKey: await getFirecrawlToken() });
+}
+```
+
+<Note>
+Installations made before OIDC support also have a `FIRECRAWL_API_KEY` environment variable. The helper falls back to it when `FIRECRAWL_STORE_ID` is not set. Vercel removes these long-lived keys in December, so move to resource tokens before then.
+</Note>
 
 ## Scrape a page
 
@@ -48,14 +86,11 @@ Create a route handler at `app/api/scrape/route.ts`:
 
 ```typescript
 import { NextResponse } from "next/server";
-import { Firecrawl } from "firecrawl";
-
-const firecrawl = new Firecrawl({
-  apiKey: process.env.FIRECRAWL_API_KEY,
-});
+import { getFirecrawl } from "@/lib/firecrawl";
 
 export async function POST(request: Request) {
   const { url } = await request.json();
+  const firecrawl = await getFirecrawl();
   const result = await firecrawl.scrape(url, {
     formats: ["markdown"],
   });
@@ -78,14 +113,11 @@ Use `search` when your app needs current web results plus page content:
 
 ```typescript
 import { NextResponse } from "next/server";
-import { Firecrawl } from "firecrawl";
-
-const firecrawl = new Firecrawl({
-  apiKey: process.env.FIRECRAWL_API_KEY,
-});
+import { getFirecrawl } from "@/lib/firecrawl";
 
 export async function POST(request: Request) {
   const { query } = await request.json();
+  const firecrawl = await getFirecrawl();
   const results = await firecrawl.search(query, {
     limit: 5,
     scrapeOptions: {
@@ -103,13 +135,10 @@ Use `interact` when your app needs to click, scroll, or fill forms before extrac
 
 ```typescript
 import { NextResponse } from "next/server";
-import { Firecrawl } from "firecrawl";
-
-const firecrawl = new Firecrawl({
-  apiKey: process.env.FIRECRAWL_API_KEY,
-});
+import { getFirecrawl } from "@/lib/firecrawl";
 
 export async function POST() {
+  const firecrawl = await getFirecrawl();
   const result = await firecrawl.scrape("https://news.ycombinator.com", {
     formats: ["markdown"],
   });
@@ -144,7 +173,7 @@ If you are building an agent with the [Vercel AI SDK](/developer-guides/llm-sdks
 npm install firecrawl-aisdk ai
 ```
 
-Then pass Firecrawl tools to your model. The Marketplace-installed `FIRECRAWL_API_KEY` is read from the environment.
+Then mint a resource token with the helper above and pass Firecrawl tools to your model.
 
 <Note>
 The example below uses the Vercel AI Gateway model string format. Configure your AI SDK model provider or AI Gateway credentials separately.
@@ -153,8 +182,11 @@ The example below uses the Vercel AI Gateway model string format. Configure your
 ```typescript
 import { generateText, stepCountIs } from "ai";
 import { FirecrawlTools } from "firecrawl-aisdk";
+import { getFirecrawlToken } from "@/lib/firecrawl";
 
-const { systemPrompt, ...tools } = FirecrawlTools();
+const { systemPrompt, ...tools } = FirecrawlTools({
+  apiKey: await getFirecrawlToken(),
+});
 
 const { text } = await generateText({
   model: "anthropic/claude-sonnet-5.5",
