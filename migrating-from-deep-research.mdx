@@ -1,0 +1,66 @@
+---
+title: "Migrating from Deep Research"
+sidebarTitle: "Migrating from Deep Research"
+description: "Move /v1/deep-research calls to /v2/agent with one prompt for your coding agent, or by hand with the mapping table."
+noindex: true
+---
+
+The Deep Research API shuts down on Thursday, December 10, 2026, 15:00 UTC. After that, every `/v1/deep-research` request fails with HTTP `410 Gone`. Its replacement is [`/v2/agent`](/features/agent).
+
+## Migrate with your coding agent
+
+Paste this prompt into Claude Code, Cursor, Codex, or any coding agent, in the root of your project:
+
+```text Prompt expandable wrap
+Migrate this codebase off Firecrawl's Deep Research API (/v1/deep-research) to the v2 Agent API (/v2/agent). Deep Research shuts down on Thursday, December 10, 2026, 15:00 UTC, and every /v1/deep-research request returns HTTP 410 after that.
+
+1. Find every Deep Research call:
+   - Node SDK: deepResearch, asyncDeepResearch, checkDeepResearchStatus
+   - Python SDK: deep_research, async_deep_research, check_deep_research_status
+   - These may be called on firecrawl.v1, FirecrawlAppV1, V1FirecrawlApp or an older FirecrawlApp
+   - Raw HTTP: POST /v1/deep-research and GET /v1/deep-research/{id}
+2. Upgrade the Firecrawl SDK to the latest version: npm install firecrawl@latest, or pip install -U firecrawl-py.
+3. Rewrite each call on the v2 client, new Firecrawl({ apiKey }) in Node or Firecrawl(api_key=...) in Python:
+   - deepResearch(query, params) -> agent({ prompt, schema, maxCredits }); Python deep_research(query, ...) -> agent(prompt=..., schema=..., max_credits=...). It starts the run and waits for it.
+   - asyncDeepResearch -> startAgent; async_deep_research -> start_agent. Same arguments as agent; returns the job id.
+   - checkDeepResearchStatus(id) -> getAgentStatus(id); check_deep_research_status(id) -> get_agent_status(id).
+   - POST /v1/deep-research -> POST /v2/agent; GET /v1/deep-research/{id} -> GET /v2/agent/{id}.
+   Request:
+   - query (or topic), systemPrompt, analysisPrompt and jsonOptions.prompt -> merge into one prompt string.
+   - jsonOptions.schema -> schema (a JSON schema, a Zod schema in Node or a Pydantic model in Python).
+   - The finalAnalysis report -> add a required string field "report" to schema, described as a markdown report that answers the question.
+   - Sources -> add a required "sources" array of { url, title } objects to schema.
+   - maxUrls -> maxCredits (max_credits in Python). It caps what the run spends and defaults to 2500. There is no page limit.
+   - maxDepth and timeLimit -> remove them. They have no equivalent.
+   - onActivity / on_activity callbacks -> poll getAgentTrace(id) / get_agent_trace(id), or pass a webhook.
+   - onSource / on_source callbacks -> read the "sources" field of the result.
+   Response:
+   - status keeps the same values: processing, completed, failed.
+   - data.finalAnalysis -> data.report; data.json -> data; data.sources -> data.sources (from the schema field); data.activities -> the trace; error -> error.
+   - A run that hits maxCredits stops with stopReason "credit_limit_reached" (stop_reason in Python).
+4. Keep the program's behavior the same: same inputs, same outputs to its callers, same error handling.
+5. Run the project's tests and fix anything that breaks.
+
+Reference: https://docs.firecrawl.dev/migrating-from-deep-research.md
+```
+
+## Migrate by hand
+
+| v1 | v2 | Note |
+|---|---|---|
+| `POST /v1/deep-research` | [`POST /v2/agent`](/api-reference/endpoint/agent) | |
+| `GET /v1/deep-research/{id}` | [`GET /v2/agent/{id}`](/api-reference/endpoint/agent-get) | Same `status` values |
+| `deepResearch` / `deep_research` | `agent` | Starts the run and waits |
+| `asyncDeepResearch` / `async_deep_research` | `startAgent` / `start_agent` | |
+| `checkDeepResearchStatus` / `check_deep_research_status` | `getAgentStatus` / `get_agent_status` | |
+| `query`, `systemPrompt`, `analysisPrompt` | `prompt` | Merge into one prompt |
+| `jsonOptions.schema` | `schema` | |
+| `maxUrls` | `maxCredits` | Caps spend, default 2,500 |
+| `maxDepth`, `timeLimit` | None | Remove them |
+| `data.finalAnalysis` | `data.report` | Add a `report` string to `schema` |
+| `data.sources` | `data.sources` | Add a `sources` array to `schema` |
+| `data.activities`, `onActivity` | [`GET /v2/agent/{id}/trace`](/api-reference/endpoint/agent-trace) | `getAgentTrace` / `get_agent_trace` |
+
+Using n8n, Zapier, Make, or another no-code tool? Update the Firecrawl node or app to its latest version.
+
+Questions? Email [help@firecrawl.com](mailto:help@firecrawl.com).
