@@ -1,0 +1,58 @@
+---
+title: "Migrating from LLMs.txt generation"
+sidebarTitle: "Migrating from LLMs.txt"
+description: "Build llms.txt with /v2/map and /v2/batch/scrape instead of /v1/llmstxt, with one prompt for your coding agent or by hand with the mapping table."
+noindex: true
+---
+
+The LLMs.txt API shuts down on Thursday, December 10, 2026, 15:00 UTC. After that, every `/v1/llmstxt` request fails with HTTP `410 Gone`. Build the files with [`/v2/map`](/features/map) and [`/v2/batch/scrape`](/features/batch-scrape) instead.
+
+## Migrate with your coding agent
+
+Paste this prompt into Claude Code, Cursor, Codex, or any coding agent, in the root of your project:
+
+```text Prompt expandable wrap
+Migrate this codebase off Firecrawl's LLMs.txt API (/v1/llmstxt). It shuts down on Thursday, December 10, 2026, 15:00 UTC, and every /v1/llmstxt request returns HTTP 410 after that. It has no single replacement: build llms.txt and llms-full.txt from the v2 Map and Batch Scrape APIs.
+
+1. Find every LLMs.txt call:
+   - Node SDK: generateLLMsText, asyncGenerateLLMsText, checkGenerateLLMsTextStatus
+   - Python SDK: generate_llms_text, async_generate_llms_text, check_generate_llms_text_status
+   - These may be called on firecrawl.v1, FirecrawlAppV1, V1FirecrawlApp or an older FirecrawlApp
+   - Raw HTTP: POST /v1/llmstxt and GET /v1/llmstxt/{id}
+   - The generate-llmstxt npx package
+2. Upgrade the Firecrawl SDK to the latest version: npm install firecrawl@latest, or pip install -U firecrawl-py.
+3. Replace each call with these steps on the v2 client, new Firecrawl({ apiKey }) in Node or Firecrawl(api_key=...) in Python:
+   a. List the pages: map(url, { limit: maxUrls, includeSubdomains: false }) in Node, map(url, limit=max_urls, include_subdomains=False) in Python. Use the old maxUrls value (default 10) as limit. Take the URLs from links[].url.
+   b. Scrape them: batchScrape(urls, { options: { formats } }) in Node, batch_scrape(urls, formats=formats) in Python, with
+      formats = ["markdown", { "type": "json", "prompt": "Write a 3-4 word title and a 9-10 word description of this page.", "schema": { "type": "object", "properties": { "title": { "type": "string" }, "description": { "type": "string" } }, "required": ["title", "description"] } }]
+      batchScrape waits for the job. For asyncGenerateLLMsText / async_generate_llms_text use startBatchScrape / start_batch_scrape, and replace checkGenerateLLMsTextStatus / check_generate_llms_text_status with getBatchScrapeStatus(id) / get_batch_scrape_status(id).
+   c. Drop pages whose metadata.statusCode (metadata.status_code in Python) is 400 or more, and sort the rest back into map order by metadata.sourceURL (metadata.source_url in Python). Batch results come back in the order they finish.
+   d. llms.txt (what data.llmstxt held): "# {url} llms.txt", a blank line, then one "- [{title}]({page url}): {description}" line per page. Use json.title and json.description, falling back to metadata.title and metadata.description.
+   e. llms-full.txt (what data.llmsfulltxt held when showFullText / show_full_text was true): "# {url} llms-full.txt", a blank line, then for each page "## {title}", a newline, its markdown and a blank line. If showFullText was false, drop "markdown" from formats and skip this file.
+   f. cache: false -> set maxAge: 0 in the scrape options (max_age=0 in Python).
+   g. Raw HTTP: POST /v2/map, then POST /v2/batch/scrape with { urls, formats }, then poll GET /v2/batch/scrape/{id} until status is "completed", following the "next" URL for more results.
+4. Keep the program's behavior the same: same inputs, same file contents and return values, same error handling.
+5. Run the project's tests and fix anything that breaks.
+
+Reference: https://docs.firecrawl.dev/migrating-from-llmstxt.md
+```
+
+## Migrate by hand
+
+| v1 | v2 | Note |
+|---|---|---|
+| `POST /v1/llmstxt` | [`POST /v2/map`](/api-reference/endpoint/map), then [`POST /v2/batch/scrape`](/api-reference/endpoint/batch-scrape) | Write the files from the results |
+| `GET /v1/llmstxt/{id}` | [`GET /v2/batch/scrape/{id}`](/api-reference/endpoint/batch-scrape-get) | |
+| `generateLLMsText` / `generate_llms_text` | `map`, then `batchScrape` / `batch_scrape` | |
+| `asyncGenerateLLMsText` / `async_generate_llms_text` | `map`, then `startBatchScrape` / `start_batch_scrape` | |
+| `checkGenerateLLMsTextStatus` / `check_generate_llms_text_status` | `getBatchScrapeStatus` / `get_batch_scrape_status` | |
+| `maxUrls` | `limit` on map | Map returns up to 5,000 links unless set |
+| Subdomains left out | `includeSubdomains: false` on map | Map includes them by default |
+| `cache: false` | `maxAge: 0` on the scrape | |
+| `showFullText` | `markdown` format | Needed only for llms-full.txt |
+| `data.llmstxt`, `data.llmsfulltxt` | Your own code | Format is in the prompt above |
+| `npx generate-llmstxt` | `map` and `batchScrape` in a short script | |
+
+Using n8n, Zapier, Make, or another no-code tool? Update the Firecrawl node or app to its latest version.
+
+Questions? Email [help@firecrawl.com](mailto:help@firecrawl.com).
