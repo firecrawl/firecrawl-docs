@@ -10,7 +10,7 @@ local_page="mcp-server/local.mdx"
 rate_limits="rate-limits.mdx"
 ai_onboarding="ai-onboarding.mdx"
 selector="snippets/shared/agent-first-onboarding.jsx"
-reviewed_mcp_version="3.23.7"
+reviewed_mcp_version="3.40.0"
 
 require() {
   file="$1"
@@ -125,7 +125,7 @@ forbid "$human_page" 'cta="Go to For Agents"'
 require "$human_page" "https://www.firecrawl.dev/app/settings?tab=mcp"
 require "$human_page" "https://chatgpt.com/plugins?q=firecrawl"
 require "$human_page" "https://claude.ai/directory/connectors/firecrawl"
-require "$human_page" "## ChatGPT and Claude"
+require "$human_page" "## Official plugins {#chatgpt-and-claude}"
 require "$human_page" "/images/agent-clients/chatgpt.svg"
 require "$human_page" "/images/agent-clients/claude-ai.svg"
 forbid "$human_page" 'icon="sparkles"'
