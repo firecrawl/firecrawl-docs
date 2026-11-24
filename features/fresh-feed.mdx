@@ -8,25 +8,42 @@ noindex: true
 ---
 
 <Warning>
-The Fresh Feed API is in private beta and is enabled per team. A request from a team without access gets a `403`. Parameters, fields, and limits may change during the beta.
+The Fresh Feed API is in private beta and is enabled per team. A request from a team without access to the requested feed or vertical gets a `403`. Parameters, fields, and limits may change during the beta.
 </Warning>
 
 The Fresh Feed API delivers web pages soon after their sources publish or update them. Each record carries the page's URL, its raw HTML, and what the page states about itself: title, description, author, language, and publish and update times. Records form one ordered log. You keep a cursor, ask for the records after it, and get each record once, in order.
 
-The first feed is **Local**. It covers pages from sources in Australia, Canada, Ireland, New Zealand, and the United Kingdom. Each source is listed under one of six subcategories: restaurants, food venues, hotels and lodging, attractions, tours and events, and local services.
+The API supports multiple feeds and dedicated vertical endpoints under `/v2/fresh-vertical-feed`:
 
-## Endpoint
+- **Local** (`/local/latest`): covers regional sources (such as Australia, Canada, Ireland, New Zealand, and the United Kingdom across `restaurants`, `food_venues`, `hotels_lodging`, `attractions`, `tours_events`, and `local_services`), or the feed configured for your team.
+- **Curated** (`/curated/latest`): a curated multi-vertical feed, when enabled for your team.
+- **Global** (`/global/latest`): the global index feed, when enabled for your team.
+- **Dedicated vertical endpoints** (`/{vertical}/latest`): endpoints scoped to a single vertical (`newsroom-blogs`, `tech-support`, `gov-hqi`, plus underscore aliases `newsroom_blogs`, `tech_support`, `gov_hqi`), when multi-vertical or global access is enabled for your team.
+
+## Endpoints
 
 ```http
 GET https://api.firecrawl.dev/v2/fresh-vertical-feed/local/latest
+GET https://api.firecrawl.dev/v2/fresh-vertical-feed/curated/latest
+GET https://api.firecrawl.dev/v2/fresh-vertical-feed/global/latest
+GET https://api.firecrawl.dev/v2/fresh-vertical-feed/{vertical}/latest
 Authorization: Bearer fc-YOUR_API_KEY
 ```
 
-Only `GET` is supported. The SDKs don't wrap this endpoint yet, so the examples on this page call it over HTTP.
+| Endpoint | Scope | Access |
+| --- | --- | --- |
+| `/v2/fresh-vertical-feed/local/latest` | Local feed, or the feed configured for your team. | Enabled for teams with Fresh Feed access. |
+| `/v2/fresh-vertical-feed/curated/latest` | Curated multi-vertical feed. | Enabled for teams with curated or global feed access (`403` otherwise). |
+| `/v2/fresh-vertical-feed/global/latest` | Global index feed. | Enabled for teams with global feed access (`403` otherwise). |
+| `/v2/fresh-vertical-feed/{vertical}/latest` | Scoped to one vertical: `newsroom-blogs`, `tech-support`, or `gov-hqi` (underscore aliases `newsroom_blogs`, `tech_support`, and `gov_hqi` are also accepted). | Enabled for teams with curated or global feed access (`403` otherwise; unknown verticals return `404`). |
+
+Calling a dedicated vertical endpoint scopes results to that vertical's `subcategory`. Passing a conflicting or repeated `subcategory` query parameter returns `400`. If your team's access is scoped to specific verticals or filters, requesting a vertical outside your scope returns `403`, and sending a conflicting query filter returns `400`.
+
+Only `GET` is supported; `HEAD` on a valid feed or vertical endpoint returns `405` with `Allow: GET`. The SDKs don't wrap these endpoints yet, so the examples on this page call them over HTTP.
 
 ## Try it
 
-The five newest records, without their HTML:
+The five newest records from the local feed, without their HTML:
 
 ```bash
 curl -s --compressed "https://api.firecrawl.dev/v2/fresh-vertical-feed/local/latest?limit=5&content=false" \
@@ -40,16 +57,30 @@ curl -s --compressed "https://api.firecrawl.dev/v2/fresh-vertical-feed/local/lat
   -H "Authorization: Bearer $FIRECRAWL_API_KEY"
 ```
 
+Records from a dedicated vertical endpoint written in the last 30 minutes, without HTML:
+
+```bash
+curl -s --compressed "https://api.firecrawl.dev/v2/fresh-vertical-feed/newsroom-blogs/latest?after=0&since=30m&limit=5&content=false" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY"
+```
+
+Records filtered to a single domain on the curated feed:
+
+```bash
+curl -s --compressed "https://api.firecrawl.dev/v2/fresh-vertical-feed/curated/latest?after=0&since=1h&domain=example.com" \
+  -H "Authorization: Bearer $FIRECRAWL_API_KEY"
+```
+
 ## Stay in sync
 
-Read the feed with the `after` cursor:
+Read any feed or vertical endpoint with the `after` cursor:
 
-1. Send `after=0` with a `since` value, such as `since=1h`, to start from that point instead of the beginning of the feed.
+1. Send `after=0` with a `since` value, such as `since=15m`, `since=30m`, or `since=1h`, to start from that point instead of the beginning of the feed.
 2. Save the records in the order they arrive, which is oldest first.
 3. Send the response's `next_after` as `after` on your next request.
-4. While `more` is `true`, request again right away. When it's `false`, wait a minute or more before the next request.
+4. While `more` is `true`, request again right away to drain the backlog. When `more` is `false`, wait before the next poll — 1 minute for near-real-time consumers, or 15–60 minutes for scheduled batch polling.
 
-Records are written in cursor order, so no record can appear behind a cursor you've already passed. Save the cursor only after you've saved the records it covers, and a retry with the same cursor is always safe. Cursor values aren't consecutive, so treat them as opaque numbers.
+Records are written in cursor order, so no record can appear behind a cursor you've already passed. Save the cursor only after you've saved the records it covers, and a retry with the same cursor is always safe. Cursor values aren't consecutive, so treat them as opaque numbers, and track cursors separately for each endpoint or filter combination you poll.
 
 While your cursor is still `0`, keep sending `since`. An answer with no records leaves `next_after` at `0`, and `after=0` on its own starts from the beginning of the feed. To backfill the whole feed, do exactly that: start at `after=0` without `since`.
 
@@ -61,8 +92,12 @@ import time
 
 import requests
 
+# Swap in /curated/latest, /global/latest, or /{vertical}/latest as needed
 FEED_URL = "https://api.firecrawl.dev/v2/fresh-vertical-feed/local/latest"
-HEADERS = {"Authorization": f"Bearer {os.environ['FIRECRAWL_API_KEY']}"}
+HEADERS = {
+    "Authorization": f"Bearer {os.environ['FIRECRAWL_API_KEY']}",
+    "Accept-Encoding": "gzip",
+}
 
 
 def save(record):
@@ -85,12 +120,16 @@ while True:
         save(record)
     cursor = page["next_after"]  # advance only after the records are saved
     if not page["more"]:
-        time.sleep(60)
+        time.sleep(60)  # or 900–3600 seconds for 15–60 minute batch polling
 ```
 
 ```js Node
+// Swap in /curated/latest, /global/latest, or /{vertical}/latest as needed
 const FEED_URL = "https://api.firecrawl.dev/v2/fresh-vertical-feed/local/latest";
-const headers = { Authorization: `Bearer ${process.env.FIRECRAWL_API_KEY}` };
+const headers = {
+  Authorization: `Bearer ${process.env.FIRECRAWL_API_KEY}`,
+  "Accept-Encoding": "gzip",
+};
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function save(record) {
@@ -111,7 +150,7 @@ while (true) {
   const page = await response.json();
   for (const record of page.events) save(record);
   cursor = page.next_after; // advance only after the records are saved
-  if (!page.more) await sleep(60_000);
+  if (!page.more) await sleep(60_000); // or 900_000–3_600_000 ms for 15–60 minute batch polling
 }
 ```
 
@@ -119,27 +158,28 @@ while (true) {
 
 ## Query parameters
 
-Every parameter is optional. A request with an unknown parameter, or with a parameter sent twice, gets a `400` that names it.
+Every parameter is optional. A request with an unknown parameter, a parameter sent twice, or a value that conflicts with the endpoint or your team's feed scope gets a `400` that names the problem.
 
 | Parameter | Values | Description |
 | --- | --- | --- |
-| `after` | A cursor | Records written after this cursor, oldest first. Start with `0`, then send the `next_after` of the previous response. |
+| `after` | A cursor | Records written after this cursor, oldest first. Start with `0`, then send the `next_after` of the previous response. Can't be sent with `before`. |
 | `before` | A cursor | Records written before this cursor, newest first. Send the `next_before` of the previous response to page back. Can't be sent with `after`. |
-| `since` | An age or a time | Only records written since then: an age such as `15m`, `6h`, or `2d`, or an ISO 8601 time such as `2026-11-14T00:00:00Z`. A time without an offset is read as UTC. |
-| `limit` | `1` to `500` | The most records in one response. Defaults to `50`. With `content=true`, the most is `50`. |
-| `content` | `true` or `false` | Defaults to `true`. With `false`, every record's `html` is `null`, so responses are far smaller. |
+| `since` | An age or a time | Only records written since then: an age such as `15m`, `30m`, `1h`, `6h`, or `2d`, or an ISO 8601 time such as `2026-11-14T00:00:00Z`. A time without an offset is read as UTC. |
+| `limit` | `1` to `500` | The most records in one response. Defaults to `50`. With `content=true`, the maximum is `50`; with `content=false`, up to `500`. |
+| `content` | `true` or `false` | Defaults to `true`. With `false`, every record's `html` is `null`, responses are far smaller, and `limit` can go up to `500`. |
 | `stream` | `default` or `full` | Defaults to `default`. `stream=full` returns every record in the feed. `stream=default` is the standard view; today it returns the same records as `full`. |
-| `country` | `AU`, `CA`, `GB`, `IE`, `NZ` | Only records from sources in this country. The United Kingdom is `GB`. |
-| `subcategory` | `restaurants`, `food_venues`, `hotels_lodging`, `attractions`, `tours_events`, `local_services` | Only records from sources in this subcategory. |
+| `subcategory` | A subcategory supported by the feed | Only records from sources in this subcategory. On Local: `restaurants`, `food_venues`, `hotels_lodging`, `attractions`, `tours_events`, `local_services`. On Curated and Global: vertical subcategories such as `newsroom_blogs`, `tech_support`, `gov_hqi`. Conflicting values on `/{vertical}/latest` return `400`. |
+| `country` | ISO 3166-1 alpha-2 country code supported by the feed | Only records from sources in this country (for example `AU`, `CA`, `GB`, `IE`, or `NZ` on Local; the United Kingdom is `GB`). |
+| `region` | ISO 3166-2 subdivision code for a country in the feed | Only records from this region, such as `NZ-AUK` or `GB-ENG`. |
+| `domain` | A registrable domain, such as `example.com` or `example.co.uk` | Only records whose `url` is on this domain or one of its subdomains. Send the registrable domain itself, not a subdomain such as `www.example.co.uk`. |
 | `host` | A host, such as `www.example.com` | Only records whose `url` has exactly this host. |
-| `domain` | A domain, such as `example.co.uk` | Only records whose `url` is on this domain or one of its subdomains. Send the domain itself, not a subdomain such as `www.example.co.uk`. |
-| `agents` | 1 to 4 robots.txt product tokens, comma-separated, such as `ExampleBot,example-agent` | Leaves out records whose site's robots.txt disallows them for any of these tokens. Each token is letters, `-`, and `_`. See below. |
+| `agents` | 1 to 4 robots.txt product tokens, comma-separated, such as `ExampleBot,example-agent` | AND filter: keeps a record only when its site's robots.txt allows it for every named token (leaves it out if disallowed for any of them). Each token is 1 to 64 characters of ASCII letters, `-`, and `_`. See below. |
 
 Without `after` or `before`, a response starts at the newest record.
 
 ### Filter by robots.txt
 
-With `agents`, the feed checks each record's URL against the most recently fetched robots.txt of its site and leaves the record out when any of the named tokens is disallowed:
+With `agents`, the feed checks each record's URL against the most recently fetched robots.txt of its site using AND semantics — a record is kept only when every named token is allowed, and left out if any named token is disallowed:
 
 - A robots.txt that returned `404` allows everything.
 - A robots.txt that couldn't be read for another reason, such as a `401`, `403`, `429`, `5xx`, or a redirect, disallows everything.
@@ -184,7 +224,7 @@ An example response to a request with `after`, with the HTML shortened:
 
 | Field | Description |
 | --- | --- |
-| `feed` | The feed's name: `local`. |
+| `feed` | The feed's name (for example, `local`, `curated`, or `global`). |
 | `events` | The records. Oldest first with `after`, otherwise newest first. |
 | `next_after` | Only with `after`. Send it as `after` on your next request. |
 | `more` | Only with `after`. `true` when more records may be waiting, so request again right away. |
@@ -194,7 +234,7 @@ A response stops before 8 MiB, so it can hold fewer records than `limit` while m
 
 ### Record fields
 
-Every record has these 14 fields, in this order. Times are Unix seconds, UTC.
+Each record carries these fields (plus `region_code` when a region is available). Times are Unix seconds, UTC.
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -208,14 +248,15 @@ Every record has these 14 fields, in this order. Times are Unix seconds, UTC.
 | `published_time` | integer or null | When the page was published, as its own markup states. A date in the URL or in a listing is never used. |
 | `title` | string | The page's `og:title`, else its `<title>`, else the title its source listed. Can be an empty string. |
 | `description` | string or null | The page's meta description, else its `og:description`. |
-| `category` | string | The feed's topic: `local`. |
+| `category` | string | The feed's category (for example, `local`). |
 | `author` | string or null | The page's author. `null` when the page names none, or when the author is an organization, such as the site or business naming itself. |
-| `country_code` | string | The source's country: `AU`, `CA`, `GB`, `IE`, or `NZ`. |
+| `country_code` | string | The source's two-letter ISO 3166-1 alpha-2 country code (for example `AU`, `CA`, `GB`, `IE`, or `NZ` on Local). |
+| `region_code` | string (optional) | ISO 3166-2 subdivision code (such as `NZ-AUK`) when available for the record. Omitted when absent. |
 | `language_code` | string or null | The primary subtag of the page's stated language, in lower case, such as `en` or `fr`. |
 
 `updated_time` and `published_time` come only from what the page or its sitemap states. They're `null` unless it gives a full time of day with a time zone, and also when that time is before 1990 or later than `crawl_time`. A bare date is never turned into a time.
 
-`country_code`, and the `country` and `subcategory` filters, describe the source the page came from, not the page itself. Records don't carry the subcategory, so filter by it when you need it.
+`country_code`, and the `country` and `subcategory` filters, describe the source the page came from, not the page itself. Records don't carry the subcategory, so filter by `subcategory` or poll a dedicated `/{vertical}/latest` endpoint when you need records scoped to one vertical.
 
 ## New pages and updates
 
@@ -236,24 +277,26 @@ A page is delivered with its content or not at all. The feed skips a page when:
 
 ## Compression
 
-Records carry raw HTML, so responses are large. Send an `Accept-Encoding` header and the response comes back compressed with `zstd`, `br`, or `gzip`: the one your header weights highest, or in that order when it weights them the same. Most HTTP clients send the header and decompress for you. With curl, add `--compressed`. A very small response, such as one with no records, can come back uncompressed. A request whose header refuses an uncompressed body and accepts none of the three gets a `406`.
+Records carry raw HTML, so responses are large. Send an `Accept-Encoding` header (such as `Accept-Encoding: gzip`) and the response comes back compressed with `gzip`, `zstd`, or `br`: the one your header weights highest, or in that order when it weights them the same. Most HTTP clients send the header and decompress for you. With curl, add `--compressed`. A very small response, such as one with no records, can come back uncompressed. A request whose header refuses an uncompressed body and accepts none of the three gets a `406`.
 
 ## Errors
 
-Every error except `405` has a JSON body with an `error` message.
+Every error except `405` (and `404` on `HEAD` for an unknown vertical) has a JSON body with an `error` message.
 
 | Status | Meaning |
 | --- | --- |
-| `400` | A query parameter is invalid, unknown, or repeated, or `after` is above the feed's newest cursor. The `error` names the problem. |
+| `400` | A query parameter is invalid, unknown, repeated, or conflicts with the endpoint or your team's feed scope (such as a conflicting `subcategory` on a vertical route, sending `before` and `after` together, or an `after` cursor above the feed's newest cursor). The `error` names the problem. |
 | `401` | The API key is missing or invalid. |
-| `403` | The Fresh Feed API isn't enabled for your team. |
-| `405` | The request used `HEAD`. Use `GET`. |
+| `402` | Insufficient credits for the request. On credit-billed feeds, the pre-check requires credits for up to `limit` records (`50` max with `content=true`, `500` max with `content=false`), and billing charges per returned record. |
+| `403` | The Fresh Feed API, requested feed endpoint, or vertical isn't enabled for your team. |
+| `404` | Unknown vertical on `/v2/fresh-vertical-feed/{vertical}/latest`. |
+| `405` | The request used `HEAD` on a valid feed or vertical endpoint (`Allow: GET`). Use `GET`. |
 | `406` | `Accept-Encoding` accepts none of the codings the feed sends. |
 | `429` | Your team is over its rate limit. Wait for the number of seconds in the `Retry-After` header. |
 | `502` | The request couldn't be completed. Retry with the same cursor. |
-| `503` | The feed is temporarily unavailable. Retry the same request after the seconds in `Retry-After`. |
+| `503` | The feed is temporarily unavailable. Retry the same request after the seconds in `Retry-After` (if present) or after a short backoff. |
 | `504` | The response didn't start within 30 seconds. Retry with the same cursor. |
 
 ## Rate limits
 
-During the beta, each team can make 100 requests a minute to this endpoint by default, shared by all of its API keys. A sync loop that waits a minute between quiet polls uses a small part of that.
+During the beta, each team can make 100 requests a minute across Fresh Feed endpoints by default, shared by all of its API keys. A sync loop that waits a minute between quiet polls — or 15 to 60 minutes for batch polling — uses a small part of that.
