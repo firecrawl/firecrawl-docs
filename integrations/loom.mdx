@@ -1,0 +1,50 @@
+---
+title: 'ClickHouse Loom'
+description: 'Store a Firecrawl Markdown scrape as a searchable Loom document.'
+---
+
+Use Firecrawl Local to scrape a page as Markdown, then store it in [ClickHouse Loom](https://github.com/ClickHouse/loom) for agent retrieval. Keep the page URL as the document's identity so each refresh replaces the previous version.
+
+## Prerequisites
+
+- [Firecrawl Local](https://github.com/firecrawl/firecrawl#firecrawl-local). Run `FIRECRAWL_CLOUD=off firecrawl-local serve` to serve its API on port 3002 using local scraping.
+- Loom v1.3.0 with embeddings configured. Set `LOOM_URL` to the base URL and set `LOOM_ORG`, `LOOM_NAMESPACE`, and `LOOM_TOKEN` for a namespace where the token has write access.
+- Bash, curl, and jq.
+
+## Scrape and index a page
+
+Set `PAGE_URL` to a public page whose contents can be stored in the Loom namespace.
+
+```bash
+set -euo pipefail
+
+: "${PAGE_URL:?Set PAGE_URL}"
+: "${LOOM_URL:?Set LOOM_URL}"
+: "${LOOM_ORG:?Set LOOM_ORG}"
+: "${LOOM_NAMESPACE:?Set LOOM_NAMESPACE}"
+: "${LOOM_TOKEN:?Set LOOM_TOKEN}"
+
+firecrawl_url="${FIRECRAWL_URL:-http://localhost:3002}"
+request=$(jq -n --arg url "$PAGE_URL" '{url: $url, formats: ["markdown"]}')
+scrape=$(curl --fail --silent --show-error "${firecrawl_url%/}/v2/scrape" \
+  --header 'Content-Type: application/json' --data-binary "$request")
+
+document=$(jq --compact-output --exit-status \
+  --arg url "$PAGE_URL" --arg org "$LOOM_ORG" --arg namespace "$LOOM_NAMESPACE" '
+  if .success == true and (.data.markdown | type == "string" and length > 0)
+  then {
+    org: $org, namespace: $namespace, source_uri: $url,
+    title: (.data.metadata.title // $url), content: .data.markdown, source_class: "external"
+  }
+  else error("Firecrawl did not return Markdown")
+  end
+' <<< "$scrape")
+
+curl --fail --silent --show-error "${LOOM_URL%/}/v1/knowledge.upsert" \
+  --header "Authorization: Bearer $LOOM_TOKEN" \
+  --header 'Content-Type: application/json' --data-binary "$document"
+```
+
+Check `chunks_created` in the response. To look up a passage, call `POST /v1/knowledge.search` with a question as `query`, the same `org` and `namespace`, `namespace_scope` set to `"this"`, and `uri_prefix` containing `PAGE_URL`. An agent can make the same call with `loom_knowledge_search` if its MCP toolset exposes it. Each matching result carries the stored URL as `source_uri`.
+
+See [Loom's knowledge operations](https://clickhouse.github.io/loom/reference/operations/knowledge/) for document lookup and deletion.
