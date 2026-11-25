@@ -64,7 +64,7 @@ curl -s --compressed "https://api.firecrawl.dev/v2/fresh-vertical-feed/newsroom-
   -H "Authorization: Bearer $FIRECRAWL_API_KEY"
 ```
 
-Records filtered to a single domain on the curated feed:
+Records filtered to a domain and its subdomains on the curated feed:
 
 ```bash
 curl -s --compressed "https://api.firecrawl.dev/v2/fresh-vertical-feed/curated/latest?after=0&since=1h&domain=example.com" \
@@ -168,24 +168,26 @@ Every parameter is optional. A request with an unknown parameter, a parameter se
 | `limit` | `1` to `500` | The most records in one response. Defaults to `50`. With `content=true`, the maximum is `50`; with `content=false`, up to `500`. |
 | `content` | `true` or `false` | Defaults to `true`. With `false`, every record's `html` is `null`, responses are far smaller, and `limit` can go up to `500`. |
 | `stream` | `default` or `full` | Defaults to `default`. `stream=full` returns every record in the feed. `stream=default` is the standard view; today it returns the same records as `full`. |
-| `subcategory` | A subcategory supported by the feed | Only records from sources in this subcategory. On Local: `restaurants`, `food_venues`, `hotels_lodging`, `attractions`, `tours_events`, `local_services`. On Curated and Global: vertical subcategories such as `newsroom_blogs`, `tech_support`, `gov_hqi`. Conflicting values on `/{vertical}/latest` return `400`. |
-| `country` | ISO 3166-1 alpha-2 country code supported by the feed | Only records from sources in this country (for example `AU`, `CA`, `GB`, `IE`, or `NZ` on Local; the United Kingdom is `GB`). |
-| `region` | ISO 3166-2 subdivision code for a country in the feed | Only records from this region, such as `NZ-AUK` or `GB-ENG`. |
-| `domain` | A registrable domain, such as `example.com` or `example.co.uk` | Only records whose `url` is on this domain or one of its subdomains. Send the registrable domain itself, not a subdomain such as `www.example.co.uk`. |
-| `host` | A host, such as `www.example.com` | Only records whose `url` has exactly this host. |
-| `agents` | 1 to 4 robots.txt product tokens, comma-separated, such as `ExampleBot,example-agent` | AND filter: keeps a record only when its site's robots.txt allows it for every named token (leaves it out if disallowed for any of them). Each token is 1 to 64 characters of ASCII letters, `-`, and `_`. See below. |
+| `subcategory` | `1` to `50` comma-separated subcategories supported by the feed | Filter parameter only (not emitted on individual records). Returns only records from sources in any listed subcategory: on Local, `restaurants`, `food_venues`, `hotels_lodging`, `attractions`, `tours_events`, `local_services`; on Curated and Global, vertical subcategories such as `newsroom_blogs`, `tech_support`, `gov_hqi`. Conflicting values on `/{vertical}/latest` return `400`. |
+| `country` | `1` to `50` comma-separated ISO 3166-1 alpha-2 country codes (or `ZZ`) supported by the feed | Only records from sources in any listed country (for example `AU`, `CA`, `GB`, `IE`, or `NZ` on Local; the United Kingdom is `GB`). On Curated and Global feeds, include `ZZ` to match global or multi-country sources alongside ISO alpha-2 codes such as `AU` or `GB`. |
+| `region` | `1` to `50` comma-separated ISO 3166-2 subdivision codes for countries in the feed | Only records from any listed region, such as `NZ-AUK` or `GB-ENG`. |
+| `domain` | `1` to `50` comma-separated domains or hostnames, such as `example.com` or `example.co.uk` | Only records whose `url` host matches any listed domain or any of its subdomains (for example, `domain=example.com` matches `example.com`, `www.example.com`, and `blog.example.com`). Pass the parent domain rather than `www.` when you want all subdomains included. |
+| `host` | `1` to `50` comma-separated hosts, such as `www.example.com` | Only records whose `url` has an exact host match with any listed host. |
+| `agents` | `1` to `4` comma-separated robots.txt user-agent names (product tokens), such as `ExampleBot,example-agent` | AND filter: keeps a record only when its site's robots.txt allows it for every named user-agent (leaves it out if disallowed for any of them). Each token is 1 to 64 characters of ASCII letters, `-`, and `_`. See below. |
 
-Without `after` or `before`, a response starts at the newest record.
+Without `after` or `before`, a response starts at the newest record. `country`, `subcategory`, `region`, `domain`, and `host` each accept up to `50` comma-separated values (matching any listed value), and `agents` accepts `1` to `4` comma-separated user-agent names (requiring every named agent to be allowed); exceeding these limits returns `400`.
 
 ### Filter by robots.txt
 
-With `agents`, the feed checks each record's URL against the most recently fetched robots.txt of its site using AND semantics — a record is kept only when every named token is allowed, and left out if any named token is disallowed:
+With `agents`, the feed checks each record's URL against the most recently fetched robots.txt of its site using AND semantics — a record is kept only when every named user-agent token is allowed, and left out if any named token is disallowed:
 
-- A robots.txt that returned `404` allows everything.
-- A robots.txt that couldn't be read for another reason, such as a `401`, `403`, `429`, `5xx`, or a redirect, disallows everything.
+- A robots.txt that returned HTTP `404` or `410` is treated as allowing all agents.
+- A robots.txt that couldn't be read for another reason, such as a `401`, `403`, `429`, `5xx`, or a redirect, disallows all agents.
 - A record whose site has no stored robots.txt is kept.
 
-Records left out this way still move the cursor forward, so a response can hold fewer records than `limit`. Without `agents`, responses are unchanged.
+Records left out this way still move the cursor forward, so a response can hold fewer records than `limit`.
+
+When an account has a configured default `agents` filter, requests can omit `agents` (the configured agent filter applies automatically) or pass a superset that includes the configured agent(s) alongside additional user-agent names (up to `4` total, checked with AND semantics). Passing a narrower `agents` list that omits a required agent returns `400`. When no default `agents` filter is configured, omitting `agents` leaves responses unchanged.
 
 ```bash
 curl -s --compressed "https://api.firecrawl.dev/v2/fresh-vertical-feed/local/latest?after=0&since=1h&agents=ExampleBot,example-agent" \
@@ -244,19 +246,19 @@ Each record carries these fields (plus `region_code` when a region is available)
 | `status_code` | integer or null | The HTTP status of the fetch. |
 | `content_type` | string or null | The `Content-Type` of the fetch. |
 | `crawl_time` | integer | When the page was fetched. |
-| `updated_time` | integer or null | When the page last changed: the modified time the page states (`article:modified_time`, `og:updated_time`, or `dateModified`), else its sitemap's `lastmod`. When the two are more than an hour apart, the earlier one. |
-| `published_time` | integer or null | When the page was published, as its own markup states. A date in the URL or in a listing is never used. |
+| `updated_time` | integer or null | When the page last changed: the modified time the page states (`article:modified_time`, `og:updated_time`, or `dateModified`), else its sitemap's `lastmod` (`null` when neither is present). When the two are more than an hour apart, the earlier one. |
+| `published_time` | integer or null | When the page was published, as explicit page markup states (`null` otherwise). A date from the URL, an RSS/Atom feed, or a listing is never used. |
 | `title` | string | The page's `og:title`, else its `<title>`, else the title its source listed. Can be an empty string. |
 | `description` | string or null | The page's meta description, else its `og:description`. |
-| `category` | string | The feed's category (for example, `local`). |
+| `category` | string | The feed's category (`local`, `curated`, or `global`). Identifies the feed rather than a vertical or subcategory. |
 | `author` | string or null | The page's author. `null` when the page names none, or when the author is an organization, such as the site or business naming itself. |
-| `country_code` | string | The source's two-letter ISO 3166-1 alpha-2 country code (for example `AU`, `CA`, `GB`, `IE`, or `NZ` on Local). |
+| `country_code` | string | The source's two-letter ISO 3166-1 alpha-2 country code (for example `AU`, `CA`, `GB`, `IE`, or `NZ` on Local), or `ZZ` for global or multi-country sources on Curated and Global feeds. |
 | `region_code` | string (optional) | ISO 3166-2 subdivision code (such as `NZ-AUK`) when available for the record. Omitted when absent. |
 | `language_code` | string or null | The primary subtag of the page's stated language, in lower case, such as `en` or `fr`. |
 
-`updated_time` and `published_time` come only from what the page or its sitemap states. They're `null` unless it gives a full time of day with a time zone, and also when that time is before 1990 or later than `crawl_time`. A bare date is never turned into a time.
+`published_time` and `updated_time` are populated only when explicit page markup or sitemap timestamps exist (`published_time` uses page markup only; `updated_time` can also fall back to a sitemap `lastmod`), and are `null` otherwise. Both are also `null` unless the timestamp gives a full time of day with a time zone (bare dates and exact-midnight timestamps aren't used), or when that time is before 1990 or later than `crawl_time`.
 
-`country_code`, and the `country` and `subcategory` filters, describe the source the page came from, not the page itself. Records don't carry the subcategory, so filter by `subcategory` or poll a dedicated `/{vertical}/latest` endpoint when you need records scoped to one vertical.
+Each record's `category` field reflects the feed (`local`, `curated`, or `global`), while `subcategory` is a query filter parameter and is not emitted on individual record objects. `country_code`, and the `country` and `subcategory` filters, describe the source the page came from rather than the page itself. Filter by `subcategory` or poll a dedicated `/{vertical}/latest` endpoint (`newsroom-blogs`, `tech-support`, or `gov-hqi`) when you need records scoped to a specific vertical.
 
 ## New pages and updates
 
@@ -273,7 +275,7 @@ A page is delivered with its content or not at all. The feed skips a page when:
 - its HTML is larger than 4 MiB;
 - its site's robots.txt disallows it for the crawler token set for your feed;
 - a `robots` meta tag, or one named for that crawler token, says `none`, `noindex`, `noarchive`, `noai`, or `noimageai`, or the page reserves text and data mining with a `tdm-reservation` meta tag;
-- it's screened out as adult content or as a promotion for online gambling.
+- it's screened out by the feed's content-safety filters (such as adult content and illegal hard drugs; additional screening rules, such as online gambling promotions, vary by feed).
 
 ## Compression
 
