@@ -1,0 +1,370 @@
+---
+title: "Node.js Agent Quickstart"
+description: "Canonical Firecrawl Node.js quickstart for external agents using search, scrape, and interact."
+---
+
+# Firecrawl Node.js Agent Quickstart
+
+Canonical quickstart for external agents. Generated from the `firecrawl` SDK source (v4.51.0) and the v2 OpenAPI spec. Method names, parameters, and types match the SDK public API.
+
+## Install
+
+```bash
+npm install firecrawl
+```
+
+## Authenticate
+
+```ts
+import Firecrawl from "firecrawl";
+
+const client = new Firecrawl({
+  apiKey: process.env.FIRECRAWL_API_KEY,
+  // apiUrl: "https://api.firecrawl.dev" // optional; falls back to FIRECRAWL_API_URL env or cloud default
+});
+```
+
+## When To Use What
+
+- `search`: use when you start with a query and need discovery.
+- `scrape`: use when you already have a URL and want page content.
+- `interact`: use when the page needs clicks, forms, or other browser actions after a scrape has created a session. For multi-step interactive flows, prefer `interact` over scrape-time `actions`.
+
+## Search
+
+### Why use it
+
+Use search to discover relevant pages from a query, then pick URLs to scrape or interact with. Constrain results to a site with `site:`, for example `site:docs.firecrawl.dev crawl webhooks`.
+
+### Preferred SDK method
+
+`client.search(query, options?)` → `Promise<SearchData>`
+
+### Example
+
+```ts
+const results = await client.search("site:docs.firecrawl.dev webhook retries");
+
+for (const hit of results.web ?? []) {
+  console.log(hit.url, hit.title);
+}
+```
+
+### Parameters
+
+- `query`
+  - Type: string (required)
+  - Use when: you need a search query.
+  - Notes: use `site:example.com` to limit results to a domain.
+
+- `options.sources`
+  - Type: `Array<"web" | "news" | "images" | "alexandria" | { type: ... }>`
+  - Use when: you want to control which sources are searched.
+
+- `options.categories`
+  - Type: `Array<"github" | "research" | "pdf" | "developer" | "gov" | CategoryOption>`
+  - Use when: you want to filter results by category.
+
+- `options.includeDomains`
+  - Type: `string[]`
+  - Use when: you want to restrict results to specific domains.
+  - Notes: cannot be combined with `excludeDomains`.
+
+- `options.excludeDomains`
+  - Type: `string[]`
+  - Use when: you want to exclude results from specific domains.
+  - Notes: cannot be combined with `includeDomains`.
+
+- `options.limit`
+  - Type: number
+  - Use when: you want to cap results.
+
+- `options.tbs`
+  - Type: string
+  - Use when: you need a time-based filter (for example `qdr:d`, `qdr:w`, `sbd:1,qdr:m`).
+
+- `options.location`
+  - Type: string
+  - Use when: you want localized results.
+
+- `options.country`
+  - Type: string
+  - Use when: you want ISO 3166-1 alpha-2 geo-targeting.
+
+- `options.ignoreInvalidURLs`
+  - Type: boolean
+  - Use when: you want to drop URLs that cannot be scraped by other endpoints.
+
+- `options.timeout`
+  - Type: number
+  - Use when: you need a request timeout in milliseconds.
+
+- `options.highlights`
+  - Type: boolean
+  - Use when: you want query-relevant highlights in results.
+  - Default: true
+
+- `options.scrapeOptions`
+  - Type: `ScrapeOptions`
+  - Use when: you want to scrape each search result (see Scrape parameters for fields).
+
+- `options.enterprise`
+  - Type: `Array<"default" | "anon" | "zdr">`
+  - Use when: you need enterprise zero data retention options.
+
+- `options.threatProtection`
+  - Type: `ThreatProtectionOptions`
+  - Use when: you need per-request threat protection overrides (enterprise).
+
+- `options.domainTools`
+  - Type: boolean
+  - Use when: you want Alexandria tool contracts matched to result domains.
+
+- `options.toolDetail`
+  - Type: `"compact" | "summary" | "full"`
+  - Use when: you want to control level of detail in returned tool contracts.
+  - Default: `"compact"`
+
+- `options.integration`
+  - Type: string
+  - Use when: you need an integration identifier for server-side tracking.
+
+- `options.origin`
+  - Type: string
+  - Use when: you need an origin tag for request attribution.
+
+### Return value
+
+`SearchData` has optional arrays:
+
+- `web`: web index hits (`SearchResultWeb` or full `Document` when `scrapeOptions` hydrated the hit)
+- `news`: news hits
+- `images`: image hits
+- `tools`: discovered Alexandria tool contracts
+
+**Wrong turn to avoid:** `search()` does not return `{ data: [...] }`. Do not access `result.data`. Web results are in `result.web`, news in `result.news`, images in `result.images`.
+
+## Scrape
+
+### Why use it
+
+Use scrape when you already have a URL and want structured content in one or more formats.
+
+### Preferred SDK method
+
+`client.scrape(url, options?)` → `Promise<Document>`
+
+### Example
+
+```ts
+const doc = await client.scrape("https://docs.firecrawl.dev", {
+  formats: ["markdown"]
+});
+console.log(doc.markdown);
+```
+
+### Parameters
+
+- `url`
+  - Type: string (required)
+  - Use when: you want to scrape a specific page.
+
+- `options.formats`
+  - Type: `FormatOption[]`
+  - Use when: you want multiple output formats.
+  - Plain string formats: `"markdown"`, `"html"`, `"rawHtml"`, `"links"`, `"images"`, `"screenshot"`, `"summary"`, `"changeTracking"`, `"attributes"`, `"branding"`, `"product"`, `"menu"`, `"audio"`, `"video"`
+  - Object-only format types:
+    - `{ type: "json", prompt?: string, schema?: JSON schema or Zod schema }`: at least one of `prompt` or `schema` is required. The SDK rejects plain string `"json"`.
+    - `{ type: "question", question: string }`: question-answer extraction.
+    - `{ type: "highlights", query: string }`: relevant source-text extraction.
+    - `{ type: "screenshot", fullPage?, quality?, viewport? }`: screenshot with options.
+    - `{ type: "changeTracking", modes: ("git-diff" | "json")[], schema?, prompt?, tag? }`: `modes` is required.
+    - `{ type: "attributes", selectors: Array<{ selector, attribute }> }`: attribute extraction.
+
+- `options.headers`
+  - Type: `Record<string, string>`
+  - Use when: you need custom request headers.
+
+- `options.includeTags`
+  - Type: `string[]`
+  - Use when: you want to include only specific HTML tags.
+
+- `options.excludeTags`
+  - Type: `string[]`
+  - Use when: you want to exclude specific HTML tags.
+
+- `options.onlyMainContent`
+  - Type: boolean
+  - Use when: you want to strip nav, footer, and other boilerplate.
+
+- `options.timeout`
+  - Type: number
+  - Use when: you need a timeout in milliseconds.
+
+- `options.waitFor`
+  - Type: number
+  - Use when: you need to wait for the page to render (milliseconds).
+
+- `options.mobile`
+  - Type: boolean
+  - Use when: you want a mobile viewport.
+
+- `options.parsers`
+  - Type: `Array<string | PDFParser | ImageParser>`
+  - Use when: you need file parsing controls.
+  - Confirmed values: `"pdf"`, `"image"`, or `{ type: "pdf", mode?: "fast" | "auto" | "ocr", maxPages?: number, pages?: string, blocks?: boolean, pageMarkers?: boolean }`
+
+- `options.actions`
+  - Type: `ActionOption[]`
+  - Use when: you need lightweight pre-scrape browser actions.
+  - Confirmed action types: `wait` (`milliseconds` or `selector`), `screenshot`, `click` (`selector`), `write` (`text`), `press` (`key`), `scroll` (`direction`: `up`/`down`), `scrape`, `executeJavascript` (`script`), `pdf` (`format`, `landscape`, `scale`)
+
+- `options.location`
+  - Type: `{ country: string, languages?: string[] }`
+  - Use when: you need geo or language-aware scraping.
+
+- `options.skipTlsVerification`
+  - Type: boolean
+  - Use when: you need to skip TLS verification.
+
+- `options.removeBase64Images`
+  - Type: boolean
+  - Use when: you want to drop base64 images from markdown output.
+
+- `options.fastMode`
+  - Type: boolean
+  - Use when: you want faster scrapes with reduced fidelity.
+
+- `options.blockAds`
+  - Type: boolean
+  - Use when: you want ad and cookie popup blocking.
+
+- `options.proxy`
+  - Type: `"basic" | "stealth" | "enhanced" | "auto" | string`
+  - Use when: you need proxy control.
+
+- `options.maxAge`
+  - Type: number
+  - Use when: you want cached data up to a maximum age (milliseconds). Set to `0` to bypass cache.
+
+- `options.minAge`
+  - Type: number
+  - Use when: you want cache-only mode with a minimum age (milliseconds).
+
+- `options.storeInCache`
+  - Type: boolean
+  - Use when: you want Firecrawl to cache the result.
+
+- `options.lockdown`
+  - Type: boolean
+  - Use when: you want to serve only previously cached results, never making an outbound request.
+
+- `options.checkPromptInjection`
+  - Type: boolean
+  - Use when: you want to scan page content for prompt injection before LLM-backed formats run. Adds 4 credits.
+
+- `options.redactPII`
+  - Type: `boolean | { mode?: "accurate" | "aggressive" | "fast", entities?: string[], replaceStyle?: "tag" | "mask" | "remove" }`
+  - Use when: you want to redact personally identifiable information from output.
+
+- `options.threatProtection`
+  - Type: `ThreatProtectionOptions`
+  - Use when: you need per-request threat protection overrides (enterprise).
+
+- `options.auditMetadata`
+  - Type: `{ username: string }`
+  - Use when: you need user attribution for SIEM logging.
+
+- `options.profile`
+  - Type: `{ name: string, saveChanges?: boolean }`
+  - Use when: you want a persistent browser profile shared across scrapes and interactions.
+
+- `options.domainTools`
+  - Type: boolean
+  - Use when: you want Alexandria tool contracts matched to the scraped domain.
+
+- `options.toolDetail`
+  - Type: `"compact" | "summary" | "full"`
+  - Use when: you want to control the level of detail in returned tool contracts.
+
+- `options.integration`
+  - Type: string
+  - Use when: you need an integration identifier for server-side tracking.
+
+- `options.origin`
+  - Type: string
+  - Use when: you need an origin tag for request attribution.
+
+## Interact
+
+### Why use it
+
+Use `interact` for code or natural-language control of the browser session tied to a scrape job (via `metadata.scrapeId`). The SDK requires at least one of `code` or `prompt`. For flows that go beyond quick pre-scrape tweaks, prefer `interact` over scrape-time `actions`.
+
+### Preferred SDK method
+
+`client.interact(jobId, args)` → `Promise<ScrapeExecuteResponse>`
+
+### Example
+
+```ts
+const doc = await client.scrape("https://example.com", { formats: ["markdown"] });
+const jobId = doc.metadata?.scrapeId;
+if (!jobId) throw new Error("Missing scrapeId from scrape response");
+
+const result = await client.interact(jobId, {
+  prompt: "Click the pricing tab and summarize the plans."
+});
+```
+
+### Parameters
+
+- `jobId`
+  - Type: string (required)
+  - Use when: you have a scrape job ID from `document.metadata.scrapeId`.
+
+- `args.code`
+  - Type: string
+  - Use when: you want to run code in the browser session (for example Playwright `page` usage in the `node` runtime).
+
+- `args.prompt`
+  - Type: string
+  - Use when: you want the browser agent to follow a natural-language instruction.
+
+- At least one of `args.code` or `args.prompt` must be non-empty (SDK throws otherwise).
+
+- `args.language`
+  - Type: `"python" | "node" | "bash"`
+  - Use when: you need a specific runtime.
+  - Default: `"node"`
+
+- `args.timeout`
+  - Type: number
+  - Use when: you need an execution timeout in seconds.
+
+- `args.origin`
+  - Type: string
+  - Use when: you need an origin label for request attribution.
+
+### Stop session
+
+`client.stopInteraction(jobId)` → `Promise<ScrapeBrowserDeleteResponse>`
+
+Ends the scrape-bound browser session. Response fields: `success`, `sessionDurationMs`, `creditsBilled`, `error`.
+
+## Notes
+
+- Deprecated client aliases: `scrapeExecute` → `interact`; `stopInteractiveBrowser` and `deleteScrapeBrowser` → `stopInteraction`.
+- The default `Firecrawl` export is the v2 client; v1 remains under `client.v1`.
+- Zod schemas passed to `formats` (for `json` or `changeTracking`) are converted to JSON Schema by the SDK.
+- The package declares **Node.js >= 22** in `engines`.
+
+## Source Of Truth
+
+- `firecrawl/apps/js-sdk/firecrawl/package.json`
+- `firecrawl/apps/js-sdk/firecrawl/src/index.ts`
+- `firecrawl/apps/js-sdk/firecrawl/src/v2/client.ts`
+- `firecrawl/apps/js-sdk/firecrawl/src/v2/types.ts`
+- `firecrawl/apps/js-sdk/firecrawl/src/v2/methods/search.ts`
+- `firecrawl/apps/js-sdk/firecrawl/src/v2/methods/scrape.ts`
+- `firecrawl-docs/api-reference/v2-openapi.json`
